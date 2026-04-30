@@ -17,6 +17,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { MetricCard } from "@/components/metric-card";
@@ -41,12 +42,13 @@ import {
   normalizeCalendarFilterState,
   type CalendarFilterState,
 } from "@/lib/calendar-filters";
+import { getPendingReleasedCalendarEvents } from "@/lib/calendar-history";
 import {
   getCalendarEventDetail,
   getCalendarValuePanels,
   isStrongGoldCalendarEvent,
 } from "@/lib/calendar-presentation";
-import { formatSofiaDay, formatSofiaTime } from "@/lib/format";
+import { formatSofiaDateKey, formatSofiaDay, formatSofiaTime } from "@/lib/format";
 import type {
   CalendarEventType,
   CalendarImpact,
@@ -109,11 +111,26 @@ function StrongXauBadge() {
 
 function groupByDay(events: EconomicCalendarEvent[]) {
   return events.reduce<Record<string, EconomicCalendarEvent[]>>((groups, event) => {
-    const key = event.startsAt.slice(0, 10);
+    const key = formatSofiaDateKey(event.startsAt) || event.startsAt.slice(0, 10);
     groups[key] ??= [];
     groups[key].push(event);
     return groups;
   }, {});
+}
+
+function shiftDateKey(dateKey: string, days: number) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+
+  if (!Number.isFinite(date.getTime())) {
+    return dateKey;
+  }
+
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function todaySofiaDateKey() {
+  return formatSofiaDateKey(new Date().toISOString()) || new Date().toISOString().slice(0, 10);
 }
 
 function TogglePill({
@@ -249,6 +266,16 @@ function CalendarEventDetailModal({
           <FullValuePanels event={event} />
         </div>
 
+        <div className="mt-5 rounded-[22px] border border-amber-300/16 bg-amber-300/[0.055] p-4">
+          <p className="text-sm font-semibold text-amber-100">Резултат спрямо очакването</p>
+          <p className="mt-2 text-sm leading-7 text-slate-200">{detail.releaseAnalysis}</p>
+          {event.actualUpdatedAt ? (
+            <p className="mt-2 text-xs leading-5 text-slate-400">
+              Обновено: {event.actualUpdatedAt ? formatSofiaTime(event.actualUpdatedAt) : "-"}
+            </p>
+          ) : null}
+        </div>
+
         <div className="mt-5 grid gap-3 md:grid-cols-2">
           <div className="rounded-[20px] border border-emerald-300/14 bg-emerald-300/[0.045] p-4">
             <p className="text-sm font-semibold text-emerald-100">Bullish сценарий</p>
@@ -332,11 +359,13 @@ function readJsonStorage(key: string) {
 }
 
 export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
+  const router = useRouter();
   const [filters, setFilters] = useState<CalendarFilterState>(() => getDefaultCalendarFilterState());
   const [alerts, setAlerts] = useState<CalendarAlertSettings[]>([]);
   const [isFilterOpen, setIsFilterOpen] = useState(true);
   const [activeAlertId, setActiveAlertId] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<EconomicCalendarEvent | null>(null);
+  const [selectedDate, setSelectedDate] = useState(() => todaySofiaDateKey());
   const [notificationMessage, setNotificationMessage] = useState<string | null>(null);
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
 
@@ -425,6 +454,61 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
     };
   }, [selectedEvent]);
 
+  useEffect(() => {
+    let timeoutId: number | null = null;
+    let cancelled = false;
+
+    const scheduleNextCheck = (delayMs: number) => {
+      timeoutId = window.setTimeout(checkForReleasedActuals, delayMs);
+    };
+
+    const checkForReleasedActuals = async () => {
+      if (cancelled) {
+        return;
+      }
+
+      const pendingReleasedEvents = getPendingReleasedCalendarEvents(events);
+
+      if (!pendingReleasedEvents.length) {
+        scheduleNextCheck(60_000);
+        return;
+      }
+
+      const newestReleaseAgeMs = Math.min(
+        ...pendingReleasedEvents.map((event) => Date.now() - new Date(event.startsAt).getTime()),
+      );
+      const nextDelayMs = newestReleaseAgeMs <= 30 * 60 * 1000 ? 60_000 : 5 * 60_000;
+
+      try {
+        const response = await fetch("/api/refresh", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ mode: "calendar-release" }),
+        });
+
+        if (response.ok) {
+          router.refresh();
+        }
+      } finally {
+        if (!cancelled) {
+          scheduleNextCheck(nextDelayMs);
+        }
+      }
+    };
+
+    scheduleNextCheck(1500);
+
+    return () => {
+      cancelled = true;
+
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [events, router]);
+
   const requestNotificationAccess = useCallback(async () => {
     if (!("Notification" in window)) {
       setNotificationMessage("Този браузър не поддържа desktop известия. Алармата остава видима в сайта.");
@@ -450,10 +534,16 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
   }, []);
 
   const visibleEvents = useMemo(() => filterCalendarEvents(events, filters), [events, filters]);
-  const groupedEvents = useMemo(() => groupByDay(visibleEvents), [visibleEvents]);
+  const selectedDateEvents = useMemo(
+    () =>
+      visibleEvents.filter((event) => (formatSofiaDateKey(event.startsAt) || event.startsAt.slice(0, 10)) === selectedDate),
+    [selectedDate, visibleEvents],
+  );
+  const groupedEvents = useMemo(() => groupByDay(selectedDateEvents), [selectedDateEvents]);
   const nextEvent = visibleEvents.find((event) => new Date(event.startsAt) >= new Date()) ?? visibleEvents[0];
-  const highImpactCount = visibleEvents.filter((event) => event.impact === "high").length;
-  const directCount = visibleEvents.filter((event) => event.relevance === "direct").length;
+  const highImpactCount = selectedDateEvents.filter((event) => event.impact === "high").length;
+  const directCount = selectedDateEvents.filter((event) => event.relevance === "direct").length;
+  const pendingReleasedCount = getPendingReleasedCalendarEvents(events).length;
   const alertsById = useMemo(() => new Map(alerts.map((alert) => [alert.eventId, alert])), [alerts]);
 
   const toggleImpactFilter = (impact: CalendarImpact) => {
@@ -650,13 +740,52 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
         </div>
       ) : null}
 
-      <SectionCard title="Календарен поток" eyebrow="Следващите 7 дни">
+      <SectionCard title="Календарен поток" eyebrow="История и предстоящи събития">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-white/8 bg-white/[0.03] p-3">
+          <div>
+            <p className="text-sm font-semibold text-white">{formatSofiaDay(`${selectedDate}T12:00:00.000Z`)}</p>
+            <p className="mt-1 text-xs leading-5 text-slate-400">
+              {selectedDateEvents.length} събития по текущите филтри
+              {pendingReleasedCount ? ` • ${pendingReleasedCount} чакат публикуван actual` : ""}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedDate((current) => shiftDateKey(current, -1))}
+              className="inline-flex h-10 items-center rounded-full border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08]"
+            >
+              Предишен ден
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedDate(todaySofiaDateKey())}
+              className="inline-flex h-10 items-center rounded-full border border-amber-300/25 bg-amber-300/12 px-3 text-xs font-semibold text-amber-100 transition hover:bg-amber-300/18"
+            >
+              Днес
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedDate((current) => shiftDateKey(current, 1))}
+              className="inline-flex h-10 items-center rounded-full border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08]"
+            >
+              Следващ ден
+            </button>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(event) => setSelectedDate(event.target.value || todaySofiaDateKey())}
+              className="h-10 rounded-full border border-white/10 bg-[#0c1426] px-3 text-xs font-semibold text-slate-100 outline-none transition focus:border-amber-300/45"
+            />
+          </div>
+        </div>
+
         <div className="space-y-5">
           {!events.length ? (
             <div className="rounded-[24px] border border-white/8 bg-white/[0.03] p-6">
               <p className="text-base font-semibold text-white">Няма live календарни събития за тази седмица.</p>
               <p className="mt-2 text-sm leading-6 text-slate-300">
-                Demo календарът е скрит. Натисни „Обнови“, за да се заредят live събития за следващите 7 дни.
+                Demo календарът е скрит. Натисни „Обнови“, за да се заредят live събития и последната история.
               </p>
             </div>
           ) : null}
@@ -666,6 +795,15 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
               <p className="text-base font-semibold text-white">Няма събития по тези филтри.</p>
               <p className="mt-2 text-sm leading-6 text-slate-300">
                 Разшири impact, тип събитие или валута, за да се покажат повече новини.
+              </p>
+            </div>
+          ) : null}
+
+          {visibleEvents.length > 0 && !selectedDateEvents.length ? (
+            <div className="rounded-[24px] border border-white/8 bg-white/[0.03] p-6">
+              <p className="text-base font-semibold text-white">Няма събития за избрания ден.</p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                Върни ден назад/напред или промени филтрите, за да видиш публикувани и предстоящи събития.
               </p>
             </div>
           ) : null}

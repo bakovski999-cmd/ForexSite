@@ -6,6 +6,7 @@ import {
   fetchFreeOfficialCalendarEvents,
   fetchTradingEconomicsCalendarEvents,
 } from "@/lib/data/fetchers/economic-calendar";
+import { mergeCalendarEvents } from "@/lib/calendar-history";
 import { fetchFredSeries } from "@/lib/data/fetchers/fred";
 import { fetchGdeltGoldNews } from "@/lib/data/fetchers/gdelt";
 import { analyzeNewsItem } from "@/lib/data/fetchers/openai";
@@ -98,13 +99,20 @@ async function fetchCalendarForSync(current: DashboardSnapshot) {
       };
     }
 
+    const liveEvents = events.filter(isLiveCalendarEvent);
+    const mergedEvents = mergeCalendarEvents(lastLiveEvents, liveEvents);
+
     return {
-      events: events.filter(isLiveCalendarEvent),
-      run: makeSyncRun(source, "success", { items: events.length }),
+      events: mergedEvents,
+      run: makeSyncRun(source, "success", {
+        items: events.length,
+        liveItems: liveEvents.length,
+        retainedItems: mergedEvents.length,
+      }),
     };
   } catch (error) {
     return {
-      events: lastLiveEvents,
+      events: mergeCalendarEvents(lastLiveEvents, []),
       run: makeSyncRun(
         env.TRADING_ECONOMICS_API_KEY ? "trading-economics-calendar" : "free-calendar",
         "warning",

@@ -88,6 +88,16 @@ export function formatSofiaDay(value: string) {
   return `${weekday}, ${parts.day} ${month}`;
 }
 
+export function formatSofiaDateKey(value: string) {
+  const parts = getDateTimeParts(value);
+
+  if (!parts) {
+    return "";
+  }
+
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 export function formatCompactNumber(value: number) {
   return new Intl.NumberFormat("bg-BG", {
     maximumFractionDigits: 1,

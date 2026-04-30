@@ -7,6 +7,7 @@ import {
   isStrongGoldCalendarEvent,
   isStrongGoldNews,
   pendingActualLabel,
+  sourcePendingActualLabel,
   unavailableFreeForecastLabel,
 } from "@/lib/calendar-presentation";
 import type { EconomicCalendarEvent } from "@/lib/types";
@@ -42,6 +43,15 @@ describe("calendar presentation", () => {
     expect(panels.find((panel) => panel.key === "actual")?.value).toBe(pendingActualLabel);
   });
 
+  test("shows source pending when release time passed but actual is still missing", () => {
+    const panels = getCalendarValuePanels({
+      ...baseEvent,
+      actualStatus: "source_pending",
+    });
+
+    expect(panels.find((panel) => panel.key === "actual")?.value).toBe(sourcePendingActualLabel);
+  });
+
   test("explains Fed calendar events through rates, USD and real yields", () => {
     const detail = getCalendarEventDetail({
       ...baseEvent,
@@ -60,6 +70,21 @@ describe("calendar presentation", () => {
 
     expect(detail.meaning).toContain("Fed очакванията");
     expect(detail.goldImpact).toContain("real-yield");
+  });
+
+  test("adds post-release analysis when actual is published", () => {
+    const detail = getCalendarEventDetail({
+      ...baseEvent,
+      forecast: "2.2%",
+      forecastStatus: "provided",
+      actual: "2.0%",
+      actualSource: "FRED / BEA official GDP",
+      expectedGoldImpact: "bullish",
+    });
+
+    expect(detail.releaseAnalysis).toContain("2.0%");
+    expect(detail.releaseAnalysis).toContain("под очакването");
+    expect(detail.releaseAnalysis).toContain("FRED / BEA official GDP");
   });
 
   test("explains employment events through USD, yields and risk sentiment", () => {

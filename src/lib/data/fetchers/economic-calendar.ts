@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { buildCalendarEventKey, getCalendarActualStatus } from "@/lib/calendar-history";
 import { inferCalendarEventType } from "@/lib/calendar-filters";
 import type {
   CalendarImpact,
@@ -46,6 +47,15 @@ type FredReleaseDatesResponse = {
   release_dates?: FredReleaseDate[];
 };
 
+type FredObservation = {
+  date: string;
+  value: string;
+};
+
+type FredObservationsResponse = {
+  observations?: FredObservation[];
+};
+
 type BlsSeriesDataPoint = {
   year: string;
   period: string;
@@ -68,6 +78,7 @@ type BlsResponse = {
 
 type BlsFact = {
   actual?: string;
+  observationDate?: string;
   period?: string;
   previous?: string;
   sourceUrl: string;
@@ -85,6 +96,28 @@ type ReleaseRule = {
   blsFactKey?: BlsFactKey;
   sourceUrl?: string;
   timeUtc: string;
+};
+
+type OfficialActualCadence = "monthly" | "quarterly" | "weekly";
+
+type OfficialActualMetric = "valuePercent" | "percentChange" | "thousandsK";
+
+type OfficialActualRule = {
+  pattern: RegExp;
+  seriesId: string;
+  cadence: OfficialActualCadence;
+  metric: OfficialActualMetric;
+  decimals?: number;
+  source: string;
+  sourceUrl: string;
+};
+
+type OfficialActualFact = {
+  actual: string;
+  period: string;
+  observationDate: string;
+  source: string;
+  sourceUrl: string;
 };
 
 const goldRelevantKeywords = [
@@ -201,6 +234,53 @@ const fredCalendarRules: ReleaseRule[] = [
   },
 ];
 
+const officialActualRules: OfficialActualRule[] = [
+  {
+    pattern: /^advance gdp q\/q$/i,
+    seriesId: "A191RL1Q225SBEA",
+    cadence: "quarterly",
+    metric: "valuePercent",
+    decimals: 1,
+    source: "FRED / BEA official GDP",
+    sourceUrl: "https://fred.stlouisfed.org/series/A191RL1Q225SBEA",
+  },
+  {
+    pattern: /gdp price index q\/q/i,
+    seriesId: "A191RI1Q225SBEA",
+    cadence: "quarterly",
+    metric: "valuePercent",
+    decimals: 1,
+    source: "FRED / BEA official GDP price index",
+    sourceUrl: "https://fred.stlouisfed.org/series/A191RI1Q225SBEA",
+  },
+  {
+    pattern: /^core pce price index m\/m$/i,
+    seriesId: "PCEPILFE",
+    cadence: "monthly",
+    metric: "percentChange",
+    decimals: 1,
+    source: "FRED / BEA official Core PCE",
+    sourceUrl: "https://fred.stlouisfed.org/series/PCEPILFE",
+  },
+  {
+    pattern: /^employment cost index q\/q$/i,
+    seriesId: "ECIALLCIV",
+    cadence: "quarterly",
+    metric: "percentChange",
+    decimals: 1,
+    source: "FRED / BLS official Employment Cost Index",
+    sourceUrl: "https://fred.stlouisfed.org/series/ECIALLCIV",
+  },
+  {
+    pattern: /^(unemployment claims|initial jobless claims|jobless claims)$/i,
+    seriesId: "ICSA",
+    cadence: "weekly",
+    metric: "thousandsK",
+    source: "FRED / DOL official initial claims",
+    sourceUrl: "https://fred.stlouisfed.org/series/ICSA",
+  },
+];
+
 const blsSeriesCatalog: Record<BlsFactKey, { seriesId: string; sourceUrl: string }> = {
   cpi: { seriesId: "CUUR0000SA0", sourceUrl: "https://www.bls.gov/cpi/" },
   coreCpi: { seriesId: "CUUR0000SA0L1E", sourceUrl: "https://www.bls.gov/cpi/" },
@@ -246,6 +326,30 @@ function formatBlsPeriod(point: BlsSeriesDataPoint) {
   }
 
   return point.periodName ? `${point.periodName} ${point.year}` : point.year;
+}
+
+function formatOfficialPeriod(date: string, cadence: OfficialActualCadence) {
+  const [year, month, day] = date.split("-").map(Number);
+
+  if (cadence === "weekly") {
+    const labelDate = new Date(Date.UTC(year, month - 1, day));
+    const dayLabel = String(labelDate.getUTCDate()).padStart(2, "0");
+    const monthLabel = String(labelDate.getUTCMonth() + 1).padStart(2, "0");
+
+    return `седмица до ${dayLabel}.${monthLabel}.${labelDate.getUTCFullYear()}`;
+  }
+
+  if (cadence === "quarterly") {
+    const quarter = Math.floor((month - 1) / 3) + 1;
+
+    return `Q${quarter} ${year}`;
+  }
+
+  return `${bgMonthNames[month - 1] ?? month} ${year}`;
+}
+
+function formatPercent(value: number, decimals = 1) {
+  return `${value.toFixed(decimals)}%`;
 }
 
 function normalizeImpact(value: number | undefined): CalendarImpact {
@@ -479,12 +583,21 @@ function normalizeCalendarItem(item: TradingEconomicsCalendarItem): EconomicCale
   const scenarios = scenarioFor(item);
   const title = item.Event || item.Category || "Economic calendar event";
   const id = String(item.CalendarId ?? hashText(`${title}|${item.Date ?? ""}`)).slice(0, 32);
+  const startsAt = item.Date ? new Date(item.Date).toISOString() : new Date().toISOString();
+  const event = {
+    country: item.Country === "United States" ? "САЩ" : item.Country || "Глобално",
+    currency: item.Currency || (item.Country === "United States" ? "USD" : ""),
+    startsAt,
+    title,
+  };
+  const calendarKey = buildCalendarEventKey(event);
 
   return {
     id: `te-${id}`,
-    startsAt: item.Date ? new Date(item.Date).toISOString() : new Date().toISOString(),
-    country: item.Country === "United States" ? "САЩ" : item.Country || "Глобално",
-    currency: item.Currency || (item.Country === "United States" ? "USD" : ""),
+    calendarKey,
+    startsAt,
+    country: event.country,
+    currency: event.currency,
     title,
     impact,
     eventType: inferCalendarEventType(title),
@@ -493,6 +606,9 @@ function normalizeCalendarItem(item: TradingEconomicsCalendarItem): EconomicCale
     forecast: item.Forecast || item.TEForecast || undefined,
     forecastStatus: item.Forecast || item.TEForecast ? "provided" : "not_applicable",
     actual: item.Actual || undefined,
+    actualSource: item.Actual ? item.Source || "Trading Economics" : undefined,
+    actualUpdatedAt: item.Actual ? new Date().toISOString() : undefined,
+    actualStatus: getCalendarActualStatus({ actual: item.Actual || undefined, startsAt }),
     source: item.Source || "Trading Economics",
     sourceUrl: sourceUrlFor(item),
     affectedDrivers: drivers,
@@ -503,7 +619,7 @@ function normalizeCalendarItem(item: TradingEconomicsCalendarItem): EconomicCale
   };
 }
 
-function normalizeForexFactoryItem(item: ForexFactoryCalendarItem, index: number): EconomicCalendarEvent | null {
+function normalizeForexFactoryItem(item: ForexFactoryCalendarItem): EconomicCalendarEvent | null {
   const impact = normalizeForexFactoryImpact(item.impact);
 
   if (!impact || !item.title || !item.date) {
@@ -527,12 +643,22 @@ function normalizeForexFactoryItem(item: ForexFactoryCalendarItem, index: number
   if (!Number.isFinite(startsAt.getTime())) {
     return null;
   }
+  const startsAtIso = startsAt.toISOString();
+  const country = item.country === "USD" ? "САЩ" : item.country ?? "Глобално";
+  const currency = item.country ?? "";
+  const calendarKey = buildCalendarEventKey({
+    country,
+    currency,
+    startsAt: startsAtIso,
+    title: item.title,
+  });
 
   return {
-    id: `ff-${hashText(`${index}|${item.title}|${item.country ?? ""}|${item.date}`).slice(0, 32)}`,
-    startsAt: startsAt.toISOString(),
-    country: item.country === "USD" ? "САЩ" : item.country ?? "Глобално",
-    currency: item.country ?? "",
+    id: `ff-${hashText(calendarKey).slice(0, 32)}`,
+    calendarKey,
+    startsAt: startsAtIso,
+    country,
+    currency,
     title: item.title,
     impact,
     eventType: inferCalendarEventType(item.title),
@@ -541,6 +667,9 @@ function normalizeForexFactoryItem(item: ForexFactoryCalendarItem, index: number
     forecast: item.forecast || undefined,
     forecastStatus: item.forecast ? "provided" : "not_applicable",
     actual: item.actual || undefined,
+    actualSource: item.actual ? "ForexFactory weekly export" : undefined,
+    actualUpdatedAt: item.actual ? new Date().toISOString() : undefined,
+    actualStatus: getCalendarActualStatus({ actual: item.actual || undefined, startsAt: startsAtIso }),
     latestActual: item.previous || undefined,
     source: "ForexFactory weekly export",
     sourceUrl: "https://www.forexfactory.com/calendar",
@@ -550,6 +679,79 @@ function normalizeForexFactoryItem(item: ForexFactoryCalendarItem, index: number
     scenarioBearish: scenarios.bearish,
     explanationBg: explanationFor(normalizedItem, drivers),
   };
+}
+
+function getOfficialActualFactForEvent(
+  event: EconomicCalendarEvent,
+  facts: Map<string, OfficialActualFact>,
+) {
+  const rule = findOfficialActualRule(event.title);
+
+  if (!rule) {
+    return null;
+  }
+
+  const fact = facts.get(rule.pattern.source);
+
+  if (!fact || !isOfficialFactFreshForEvent(rule, fact, event.startsAt)) {
+    return null;
+  }
+
+  return fact;
+}
+
+function enrichEventWithOfficialActual(
+  event: EconomicCalendarEvent,
+  facts: Map<string, OfficialActualFact>,
+): EconomicCalendarEvent {
+  if (event.actual) {
+    return {
+      ...event,
+      actualStatus: "published",
+    };
+  }
+
+  const fact = getOfficialActualFactForEvent(event, facts);
+  const startsAtMs = new Date(event.startsAt).getTime();
+  const isReleased = Number.isFinite(startsAtMs) && startsAtMs <= Date.now();
+
+  if (!fact || !isReleased) {
+    return {
+      ...event,
+      actualStatus: getCalendarActualStatus(event),
+    };
+  }
+
+  const normalizedItem = {
+    Category: event.title,
+    Event: event.title,
+    Actual: fact.actual,
+    Previous: event.previous,
+    Forecast: event.forecast,
+    Importance: event.impact === "high" ? 3 : event.impact === "medium" ? 2 : 1,
+    Country: event.country === "САЩ" ? "United States" : event.country,
+    Currency: event.currency,
+  } satisfies TradingEconomicsCalendarItem;
+
+  return {
+    ...event,
+    actual: fact.actual,
+    actualSource: fact.source,
+    actualUpdatedAt: new Date().toISOString(),
+    actualStatus: "published",
+    latestActual: event.latestActual ?? event.previous,
+    latestActualPeriod: event.latestActualPeriod,
+    source: event.source,
+    sourceUrl: event.sourceUrl ?? fact.sourceUrl,
+    expectedGoldImpact: inferDirection(normalizedItem),
+  };
+}
+
+function enrichCalendarEventsWithOfficialActuals(
+  events: EconomicCalendarEvent[],
+  facts: Map<string, OfficialActualFact>,
+) {
+  return events.map((event) => enrichEventWithOfficialActual(event, facts));
 }
 
 export function mapForexFactoryCalendarItemsToEvents(items: ForexFactoryCalendarItem[]) {
@@ -676,9 +878,139 @@ async function fetchBlsLatestFacts(): Promise<Map<BlsFactKey, BlsFact>> {
 
     facts.set(key, {
       actual: formatBlsValue(key, latest.value),
+      observationDate: `${latest.year}-${latest.period.replace("M", "").padStart(2, "0")}-01`,
       period: formatBlsPeriod(latest),
       previous: previous ? formatBlsValue(key, previous.value) : undefined,
       sourceUrl: descriptor.sourceUrl,
+    });
+  }
+
+  return facts;
+}
+
+function findOfficialActualRule(title: string) {
+  return officialActualRules.find((rule) => rule.pattern.test(title.trim()));
+}
+
+function parseFredNumber(value: string | undefined) {
+  if (!value || value === ".") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatOfficialActual(rule: OfficialActualRule, latest: FredObservation, previous?: FredObservation) {
+  const latestValue = parseFredNumber(latest.value);
+
+  if (latestValue === null) {
+    return null;
+  }
+
+  if (rule.metric === "valuePercent") {
+    return formatPercent(latestValue, rule.decimals ?? 1);
+  }
+
+  if (rule.metric === "thousandsK") {
+    return `${Math.round(latestValue / 1000)}K`;
+  }
+
+  const previousValue = parseFredNumber(previous?.value);
+
+  if (previousValue === null || previousValue === 0) {
+    return null;
+  }
+
+  return formatPercent((latestValue / previousValue - 1) * 100, rule.decimals ?? 1);
+}
+
+function isOfficialFactFreshForEvent(
+  rule: OfficialActualRule,
+  fact: OfficialActualFact,
+  startsAt: string,
+) {
+  const eventTime = new Date(startsAt).getTime();
+  const observationTime = new Date(`${fact.observationDate}T00:00:00.000Z`).getTime();
+
+  if (!Number.isFinite(eventTime) || !Number.isFinite(observationTime) || observationTime > eventTime) {
+    return false;
+  }
+
+  const maxAgeDays = {
+    monthly: 70,
+    quarterly: 140,
+    weekly: 14,
+  } satisfies Record<OfficialActualCadence, number>;
+
+  return eventTime - observationTime <= maxAgeDays[rule.cadence] * 24 * 60 * 60 * 1000;
+}
+
+async function fetchFredObservations(seriesId: string): Promise<FredObservation[]> {
+  if (!env.FRED_API_KEY) {
+    return [];
+  }
+
+  const url = new URL("https://api.stlouisfed.org/fred/series/observations");
+  url.searchParams.set("series_id", seriesId);
+  url.searchParams.set("api_key", env.FRED_API_KEY);
+  url.searchParams.set("file_type", "json");
+  url.searchParams.set("sort_order", "desc");
+  url.searchParams.set("limit", "3");
+
+  const response = await fetch(url, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`FRED observations request failed for ${seriesId}: ${response.status}`);
+  }
+
+  const payload = (await response.json()) as FredObservationsResponse;
+  return (payload.observations ?? []).filter((observation) => parseFredNumber(observation.value) !== null);
+}
+
+async function fetchOfficialActualFacts() {
+  const facts = new Map<string, OfficialActualFact>();
+
+  if (!env.FRED_API_KEY) {
+    return facts;
+  }
+
+  const uniqueSeriesIds = [...new Set(officialActualRules.map((rule) => rule.seriesId))];
+  const results = await Promise.allSettled(
+    uniqueSeriesIds.map(async (seriesId) => [seriesId, await fetchFredObservations(seriesId)] as const),
+  );
+  const observationsBySeriesId = new Map<string, FredObservation[]>();
+
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      observationsBySeriesId.set(result.value[0], result.value[1]);
+    }
+  }
+
+  for (const rule of officialActualRules) {
+    const observations = observationsBySeriesId.get(rule.seriesId) ?? [];
+    const latest = observations[0];
+    const previous = observations[1];
+
+    if (!latest) {
+      continue;
+    }
+
+    const actual = formatOfficialActual(rule, latest, previous);
+
+    if (!actual) {
+      continue;
+    }
+
+    facts.set(rule.pattern.source, {
+      actual,
+      period: formatOfficialPeriod(latest.date, rule.cadence),
+      observationDate: latest.date,
+      source: rule.source,
+      sourceUrl: rule.sourceUrl,
     });
   }
 
@@ -727,19 +1059,31 @@ function normalizeFredReleaseDate(
   const scenarios = officialScenarioFor(rule);
   const startsAt = dateTimeUtc(release.date, rule.timeUtc);
   const isFutureRelease = new Date(startsAt).getTime() > Date.now();
+  const title = rule.title;
+  const event = {
+    country: "САЩ",
+    currency: "USD",
+    startsAt,
+    title,
+  };
+  const actual = isFutureRelease ? undefined : fact?.actual;
 
   return {
     id: `fred-release-${release.release_id}-${release.date}`,
+    calendarKey: buildCalendarEventKey(event),
     startsAt,
-    country: "САЩ",
-    currency: "USD",
-    title: rule.title,
+    country: event.country,
+    currency: event.currency,
+    title,
     impact: rule.impact,
     eventType: inferCalendarEventType(rule.title),
     relevance: rule.relevance,
     previous: fact?.previous,
     forecastStatus: "unavailable_free",
-    actual: isFutureRelease ? undefined : fact?.actual,
+    actual,
+    actualSource: actual ? "FRED + BLS official data" : undefined,
+    actualUpdatedAt: actual ? new Date().toISOString() : undefined,
+    actualStatus: getCalendarActualStatus({ actual, startsAt }),
     latestActual: fact?.actual,
     latestActualPeriod: fact?.period,
     source: fact ? "FRED + BLS official data" : "FRED release calendar",
@@ -799,6 +1143,7 @@ function parseFomcMeetings(html: string) {
       }
 
       const date = new Date(Date.UTC(year, monthIndex, day, 18, 0, 0));
+      const startsAt = date.toISOString();
       const scenarios = officialScenarioFor({
         pattern: /fomc/i,
         title: "FOMC Rate Decision",
@@ -810,8 +1155,14 @@ function parseFomcMeetings(html: string) {
       });
 
       meetings.push({
-        id: `fed-fomc-${date.toISOString().slice(0, 10)}`,
-        startsAt: date.toISOString(),
+        id: `fed-fomc-${startsAt.slice(0, 10)}`,
+        calendarKey: buildCalendarEventKey({
+          country: "САЩ",
+          currency: "USD",
+          startsAt,
+          title: "FOMC Rate Decision",
+        }),
+        startsAt,
         country: "САЩ",
         currency: "USD",
         title: "FOMC Rate Decision",
@@ -819,6 +1170,7 @@ function parseFomcMeetings(html: string) {
         eventType: "central_bank",
         relevance: "direct",
         forecastStatus: "unavailable_free",
+        actualStatus: getCalendarActualStatus({ startsAt }),
         source: "Federal Reserve",
         sourceUrl: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
         affectedDrivers: ["fed", "real_yields", "nominal_yields", "usd"],
@@ -857,20 +1209,28 @@ export function mapFredReleaseDatesToCalendarEvents(
 }
 
 export async function fetchFreeOfficialCalendarEvents(): Promise<EconomicCalendarEvent[]> {
-  const [fredResult, blsResult, fomcResult, forexFactoryResult] = await Promise.allSettled([
+  const [fredResult, blsResult, fomcResult, forexFactoryResult, officialActualResult] = await Promise.allSettled([
     fetchFredReleaseDates(),
     fetchBlsLatestFacts(),
     fetchFomcCalendarEvents(),
     fetchForexFactoryWeeklyCalendarEvents(),
+    fetchOfficialActualFacts(),
   ]);
 
   const blsFacts = blsResult.status === "fulfilled" ? blsResult.value : new Map<BlsFactKey, BlsFact>();
+  const officialActualFacts =
+    officialActualResult.status === "fulfilled"
+      ? officialActualResult.value
+      : new Map<string, OfficialActualFact>();
   const fredEvents =
     fredResult.status === "fulfilled" ? mapFredReleaseDatesToCalendarEvents(fredResult.value, blsFacts) : [];
   const fomcEvents = fomcResult.status === "fulfilled" ? fomcResult.value : [];
-  const forexFactoryEvents = forexFactoryResult.status === "fulfilled" ? forexFactoryResult.value : [];
+  const forexFactoryEvents =
+    forexFactoryResult.status === "fulfilled"
+      ? enrichCalendarEventsWithOfficialActuals(forexFactoryResult.value, officialActualFacts)
+      : [];
   const now = new Date();
-  const lowWatermark = addDays(now, -3).getTime();
+  const lowWatermark = addDays(now, -14).getTime();
   const highWatermark = addDays(now, 90).getTime();
 
   return [...forexFactoryEvents, ...fredEvents, ...fomcEvents]

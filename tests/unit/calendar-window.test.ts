@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { getUpcomingCalendarWindow, isInUpcomingCalendarWindow } from "@/lib/calendar-window";
+import {
+  getCalendarHistoryWindow,
+  getUpcomingCalendarWindow,
+  isInCalendarHistoryWindow,
+  isInUpcomingCalendarWindow,
+} from "@/lib/calendar-window";
 
 describe("calendar week window", () => {
   test("uses a rolling seven-day window from the current day", () => {
@@ -18,5 +23,15 @@ describe("calendar week window", () => {
     expect(isInUpcomingCalendarWindow("2026-05-03T20:59:00.000Z", now)).toBe(true);
     expect(isInUpcomingCalendarWindow("2026-05-03T21:00:00.000Z", now)).toBe(false);
     expect(isInUpcomingCalendarWindow("2026-04-26T20:59:00.000Z", now)).toBe(false);
+  });
+
+  test("keeps a rolling history and future range for calendar navigation", () => {
+    const now = new Date("2026-04-30T15:24:00.000Z");
+    const window = getCalendarHistoryWindow(now);
+
+    expect(window.start.toISOString()).toBe("2026-04-15T21:00:00.000Z");
+    expect(window.end.toISOString()).toBe("2026-05-14T21:00:00.000Z");
+    expect(isInCalendarHistoryWindow("2026-04-29T18:00:00.000Z", now)).toBe(true);
+    expect(isInCalendarHistoryWindow("2026-04-15T20:59:00.000Z", now)).toBe(false);
   });
 });

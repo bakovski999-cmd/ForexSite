@@ -197,6 +197,45 @@ describe("market data normalization", () => {
     expect(events[0].startsAt).toBe("2026-04-29T18:00:00.000Z");
   });
 
+  test("ForexFactory event ids are stable when source order changes", () => {
+    const first = mapForexFactoryCalendarItemsToEvents([
+      {
+        title: "Advance GDP q/q",
+        country: "USD",
+        date: "2026-04-30T08:30:00-04:00",
+        impact: "High",
+        forecast: "2.2%",
+        previous: "1.4%",
+      },
+      {
+        title: "Core PCE Price Index m/m",
+        country: "USD",
+        date: "2026-04-30T08:30:00-04:00",
+        impact: "High",
+      },
+    ]);
+    const second = mapForexFactoryCalendarItemsToEvents([
+      {
+        title: "Core PCE Price Index m/m",
+        country: "USD",
+        date: "2026-04-30T08:30:00-04:00",
+        impact: "High",
+      },
+      {
+        title: "Advance GDP q/q",
+        country: "USD",
+        date: "2026-04-30T08:30:00-04:00",
+        impact: "High",
+        forecast: "2.2%",
+        previous: "1.4%",
+      },
+    ]);
+
+    expect(first.find((event) => event.title === "Advance GDP q/q")?.id).toBe(
+      second.find((event) => event.title === "Advance GDP q/q")?.id,
+    );
+  });
+
   test("sync remains stable in demo mode across repeated runs", async () => {
     const first = await syncDashboardSnapshot({ force: true });
     const second = await syncDashboardSnapshot({ force: true });

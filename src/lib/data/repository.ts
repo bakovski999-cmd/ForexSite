@@ -5,6 +5,7 @@ import { buildDemoSnapshot } from "@/lib/data/demo-snapshot";
 import { env, isFirebaseConfigured, isSupabaseConfigured } from "@/lib/env";
 import { getFirebaseAdminFirestore } from "@/lib/firebase/admin";
 import { inferCalendarEventType } from "@/lib/calendar-filters";
+import { buildCalendarEventKey, getCalendarActualStatus } from "@/lib/calendar-history";
 import type { DashboardSnapshot, EconomicCalendarEvent } from "@/lib/types";
 
 type MemoryStore = {
@@ -33,6 +34,10 @@ function normalizeSnapshot(snapshot: DashboardSnapshot): DashboardSnapshot {
     return {
       ...event,
       id: duplicateCount ? `${event.id}-${duplicateCount + 1}` : event.id,
+      calendarKey:
+        (event as Partial<EconomicCalendarEvent>).calendarKey ?? buildCalendarEventKey(event),
+      actualStatus:
+        (event as Partial<EconomicCalendarEvent>).actualStatus ?? getCalendarActualStatus(event),
       eventType:
         (event as Partial<EconomicCalendarEvent>).eventType ?? inferCalendarEventType(event.title),
     };

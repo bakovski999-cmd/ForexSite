@@ -22,6 +22,8 @@ export type CalendarRelevance = "direct" | "strong" | "context";
 
 export type CalendarForecastStatus = "provided" | "unavailable_free" | "not_applicable";
 
+export type CalendarActualStatus = "pending" | "source_pending" | "published";
+
 export type CalendarEventType =
   | "growth"
   | "inflation"
@@ -203,6 +205,7 @@ export interface GdeltArticle {
 
 export interface EconomicCalendarEvent {
   id: string;
+  calendarKey?: string;
   startsAt: string;
   country: string;
   currency: string;
@@ -214,6 +217,9 @@ export interface EconomicCalendarEvent {
   forecast?: string;
   forecastStatus?: CalendarForecastStatus;
   actual?: string;
+  actualSource?: string;
+  actualUpdatedAt?: string;
+  actualStatus?: CalendarActualStatus;
   latestActual?: string;
   latestActualPeriod?: string;
   source: string;

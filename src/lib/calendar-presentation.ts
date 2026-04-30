@@ -1,6 +1,7 @@
 import type { CalendarRelevance, DriverTag, EconomicCalendarEvent, NewsAnalysis } from "@/lib/types";
 
 export const pendingActualLabel = "чака се";
+export const sourcePendingActualLabel = "чака се от източника";
 export const unavailableFreeForecastLabel = "Няма безплатен консенсус";
 
 type CalendarValuePanel = {
@@ -20,6 +21,7 @@ export type CalendarEventDetail = {
   meaning: string;
   goldImpact: string;
   example: string;
+  releaseAnalysis: string;
   driverDetails: CalendarEventDriverDetail[];
 };
 
@@ -111,12 +113,18 @@ export function getCalendarValuePanels(event: EconomicCalendarEvent): CalendarVa
   const forecastValue =
     event.forecast ??
     (event.forecastStatus === "unavailable_free" ? unavailableFreeForecastLabel : "-");
+  const actualValue =
+    event.actual ??
+    (event.actualStatus === "source_pending" ? sourcePendingActualLabel : pendingActualLabel);
+  const latestValue = event.actual && event.previous
+    ? event.previous
+    : event.latestActual ?? event.previous ?? "-";
 
   return [
     {
       key: "latest",
       label: "Последна",
-      value: event.latestActual ?? event.previous ?? "-",
+      value: latestValue,
       hint: event.latestActualPeriod
         ? `Официална стойност за ${event.latestActualPeriod}`
         : "Последна налична стойност",
@@ -130,14 +138,19 @@ export function getCalendarValuePanels(event: EconomicCalendarEvent): CalendarVa
     {
       key: "actual",
       label: "Нов факт",
-      value: event.actual ?? pendingActualLabel,
-      hint: event.actual ? "Публикувана стойност" : "Ще се обнови при release",
+      value: actualValue,
+      hint: event.actual
+        ? `Публикувана стойност${event.actualSource ? ` от ${event.actualSource}` : ""}`
+        : event.actualStatus === "source_pending"
+          ? "Release часът е минал; сайтът проверява докато източникът публикува стойността"
+          : "Ще се обнови при release",
     },
   ];
 }
 
 export function getCalendarEventDetail(event: EconomicCalendarEvent): CalendarEventDetail {
   const valueContext = getValueContext(event);
+  const releaseAnalysis = getReleaseAnalysis(event);
 
   if (event.eventType === "central_bank") {
     return {
@@ -147,6 +160,7 @@ export function getCalendarEventDetail(event: EconomicCalendarEvent): CalendarEv
         "За златото основният канал е през реални доходности, USD и очакванията за бъдещите лихви. По-ниски очаквания за лихви обикновено помагат на XAU, а по-високи доходности и по-силен долар често го ограничават.",
       example:
         `Пример: ако Fed запази лихвата, но говори по-меко от очакваното, доларът и доходностите могат да отслабнат и това да подкрепи златото. ${valueContext}`,
+      releaseAnalysis,
       driverDetails: getDriverDetails(event),
     };
   }
@@ -159,6 +173,7 @@ export function getCalendarEventDetail(event: EconomicCalendarEvent): CalendarEv
         "Златото реагира през real-yield канала: по-мека инфлация може да свали реалните доходности и да помогне на XAU, докато по-гореща инфлация може да върне страх от по-твърд Fed и да натисне златото.",
       example:
         `Пример: ако CPI излезе под очакванията, пазарът може да заложи на по-ранно облекчаване от Fed; това често отслабва USD и подкрепя златото. ${valueContext}`,
+      releaseAnalysis,
       driverDetails: getDriverDetails(event),
     };
   }
@@ -171,6 +186,7 @@ export function getCalendarEventDetail(event: EconomicCalendarEvent): CalendarEv
         "При employment данните XAU реагира през USD, доходности и risk sentiment. Много силен трудов пазар често подкрепя долара и доходностите, а слаб трудов пазар може да засили очакванията за по-мек Fed.",
       example:
         `Пример: ако NFP или заетостта излезе по-слаба от прогнозата, доходностите могат да паднат и златото да получи подкрепа. ${valueContext}`,
+      releaseAnalysis,
       driverDetails: getDriverDetails(event),
     };
   }
@@ -183,6 +199,7 @@ export function getCalendarEventDetail(event: EconomicCalendarEvent): CalendarEv
         "Златото е чувствително към доходностите. Ако доходностите се качат, алтернативната цена да държиш XAU се повишава; ако паднат, златото често получава въздух.",
       example:
         `Пример: слаб аукцион или скок в доходностите може да натисне XAU, докато спад в доходностите може да го подкрепи. ${valueContext}`,
+      releaseAnalysis,
       driverDetails: getDriverDetails(event),
     };
   }
@@ -195,6 +212,7 @@ export function getCalendarEventDetail(event: EconomicCalendarEvent): CalendarEv
         "При тези данни златото реагира най-често през USD, номинални доходности и risk sentiment. По-силни данни могат да подкрепят долара, а по-слаби данни могат да засилят търсенето на защита.",
       example:
         `Пример: ако GDP, PMI или доверие излезе много под очакванията, пазарът може да потърси защита и XAU да се подкрепи, особено ако доходностите падат. ${valueContext}`,
+      releaseAnalysis,
       driverDetails: getDriverDetails(event),
     };
   }
@@ -207,8 +225,47 @@ export function getCalendarEventDetail(event: EconomicCalendarEvent): CalendarEv
       "Златото реагира, когато новината промени баланса между USD, доходности, Fed очаквания и risk sentiment.",
     example:
       `Пример: резултат под очакванията често се чете като по-мек макро сигнал, а резултат над очакванията като по-силен макро сигнал. Реакцията зависи от това кой драйвер доминира след публикуването. ${valueContext}`,
+    releaseAnalysis,
     driverDetails: getDriverDetails(event),
   };
+}
+
+function parseComparableValue(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(value.replace(/[$,%KMkBb\s]/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getReleaseAnalysis(event: EconomicCalendarEvent) {
+  if (!event.actual) {
+    if (event.actualStatus === "source_pending") {
+      return "Release часът е минал, но безплатният календарен източник още не е публикувал новия факт. Сайтът ще продължи да проверява и ще попълни стойността веднага щом се появи надежден actual.";
+    }
+
+    return "Новият факт още не е публикуван. Засега анализът е сценарен: пазарът ще сравни actual стойността с forecast-а и ще реагира през USD, доходности, Fed очаквания и risk sentiment.";
+  }
+
+  const actual = parseComparableValue(event.actual);
+  const forecast = parseComparableValue(event.forecast);
+  const source = event.actualSource ? ` Източник: ${event.actualSource}.` : "";
+
+  if (actual === null || forecast === null) {
+    return `Публикуван е нов факт: ${event.actual}.${source} Ако тонът или стойността са по-меко четене за USD/доходности, това обикновено помага на златото; ако подкрепят по-високи лихви и по-силен долар, ефектът често е натиск върху XAU.`;
+  }
+
+  const relation =
+    actual > forecast ? "над очакването" : actual < forecast ? "под очакването" : "точно около очакването";
+  const direction =
+    event.expectedGoldImpact === "bullish"
+      ? "Текущият прочит е по-скоро подкрепящ за златото."
+      : event.expectedGoldImpact === "bearish"
+        ? "Текущият прочит е по-скоро натиск за златото."
+        : "Текущият прочит е смесен и зависи от реакцията на USD и доходностите.";
+
+  return `Публикуван е нов факт ${event.actual}, при очаквана стойност ${event.forecast}; резултатът е ${relation}. ${direction}${source}`;
 }
 
 function getDriverDetails(event: EconomicCalendarEvent) {
@@ -224,7 +281,9 @@ function getValueContext(event: EconomicCalendarEvent) {
   const forecast =
     event.forecast ??
     (event.forecastStatus === "unavailable_free" ? unavailableFreeForecastLabel : undefined);
-  const actual = event.actual ?? pendingActualLabel;
+  const actual =
+    event.actual ??
+    (event.actualStatus === "source_pending" ? sourcePendingActualLabel : pendingActualLabel);
 
   return `В момента: последна стойност ${latest ?? "-"}, очаквана ${forecast ?? "-"}, нов факт ${actual}.`;
 }
