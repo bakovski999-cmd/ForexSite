@@ -77,6 +77,9 @@ export interface CotSnapshot {
   managedMoneyLong: number;
   managedMoneyShort: number;
   managedMoneyNet: number;
+  managedMoneyLongDelta?: number;
+  managedMoneyShortDelta?: number;
+  openInterestDelta?: number;
   swapDealerNet: number;
   producerNet: number;
   otherReportablesNet: number;

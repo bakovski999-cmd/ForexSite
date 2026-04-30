@@ -53,6 +53,7 @@ export function parseCotCsv(csvText: string, reportType: "combined" | "futures_o
   const snapshots = goldRows.map((row, index) => {
     const managedMoneyLong = Number(row.M_Money_Positions_Long_All);
     const managedMoneyShort = Number(row.M_Money_Positions_Short_All);
+    const openInterest = Number(row.Open_Interest_All);
     const producerNet =
       Number(row.Prod_Merc_Positions_Long_All) - Number(row.Prod_Merc_Positions_Short_All);
     const swapDealerNet =
@@ -60,21 +61,28 @@ export function parseCotCsv(csvText: string, reportType: "combined" | "futures_o
     const otherReportablesNet =
       Number(row.Other_Rept_Positions_Long_All) - Number(row.Other_Rept_Positions_Short_All);
     const managedMoneyNet = managedMoneyLong - managedMoneyShort;
-    const previousNet =
-      index < goldRows.length - 1
-        ? Number(goldRows[index + 1].M_Money_Positions_Long_All) -
-          Number(goldRows[index + 1].M_Money_Positions_Short_All)
-        : managedMoneyNet;
+    const previousRow = index < goldRows.length - 1 ? goldRows[index + 1] : null;
+    const previousManagedMoneyLong = previousRow
+      ? Number(previousRow.M_Money_Positions_Long_All)
+      : managedMoneyLong;
+    const previousManagedMoneyShort = previousRow
+      ? Number(previousRow.M_Money_Positions_Short_All)
+      : managedMoneyShort;
+    const previousNet = previousManagedMoneyLong - previousManagedMoneyShort;
+    const previousOpenInterest = previousRow ? Number(previousRow.Open_Interest_All) : openInterest;
 
     const snapshot: CotSnapshot = {
       id: `${reportType}-${row["Report_Date_as_YYYY-MM-DD"]}`,
       reportDate: row["Report_Date_as_YYYY-MM-DD"],
       reportType,
       marketName: row.Market_and_Exchange_Names,
-      openInterest: Number(row.Open_Interest_All),
+      openInterest,
       managedMoneyLong,
       managedMoneyShort,
       managedMoneyNet,
+      managedMoneyLongDelta: managedMoneyLong - previousManagedMoneyLong,
+      managedMoneyShortDelta: managedMoneyShort - previousManagedMoneyShort,
+      openInterestDelta: openInterest - previousOpenInterest,
       swapDealerNet,
       producerNet,
       otherReportablesNet,

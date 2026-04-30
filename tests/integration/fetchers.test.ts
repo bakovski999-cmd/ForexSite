@@ -26,6 +26,10 @@ describe("market data normalization", () => {
 
     expect(snapshots).toHaveLength(2);
     expect(snapshots[0].managedMoneyNet).toBe(95498);
+    expect(snapshots[0].managedMoneyLongDelta).toBe(-2730);
+    expect(snapshots[0].managedMoneyShortDelta).toBe(622);
+    expect(snapshots[0].openInterestDelta).toBe(-8275);
+    expect(snapshots[0].weeklyDelta).toBe(-3352);
     expect(snapshots[0].producerNet).toBe(-23696);
   });
 

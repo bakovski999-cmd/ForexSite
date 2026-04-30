@@ -3,9 +3,10 @@
 import type { EChartsOption } from "echarts";
 
 import { BaseChart } from "@/components/charts/base-chart";
+import { describeCotDelta, type CotPositionRow } from "@/lib/cot";
 
 type TooltipParam = {
-  axisValue?: string;
+  name?: string;
 };
 
 type TooltipSize = {
@@ -29,16 +30,9 @@ function formatContracts(value: number) {
   return `${sign}${new Intl.NumberFormat("en-US").format(Math.abs(value))}`;
 }
 
-function describeDelta(value: number) {
-  if (value > 0) {
-    return "нетната дълга позиция се увеличава";
-  }
-
-  if (value < 0) {
-    return "нетната дълга позиция намалява";
-  }
-
-  return "няма промяна в нетната позиция";
+function formatDate(value: string) {
+  const [year, month, day] = value.split("-");
+  return year && month && day ? `${day}.${month}.${year}` : value;
 }
 
 function getTooltipPosition(point: number[], _params: unknown, _dom: unknown, _rect: unknown, size: TooltipSize) {
@@ -58,14 +52,14 @@ function getTooltipPosition(point: number[], _params: unknown, _dom: unknown, _r
   ];
 }
 
-function buildCotDeltaOption(labels: string[], deltas: number[]): EChartsOption {
-  const positiveDeltas = deltas.map((value) => (value > 0 ? value : null));
-  const negativeDeltas = deltas.map((value) => (value < 0 ? value : null));
-  const fullValueByLabel = new Map(labels.map((label, index) => [label, deltas[index]]));
+function buildCotDeltaOption(rows: CotPositionRow[]): EChartsOption {
+  const labelByDate = new Map(rows.map((row) => [row.reportDate.slice(5), row]));
+  const startValue = Math.max(0, rows.length - 12);
 
   return {
     tooltip: {
-      trigger: "axis",
+      trigger: "item",
+      triggerOn: "mousemove|click",
       appendTo: "body",
       confine: true,
       extraCssText: [
@@ -86,22 +80,29 @@ function buildCotDeltaOption(labels: string[], deltas: number[]): EChartsOption 
       borderColor: "rgba(255,255,255,0.1)",
       textStyle: { color: "#f8fafc" },
       formatter: (params) => {
-        const entries = Array.isArray(params) ? (params as TooltipParam[]) : [params as TooltipParam];
-        const label = entries[0]?.axisValue ?? "";
-        const value = fullValueByLabel.get(label) ?? 0;
+        const entry = Array.isArray(params) ? (params as TooltipParam[])[0] : (params as TooltipParam);
+        const label = entry?.name ?? "";
+        const row = labelByDate.get(label);
+
+        if (!row) {
+          return "";
+        }
 
         return [
-          `<strong>Седмица: ${label}</strong>`,
-          `Промяна: ${formatContracts(value)} контракта`,
-          `Значение: ${describeDelta(value)}`,
+          `<strong>Дата: ${formatDate(row.reportDate)}</strong>`,
+          `Net промяна: ${formatContracts(row.changeNet)} контракта`,
+          `Long промяна: ${formatContracts(row.changeLong)}`,
+          `Short промяна: ${formatContracts(row.changeShort)}`,
+          `Open interest: ${formatContracts(row.changeOpenInterest)}`,
+          `Извод: ${describeCotDelta(row)}`,
         ].join("<br/>");
       },
     },
-    grid: { left: 46, right: 20, top: 34, bottom: 36, containLabel: true },
+    grid: { left: 44, right: 22, top: 34, bottom: 72, containLabel: true },
     xAxis: {
       type: "category",
-      data: labels,
-      axisLabel: { color: "#94a3b8", hideOverlap: true, interval: 1 },
+      data: rows.map((row) => row.reportDate.slice(5)),
+      axisLabel: { color: "#94a3b8", hideOverlap: true, interval: 0, margin: 12 },
       axisLine: { lineStyle: { color: "rgba(255,255,255,0.14)" } },
       axisTick: { show: false },
     },
@@ -113,24 +114,51 @@ function buildCotDeltaOption(labels: string[], deltas: number[]): EChartsOption 
       },
       splitLine: { lineStyle: { color: "rgba(255,255,255,0.08)" } },
     },
+    dataZoom: [
+      {
+        type: "inside",
+        startValue,
+        endValue: rows.length - 1,
+        zoomOnMouseWheel: true,
+        moveOnMouseMove: true,
+      },
+      {
+        type: "slider",
+        startValue,
+        endValue: rows.length - 1,
+        height: 18,
+        bottom: 20,
+        borderColor: "rgba(255,255,255,0.08)",
+        fillerColor: "rgba(249,206,103,0.18)",
+        handleStyle: { color: "#f9ce67" },
+        moveHandleStyle: { color: "#f9ce67" },
+        textStyle: { color: "#94a3b8" },
+      },
+    ],
     series: [
       {
-        name: "Увеличение",
+        name: "Net промяна",
         type: "bar",
-        data: positiveDeltas,
-        barWidth: 20,
-        itemStyle: {
-          borderRadius: [5, 5, 0, 0],
-          color: "#34d399",
-        },
+        data: rows.map((row) => ({
+          value: row.changeNet,
+          itemStyle: {
+            borderRadius: row.changeNet >= 0 ? [8, 8, 0, 0] : [0, 0, 8, 8],
+            color: row.changeNet >= 0 ? "#34d399" : "#fb7185",
+          },
+          label: {
+            position: row.changeNet >= 0 ? "top" : "bottom",
+          },
+        })),
+        barMaxWidth: 28,
+        barCategoryGap: "52%",
         label: {
           show: true,
-          position: "top",
           color: "#e2e8f0",
-          fontSize: 11,
+          fontSize: 12,
+          fontWeight: 700,
           formatter: (params) => {
             const value = Number(params.value ?? 0);
-            return Math.abs(value) >= 5000 ? formatDeltaCompact(value) : "";
+            return Math.abs(value) >= 10000 ? formatDeltaCompact(value) : "";
           },
         },
         labelLayout: {
@@ -144,41 +172,16 @@ function buildCotDeltaOption(labels: string[], deltas: number[]): EChartsOption 
           label: { show: false },
         },
       },
-      {
-        name: "Намаление",
-        type: "bar",
-        data: negativeDeltas,
-        barWidth: 20,
-        itemStyle: {
-          borderRadius: [0, 0, 5, 5],
-          color: "#fb7185",
-        },
-        label: {
-          show: true,
-          position: "bottom",
-          color: "#e2e8f0",
-          fontSize: 11,
-          formatter: (params) => {
-            const value = Number(params.value ?? 0);
-            return Math.abs(value) >= 5000 ? formatDeltaCompact(value) : "";
-          },
-        },
-        labelLayout: {
-          hideOverlap: true,
-        },
-      },
     ],
   };
 }
 
 export function CotDeltaChart({
-  labels,
-  deltas,
+  rows,
   height = 320,
 }: {
-  labels: string[];
-  deltas: number[];
+  rows: CotPositionRow[];
   height?: number;
 }) {
-  return <BaseChart height={height} option={buildCotDeltaOption(labels, deltas)} />;
+  return <BaseChart height={height} option={buildCotDeltaOption(rows)} />;
 }

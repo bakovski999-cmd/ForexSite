@@ -2,11 +2,13 @@ import type { EChartsOption } from "echarts";
 
 import { BaseChart } from "@/components/charts/base-chart";
 import { CotDeltaChart } from "@/components/charts/cot-delta-chart";
+import { CotPositionTable } from "@/components/cot-position-table";
 import { MetricCard } from "@/components/metric-card";
 import { PageIntro } from "@/components/page-intro";
 import { SectionCard } from "@/components/section-card";
-import { formatCompactNumber } from "@/lib/format";
+import { buildCotPositionRows } from "@/lib/cot";
 import { loadDashboardSnapshot } from "@/lib/data/dashboard";
+import { formatCompactNumber } from "@/lib/format";
 
 function buildCotLineOption(labels: string[], longs: number[], shorts: number[]): EChartsOption {
   return {
@@ -58,6 +60,10 @@ export default async function CotPage() {
   const snapshot = await loadDashboardSnapshot();
   const combined = snapshot.cotSeries.find((entry) => entry.reportType === "combined")!;
   const futuresOnly = snapshot.cotSeries.find((entry) => entry.reportType === "futures_only")!;
+  const cotRows = buildCotPositionRows(combined.snapshots);
+  const latestCotRow = cotRows[0];
+  const visibleTableRows = cotRows.slice(0, 16);
+  const visibleChartRows = visibleTableRows.slice().reverse();
 
   return (
     <div className="space-y-6">
@@ -70,15 +76,15 @@ export default async function CotPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         <MetricCard
           label="Комбинирана нетна позиция"
-          value={formatCompactNumber(combined.snapshots[0].managedMoneyNet)}
-          hint={`Отворен интерес ${formatCompactNumber(combined.snapshots[0].openInterest)}`}
+          value={formatCompactNumber(latestCotRow.net)}
+          hint={`Отворен интерес ${formatCompactNumber(latestCotRow.openInterest)}`}
           accent="gold"
         />
         <MetricCard
           label="Седмична промяна"
-          value={formatCompactNumber(combined.snapshots[0].weeklyDelta)}
+          value={formatCompactNumber(latestCotRow.changeNet)}
           hint="Промяна в нетната позиция спрямо предишната седмица"
-          accent={combined.snapshots[0].weeklyDelta >= 0 ? "green" : "red"}
+          accent={latestCotRow.changeNet >= 0 ? "green" : "red"}
         />
         <MetricCard
           label="Нетно само фючърси"
@@ -88,32 +94,56 @@ export default async function CotPage() {
         />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-        <SectionCard title="Спекуланти срещу хеджъри" eyebrow="Комбиниран COT отчет">
-          <BaseChart
-            height={320}
-            option={buildCotLineOption(
-              combined.snapshots.map((entry) => entry.reportDate.slice(5)).reverse(),
-              combined.snapshots.map((entry) => entry.managedMoneyNet).reverse(),
-              combined.snapshots.map((entry) => entry.producerNet).reverse(),
-            )}
-          />
-        </SectionCard>
+      <SectionCard title="Спекуланти срещу хеджъри" eyebrow="Комбиниран COT отчет">
+        <BaseChart
+          height={330}
+          option={buildCotLineOption(
+            combined.snapshots.map((entry) => entry.reportDate.slice(5)).reverse(),
+            combined.snapshots.map((entry) => entry.managedMoneyNet).reverse(),
+            combined.snapshots.map((entry) => entry.producerNet).reverse(),
+          )}
+        />
+      </SectionCard>
 
-        <SectionCard title="Седмична промяна в позиционирането" eyebrow="Импулс в нетната позиция">
-          <CotDeltaChart
-            height={320}
-            labels={combined.snapshots.map((entry) => entry.reportDate.slice(5)).reverse()}
-            deltas={combined.snapshots.map((entry) => entry.weeklyDelta).reverse()}
-          />
-          <div className="mt-5 rounded-[22px] border border-white/8 bg-white/[0.03] p-4 text-sm leading-7 text-slate-300">
-            Графиката показва седмичната промяна в нетната позиция на спекулативните участници.
-            Зелен бар означава увеличение на нетната дълга позиция, а червен бар означава намаление.
-            Точната стойност се вижда при hover върху бара; това е краен нетен ефект, не разделение по
-            нови и затворени long/short позиции.
+      <SectionCard title="Седмична промяна в позиционирането" eyebrow="Импулс в нетната позиция">
+        <CotDeltaChart height={390} rows={visibleChartRows} />
+        <div className="mt-5 grid gap-3 text-sm leading-7 text-slate-300 lg:grid-cols-3">
+          <div className="rounded-[18px] border border-emerald-300/10 bg-emerald-400/8 p-4">
+            <span className="font-semibold text-emerald-200">Зелен бар</span> означава, че нетната дълга
+            позиция на managed money участниците се увеличава.
           </div>
-        </SectionCard>
-      </div>
+          <div className="rounded-[18px] border border-rose-300/10 bg-rose-400/8 p-4">
+            <span className="font-semibold text-rose-200">Червен бар</span> означава, че нетната дълга
+            позиция намалява или short страната натежава.
+          </div>
+          <div className="rounded-[18px] border border-white/8 bg-white/[0.03] p-4">
+            Точните числа за long, short и open interest се виждат при hover или click върху всеки бар.
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Седмична COT таблица" eyebrow="Официални CFTC данни за злато">
+        <CotPositionTable rows={visibleTableRows} />
+        <div className="mt-5 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="rounded-[22px] border border-white/8 bg-white/[0.03] p-5 text-sm leading-7 text-slate-300">
+            Таблицата сравнява всяка отчетна седмица с предишната. `Long` и `Short` са отчетените
+            спекулативни позиции, `Net позиция` е Long минус Short, а `% OI` показва какъв дял от
+            общия open interest държи съответната страна.
+          </div>
+          <div className="rounded-[22px] border border-amber-300/15 bg-amber-300/8 p-5 text-sm leading-7 text-amber-50/90">
+            CFTC не публикува директно колко сделки са “новоотворени” или “затворени”. Затова тук
+            показваме коректната седмична промяна в отчетените позиции, обновена при нов COT release.
+            <a
+              href={combined.snapshots[0].sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-3 block font-semibold text-amber-200 hover:text-amber-100"
+            >
+              Официален CFTC източник
+            </a>
+          </div>
+        </div>
+      </SectionCard>
 
       <SectionCard title="Как да се чете" eyebrow="Интерпретация">
         <div className="grid gap-4 lg:grid-cols-3">
