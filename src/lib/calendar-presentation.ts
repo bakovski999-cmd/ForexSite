@@ -1,0 +1,230 @@
+import type { CalendarRelevance, DriverTag, EconomicCalendarEvent, NewsAnalysis } from "@/lib/types";
+
+export const pendingActualLabel = "чака се";
+export const unavailableFreeForecastLabel = "Няма безплатен консенсус";
+
+type CalendarValuePanel = {
+  key: "latest" | "forecast" | "actual";
+  label: string;
+  value: string;
+  hint?: string;
+};
+
+type CalendarEventDriverDetail = {
+  key: DriverTag;
+  label: string;
+  description: string;
+};
+
+export type CalendarEventDetail = {
+  meaning: string;
+  goldImpact: string;
+  example: string;
+  driverDetails: CalendarEventDriverDetail[];
+};
+
+const driverDetailCopy: Record<DriverTag, CalendarEventDriverDetail> = {
+  usd: {
+    key: "usd",
+    label: "USD",
+    description: "Златото се котира в долари, затова по-силен USD често прави XAU по-тежък за купувачи извън САЩ.",
+  },
+  real_yields: {
+    key: "real_yields",
+    label: "Реални доходности",
+    description: "Когато реалните доходности се качват, златото губи част от привлекателността си, защото не носи лихва.",
+  },
+  nominal_yields: {
+    key: "nominal_yields",
+    label: "Номинални доходности",
+    description: "Движението в държавните облигации влияе на очакванията за лихви и на краткосрочния натиск върху XAU.",
+  },
+  inflation: {
+    key: "inflation",
+    label: "Инфлация",
+    description: "Инфлацията променя очакванията за Fed и реалната покупателна сила, което е централен канал за златото.",
+  },
+  fed: {
+    key: "fed",
+    label: "Fed",
+    description: "По-мек Fed обикновено сваля лихвените очаквания, а по-твърд Fed подкрепя доходностите и долара.",
+  },
+  geopolitics: {
+    key: "geopolitics",
+    label: "Геополитика",
+    description: "Геополитическото напрежение може да вдигне търсенето на защитни активи, включително злато.",
+  },
+  risk: {
+    key: "risk",
+    label: "Risk sentiment",
+    description: "Когато пазарът търси защита, златото често получава подкрепа; при силен risk-on ефектът може да отслабне.",
+  },
+  physical_demand: {
+    key: "physical_demand",
+    label: "Физическо търсене",
+    description: "Покупките от централни банки, бижутерският сектор и физическите пазари влияят върху по-дългия баланс.",
+  },
+  positioning: {
+    key: "positioning",
+    label: "Позициониране",
+    description: "Когато големи участници са силно натрупани в една посока, реакцията след новина може да се ускори.",
+  },
+  technical: {
+    key: "technical",
+    label: "Технически режим",
+    description: "Новината може да отключи пробив или отхвърляне около важни нива, ако пазарът вече е напрегнат.",
+  },
+};
+
+export function isStrongGoldCalendarEvent(
+  event: Pick<EconomicCalendarEvent, "impact" | "relevance">,
+) {
+  return event.impact === "high" && isHighGoldRelevance(event.relevance);
+}
+
+function isHighGoldRelevance(relevance: CalendarRelevance) {
+  return relevance === "direct" || relevance === "strong";
+}
+
+export function isStrongGoldNews(
+  analysis: Pick<NewsAnalysis, "confidence" | "directionalScore" | "impactDirection">,
+) {
+  return (
+    analysis.impactDirection !== "neutral" &&
+    analysis.impactDirection !== "mixed" &&
+    analysis.confidence >= 0.6 &&
+    Math.abs(analysis.directionalScore) >= 0.45
+  );
+}
+
+export function getGoldNewsImpactScore(
+  analysis: Pick<NewsAnalysis, "confidence" | "directionalScore" | "impactDirection">,
+) {
+  if (analysis.impactDirection === "neutral" || analysis.impactDirection === "mixed") {
+    return 0;
+  }
+
+  return Math.abs(analysis.directionalScore) * analysis.confidence;
+}
+
+export function getCalendarValuePanels(event: EconomicCalendarEvent): CalendarValuePanel[] {
+  const forecastValue =
+    event.forecast ??
+    (event.forecastStatus === "unavailable_free" ? unavailableFreeForecastLabel : "-");
+
+  return [
+    {
+      key: "latest",
+      label: "Последна",
+      value: event.latestActual ?? event.previous ?? "-",
+      hint: event.latestActualPeriod
+        ? `Официална стойност за ${event.latestActualPeriod}`
+        : "Последна налична стойност",
+    },
+    {
+      key: "forecast",
+      label: "Очаквана",
+      value: forecastValue,
+      hint: event.forecast ? "Консенсус/прогноза" : "Без надежден free forecast",
+    },
+    {
+      key: "actual",
+      label: "Нов факт",
+      value: event.actual ?? pendingActualLabel,
+      hint: event.actual ? "Публикувана стойност" : "Ще се обнови при release",
+    },
+  ];
+}
+
+export function getCalendarEventDetail(event: EconomicCalendarEvent): CalendarEventDetail {
+  const valueContext = getValueContext(event);
+
+  if (event.eventType === "central_bank") {
+    return {
+      meaning:
+        "Това е събитие за централна банка или лихвена политика. Пазарът следи не само самото решение, а и тона: дали Fed звучи по-меко, по-твърдо или оставя вратата отворена за по-дълго високи лихви.",
+      goldImpact:
+        "За златото основният канал е през реални доходности, USD и очакванията за бъдещите лихви. По-ниски очаквания за лихви обикновено помагат на XAU, а по-високи доходности и по-силен долар често го ограничават.",
+      example:
+        `Пример: ако Fed запази лихвата, но говори по-меко от очакваното, доларът и доходностите могат да отслабнат и това да подкрепи златото. ${valueContext}`,
+      driverDetails: getDriverDetails(event),
+    };
+  }
+
+  if (event.eventType === "inflation") {
+    return {
+      meaning:
+        "Това е инфлационна новина. Тя показва дали ценовият натиск се охлажда или остава твърде силен, което веднага променя Fed очакванията за следващите лихвени решения.",
+      goldImpact:
+        "Златото реагира през real-yield канала: по-мека инфлация може да свали реалните доходности и да помогне на XAU, докато по-гореща инфлация може да върне страх от по-твърд Fed и да натисне златото.",
+      example:
+        `Пример: ако CPI излезе под очакванията, пазарът може да заложи на по-ранно облекчаване от Fed; това често отслабва USD и подкрепя златото. ${valueContext}`,
+      driverDetails: getDriverDetails(event),
+    };
+  }
+
+  if (event.eventType === "employment") {
+    return {
+      meaning:
+        "Това е новина за трудовия пазар. Тя показва колко силна е икономиката и дали Fed има причина да остане твърд, или може да си позволи по-мека политика.",
+      goldImpact:
+        "При employment данните XAU реагира през USD, доходности и risk sentiment. Много силен трудов пазар често подкрепя долара и доходностите, а слаб трудов пазар може да засили очакванията за по-мек Fed.",
+      example:
+        `Пример: ако NFP или заетостта излезе по-слаба от прогнозата, доходностите могат да паднат и златото да получи подкрепа. ${valueContext}`,
+      driverDetails: getDriverDetails(event),
+    };
+  }
+
+  if (event.eventType === "bonds") {
+    return {
+      meaning:
+        "Това е събитие около облигации, доходности или аукциони. То показва как пазарът оценява цената на парите и търсенето на държавен дълг.",
+      goldImpact:
+        "Златото е чувствително към доходностите. Ако доходностите се качат, алтернативната цена да държиш XAU се повишава; ако паднат, златото често получава въздух.",
+      example:
+        `Пример: слаб аукцион или скок в доходностите може да натисне XAU, докато спад в доходностите може да го подкрепи. ${valueContext}`,
+      driverDetails: getDriverDetails(event),
+    };
+  }
+
+  if (event.eventType === "growth" || event.eventType === "business_surveys" || event.eventType === "consumer_surveys") {
+    return {
+      meaning:
+        "Това е новина за икономическа активност, доверие или растеж. Тя помага на пазара да прецени дали икономиката се ускорява, охлажда или навлиза в по-рискова фаза.",
+      goldImpact:
+        "При тези данни златото реагира най-често през USD, номинални доходности и risk sentiment. По-силни данни могат да подкрепят долара, а по-слаби данни могат да засилят търсенето на защита.",
+      example:
+        `Пример: ако GDP, PMI или доверие излезе много под очакванията, пазарът може да потърси защита и XAU да се подкрепи, особено ако доходностите падат. ${valueContext}`,
+      driverDetails: getDriverDetails(event),
+    };
+  }
+
+  return {
+    meaning:
+      "Това събитие е част от макро фона, който може да промени очакванията за долара, лихвите, риска или търсенето на защитни активи.",
+    goldImpact:
+      event.explanationBg ||
+      "Златото реагира, когато новината промени баланса между USD, доходности, Fed очаквания и risk sentiment.",
+    example:
+      `Пример: резултат под очакванията често се чете като по-мек макро сигнал, а резултат над очакванията като по-силен макро сигнал. Реакцията зависи от това кой драйвер доминира след публикуването. ${valueContext}`,
+    driverDetails: getDriverDetails(event),
+  };
+}
+
+function getDriverDetails(event: EconomicCalendarEvent) {
+  return event.affectedDrivers.map((driver) => driverDetailCopy[driver] ?? {
+    key: driver,
+    label: driver,
+    description: "Този драйвер участва в общата оценка за потенциалната реакция на XAU.",
+  });
+}
+
+function getValueContext(event: EconomicCalendarEvent) {
+  const latest = event.latestActual ?? event.previous;
+  const forecast =
+    event.forecast ??
+    (event.forecastStatus === "unavailable_free" ? unavailableFreeForecastLabel : undefined);
+  const actual = event.actual ?? pendingActualLabel;
+
+  return `В момента: последна стойност ${latest ?? "-"}, очаквана ${forecast ?? "-"}, нов факт ${actual}.`;
+}

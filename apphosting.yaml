@@ -1,0 +1,16 @@
+runConfig:
+  minInstances: 0
+  maxInstances: 1
+  memoryMiB: 512
+
+env:
+  - variable: NEXT_PUBLIC_ENABLE_DEMO_MODE
+    value: "false"
+  - variable: FIREBASE_ADMIN_ENABLED
+    value: "true"
+  - variable: OPENAI_MODEL
+    value: "gpt-4o-mini"
+
+# Configure the remaining public Firebase web config and private API keys
+# in Firebase App Hosting > Backend > Settings > Environment.
+# Store private keys as App Hosting secrets, not plaintext values.
