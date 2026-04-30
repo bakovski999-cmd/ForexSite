@@ -1,5 +1,7 @@
 import type { CotSnapshot } from "@/lib/types";
 
+export type CotChangeTone = "positive" | "negative" | "neutral";
+
 export interface CotPositionRow {
   id: string;
   reportDate: string;
@@ -38,6 +40,18 @@ function computeDelta(current: number, previous?: number) {
   }
 
   return current - previous;
+}
+
+export function getCotChangeTone(value: number): CotChangeTone {
+  if (value > 0) {
+    return "positive";
+  }
+
+  if (value < 0) {
+    return "negative";
+  }
+
+  return "neutral";
 }
 
 export function buildCotPositionRows(snapshots: CotSnapshot[]): CotPositionRow[] {

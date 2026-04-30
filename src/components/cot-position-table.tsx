@@ -4,10 +4,15 @@ import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 
-import { buildCotPositionAnalysis, type CotPositionRow } from "@/lib/cot";
+import {
+  buildCotPositionAnalysis,
+  getCotChangeTone,
+  type CotChangeTone,
+  type CotPositionRow,
+} from "@/lib/cot";
 import { cn } from "@/lib/utils";
 
-type Tone = "positive" | "negative" | "neutral" | "long" | "short";
+type Tone = CotChangeTone | "long" | "short";
 
 const numberFormatter = new Intl.NumberFormat("bg-BG");
 
@@ -29,15 +34,6 @@ function formatPercent(value: number) {
   return `${value.toFixed(1)}%`;
 }
 
-function toneForDelta(value: number, bullishWhenPositive = true): Tone {
-  if (value === 0) {
-    return "neutral";
-  }
-
-  const isPositive = bullishWhenPositive ? value > 0 : value < 0;
-  return isPositive ? "positive" : "negative";
-}
-
 function toneClass(tone: Tone) {
   switch (tone) {
     case "positive":
@@ -50,6 +46,17 @@ function toneClass(tone: Tone) {
       return "border-rose-300/10 bg-rose-400/8 text-rose-100";
     default:
       return "border-white/8 bg-white/[0.035] text-slate-200";
+  }
+}
+
+function deltaTextClass(tone: CotChangeTone) {
+  switch (tone) {
+    case "positive":
+      return "text-emerald-200";
+    case "negative":
+      return "text-rose-200";
+    default:
+      return "text-slate-200";
   }
 }
 
@@ -87,7 +94,13 @@ export function CotPositionTable({ rows }: { rows: CotPositionRow[] }) {
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-400">
-        <p>Натисни върху COT ред, за да видиш подробен анализ спрямо предишната седмица.</p>
+        <div className="max-w-3xl space-y-1">
+          <p>Натисни върху COT ред, за да видиш подробен анализ спрямо предишната седмица.</p>
+          <p>
+            Цветът в колоните “Промяна” показва знака на числото: плюс е зелено, минус е червено.
+            Пазарният ефект е обяснен в анализа при клик.
+          </p>
+        </div>
         <span className="rounded-full border border-amber-300/15 bg-amber-300/8 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-amber-200">
           Click за анализ
         </span>
@@ -128,16 +141,16 @@ export function CotPositionTable({ rows }: { rows: CotPositionRow[] }) {
                 </ValueCell>
                 <ValueCell tone="long">{formatNumber(row.long)}</ValueCell>
                 <ValueCell tone="short">{formatNumber(row.short)}</ValueCell>
-                <ValueCell tone={toneForDelta(row.changeLong)}>
+                <ValueCell tone={getCotChangeTone(row.changeLong)}>
                   {formatSignedNumber(row.changeLong)}
                 </ValueCell>
-                <ValueCell tone={toneForDelta(row.changeShort, false)}>
+                <ValueCell tone={getCotChangeTone(row.changeShort)}>
                   {formatSignedNumber(row.changeShort)}
                 </ValueCell>
                 <ValueCell tone={row.net >= 0 ? "positive" : "negative"}>
                   {formatSignedNumber(row.net)}
                 </ValueCell>
-                <ValueCell tone={toneForDelta(row.changeNet)}>
+                <ValueCell tone={getCotChangeTone(row.changeNet)}>
                   {formatSignedNumber(row.changeNet)}
                 </ValueCell>
                 <ValueCell tone="long">{formatPercent(row.longOpenInterestShare)}</ValueCell>
@@ -184,10 +197,34 @@ export function CotPositionTable({ rows }: { rows: CotPositionRow[] }) {
             </div>
 
             <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <MetricPill label="Long" value={formatNumber(selectedRow.long)} delta={formatSignedNumber(selectedRow.changeLong)} tone="long" />
-              <MetricPill label="Short" value={formatNumber(selectedRow.short)} delta={formatSignedNumber(selectedRow.changeShort)} tone="short" />
-              <MetricPill label="Net" value={formatSignedNumber(selectedRow.net)} delta={formatSignedNumber(selectedRow.changeNet)} tone={selectedRow.changeNet >= 0 ? "positive" : "negative"} />
-              <MetricPill label="Open Interest" value={formatNumber(selectedRow.openInterest)} delta={formatSignedNumber(selectedRow.changeOpenInterest)} tone="neutral" />
+              <MetricPill
+                label="Long"
+                value={formatNumber(selectedRow.long)}
+                delta={formatSignedNumber(selectedRow.changeLong)}
+                tone="long"
+                deltaTone={getCotChangeTone(selectedRow.changeLong)}
+              />
+              <MetricPill
+                label="Short"
+                value={formatNumber(selectedRow.short)}
+                delta={formatSignedNumber(selectedRow.changeShort)}
+                tone="short"
+                deltaTone={getCotChangeTone(selectedRow.changeShort)}
+              />
+              <MetricPill
+                label="Net"
+                value={formatSignedNumber(selectedRow.net)}
+                delta={formatSignedNumber(selectedRow.changeNet)}
+                tone={selectedRow.changeNet >= 0 ? "positive" : "negative"}
+                deltaTone={getCotChangeTone(selectedRow.changeNet)}
+              />
+              <MetricPill
+                label="Open Interest"
+                value={formatNumber(selectedRow.openInterest)}
+                delta={formatSignedNumber(selectedRow.changeOpenInterest)}
+                tone="neutral"
+                deltaTone={getCotChangeTone(selectedRow.changeOpenInterest)}
+              />
             </div>
 
             <div className="mt-6 grid gap-4 lg:grid-cols-2">
@@ -215,17 +252,21 @@ function MetricPill({
   value,
   delta,
   tone,
+  deltaTone,
 }: {
   label: string;
   value: string;
   delta: string;
   tone: Tone;
+  deltaTone: CotChangeTone;
 }) {
   return (
     <div className={cn("rounded-2xl border p-4", toneClass(tone))}>
       <p className="text-[11px] font-semibold uppercase tracking-[0.18em] opacity-70">{label}</p>
       <p className="mt-2 text-xl font-semibold tabular-nums">{value}</p>
-      <p className="mt-1 text-sm tabular-nums opacity-80">седмично {delta}</p>
+      <p className={cn("mt-1 text-sm font-semibold tabular-nums", deltaTextClass(deltaTone))}>
+        седмично {delta}
+      </p>
     </div>
   );
 }

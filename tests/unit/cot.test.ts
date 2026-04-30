@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { buildCotPositionAnalysis, buildCotPositionRows, describeCotDelta } from "@/lib/cot";
+import {
+  buildCotPositionAnalysis,
+  buildCotPositionRows,
+  describeCotDelta,
+  getCotChangeTone,
+} from "@/lib/cot";
 import type { CotSnapshot } from "@/lib/types";
 
 function makeSnapshot(overrides: Partial<CotSnapshot>): CotSnapshot {
@@ -80,6 +85,12 @@ describe("COT positioning helpers", () => {
     expect(describeCotDelta({ changeLong: 0, changeShort: 0, changeNet: 0 })).toContain(
       "без седмична промяна",
     );
+  });
+
+  test("colors COT change values by mathematical sign", () => {
+    expect(getCotChangeTone(622)).toBe("positive");
+    expect(getCotChangeTone(-2730)).toBe("negative");
+    expect(getCotChangeTone(0)).toBe("neutral");
   });
 
   test("builds a detailed Bulgarian COT comparison analysis", () => {
