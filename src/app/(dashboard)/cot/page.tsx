@@ -103,6 +103,50 @@ export default async function CotPage() {
             combined.snapshots.map((entry) => entry.producerNet).reverse(),
           )}
         />
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-[22px] border border-amber-300/15 bg-amber-300/8 p-5">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-200">
+              Спекулативна нетна позиция
+            </p>
+            <p className="mt-3 text-sm leading-7 text-slate-200">
+              Това е позицията на managed money участниците: фондове, CTA стратегии и други големи
+              спекулативни играчи. Сметката е Long минус Short. Когато линията е положителна и се
+              качва, спекулантите добавят повече bullish експозиция към златото. Когато пада, те
+              намаляват long натиска или добавят short позиции.
+            </p>
+          </div>
+          <div className="rounded-[22px] border border-sky-300/15 bg-sky-400/8 p-5">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-200">
+              Производители / хеджъри
+            </p>
+            <p className="mt-3 text-sm leading-7 text-slate-200">
+              Това са участници, които често използват фючърсите за защита на реален бизнес риск:
+              производители, търговци и хеджиращи структури. При златото тази линия често е
+              отрицателна, защото хеджърите продават фючърси, за да заключат цена. Това не е директна
+              прогноза, а показва колко агресивно реалният сектор се застрахова.
+            </p>
+          </div>
+          <div className="rounded-[22px] border border-emerald-300/12 bg-emerald-400/8 p-5">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-200">
+              Как се чете bullish
+            </p>
+            <p className="mt-3 text-sm leading-7 text-slate-200">
+              Най-чистият bullish прочит е когато спекулативната net позиция расте, long позициите се
+              увеличават, short позициите не растат силно, а open interest също се разширява. Това
+              подсказва, че в движението влиза нов капитал, а не само че стари позиции се затварят.
+            </p>
+          </div>
+          <div className="rounded-[22px] border border-rose-300/12 bg-rose-400/8 p-5">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-rose-200">
+              Как се чете охлаждане
+            </p>
+            <p className="mt-3 text-sm leading-7 text-slate-200">
+              Ако спекулативната net позиция остава положителна, но започне да пада, това е охлаждане,
+              не задължително bearish сигнал. По-сериозно предупреждение има, когато long позициите
+              падат, short позициите растат и open interest не подкрепя нов възходящ поток.
+            </p>
+          </div>
+        </div>
       </SectionCard>
 
       <SectionCard title="Седмична промяна в позиционирането" eyebrow="Импулс в нетната позиция">
@@ -150,16 +194,17 @@ export default async function CotPage() {
           <div className="rounded-[22px] border border-white/8 bg-white/[0.03] p-5">
             <p className="text-sm font-medium text-white">Спекулативни участници</p>
             <p className="mt-3 text-sm leading-7 text-slate-300">
-              Нетната дълга книга остава положителна. Това подсказва, че спекулативният сегмент още не е
-              изпуснал възходящата теза, макар и екстремите да са по-умерени спрямо пика.
+              Положителна net позиция означава, че спекулантите държат повече long, отколкото short.
+              Това е подкрепящ фон за златото, но най-важна е промяната: дали net позицията расте или
+              отслабва спрямо предишната седмица.
             </p>
           </div>
           <div className="rounded-[22px] border border-white/8 bg-white/[0.03] p-5">
             <p className="text-sm font-medium text-white">Производители / хеджъри</p>
             <p className="mt-3 text-sm leading-7 text-slate-300">
-              Нетната позиция на производители и търговци остава дълбоко отрицателна, което е типично
-              за хеджиращата страна при силна цена. Това не е самостоятелен низходящ сигнал, но казва,
-              че спот ралито се застрахова.
+              Отрицателна позиция при хеджърите е нормална за златото и често означава защита срещу
+              ценови риск. Ако хеджиращата отрицателна позиция се задълбочава при силна цена, това
+              показва повече застраховане, не задължително директен сигнал за спад.
             </p>
           </div>
           <div className="rounded-[22px] border border-white/8 bg-white/[0.03] p-5">
