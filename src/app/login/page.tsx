@@ -46,7 +46,7 @@ export default async function LoginPage() {
               <ShieldCheck className="size-5 text-emerald-200" />
               <p className="mt-4 text-lg font-semibold text-white">Лично приложение</p>
               <p className="mt-2 text-sm leading-6 text-slate-300">
-                Входът е затворен и е подготвен за Firebase удостоверяване.
+                Вход с email и парола, плюс регистрация през Supabase.
               </p>
             </div>
             <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-5">
@@ -69,7 +69,7 @@ export default async function LoginPage() {
               {isFirebaseConfigured && !isDemoModeEnabled
                 ? "Приложението използва Firebase Auth. Въведи email и парола от твоя Firebase потребител."
                 : isSupabaseConfigured && !isDemoModeEnabled
-                  ? "Приложението е готово за Supabase вход с email и парола. Въведи валидните акаунт данни."
+                  ? "Влез със Supabase акаунт или създай нов профил с email и парола."
                   : "В момента приложението е в демо режим, докато включиш production auth и постоянна база."}
             </p>
 
@@ -85,6 +85,7 @@ export default async function LoginPage() {
                       : "Supabase вход"
                 }
                 authProvider={!isDemoModeEnabled && isFirebaseConfigured ? "firebase" : "server"}
+                canRegister={!isDemoModeEnabled && isSupabaseConfigured && !isFirebaseConfigured}
               />
             </div>
           </div>
