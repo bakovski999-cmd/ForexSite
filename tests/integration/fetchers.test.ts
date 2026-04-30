@@ -8,7 +8,11 @@ import {
 } from "@/lib/data/fetchers/economic-calendar";
 import { mapFredSeries } from "@/lib/data/fetchers/fred";
 import { normalizeGdeltArticles } from "@/lib/data/fetchers/gdelt";
-import { mapYahooGoldHistory, parseStooqXauUsdQuote } from "@/lib/data/fetchers/market-price";
+import {
+  mapYahooGoldHistory,
+  parseGoldApiXauQuote,
+  parseStooqXauUsdQuote,
+} from "@/lib/data/fetchers/market-price";
 import { analyzeNewsItem } from "@/lib/data/fetchers/openai";
 import { syncDashboardSnapshot } from "@/lib/data/sync";
 
@@ -68,6 +72,17 @@ describe("market data normalization", () => {
 
     expect(quote.date).toBe("2026-04-27");
     expect(quote.close).toBe(4719.615);
+  });
+
+  test("Gold API XAU quote parser maps the fallback live format", () => {
+    const quote = parseGoldApiXauQuote({
+      price: 4565.299805,
+      updatedAt: "2026-04-30T06:07:02Z",
+    });
+
+    expect(quote.date).toBe("2026-04-30");
+    expect(quote.time).toBe("06:07:02");
+    expect(quote.close).toBe(4565.299805);
   });
 
   test("Yahoo GC futures chart maps daily history points", () => {

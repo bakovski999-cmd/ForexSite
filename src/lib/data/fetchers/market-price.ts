@@ -4,6 +4,7 @@ import type { GoldPriceSnapshot, PricePoint } from "@/lib/types";
 import { clamp } from "@/lib/utils";
 
 const STOOQ_XAUUSD_URL = "https://stooq.com/q/l/?s=xauusd&f=sd2t2ohlcv&h&e=csv";
+const GOLD_API_XAU_URL = "https://api.gold-api.com/price/XAU";
 const YAHOO_GOLD_FUTURES_URL = "https://query1.finance.yahoo.com/v8/finance/chart/GC=F?range=1mo&interval=1d";
 
 type StooqQuoteRow = {
@@ -21,6 +22,12 @@ type StooqQuote = {
   date: string;
   time: string;
   close: number;
+  source: string;
+};
+
+type GoldApiPayload = {
+  price?: number;
+  updatedAt?: string;
 };
 
 type YahooChartPayload = {
@@ -54,6 +61,25 @@ export function parseStooqXauUsdQuote(csvText: string) {
     date: row.Date,
     time: row.Time,
     close,
+    source: "Stooq XAU/USD spot",
+  } satisfies StooqQuote;
+}
+
+export function parseGoldApiXauQuote(payload: GoldApiPayload) {
+  const close = Number(payload.price);
+  const timestamp = payload.updatedAt ? new Date(payload.updatedAt) : new Date();
+
+  if (!Number.isFinite(close) || close <= 0 || Number.isNaN(timestamp.getTime())) {
+    throw new Error("Gold API XAU quote did not include a valid live price.");
+  }
+
+  const iso = timestamp.toISOString();
+
+  return {
+    date: iso.slice(0, 10),
+    time: iso.slice(11, 19),
+    close,
+    source: "Gold API XAU/USD spot",
   } satisfies StooqQuote;
 }
 
@@ -109,7 +135,7 @@ function derivePriceSnapshot(history: PricePoint[], quote: StooqQuote) {
     monthlyChangePct: Number(monthlyChangePct.toFixed(2)),
     regime,
     regimeScore: Number(regimeScore.toFixed(3)),
-    source: "Stooq XAU/USD spot + Yahoo GC=F history",
+    source: history.length ? `${quote.source} + Yahoo GC=F history` : quote.source,
     history: points,
   } satisfies GoldPriceSnapshot;
 }
@@ -127,6 +153,27 @@ async function fetchStooqQuote() {
   return parseStooqXauUsdQuote(await response.text());
 }
 
+async function fetchGoldApiQuote() {
+  const response = await fetch(GOLD_API_XAU_URL, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(12000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gold API XAU quote request failed: ${response.status}`);
+  }
+
+  return parseGoldApiXauQuote((await response.json()) as GoldApiPayload);
+}
+
+async function fetchSpotQuote() {
+  try {
+    return await fetchStooqQuote();
+  } catch {
+    return fetchGoldApiQuote();
+  }
+}
+
 async function fetchYahooHistory() {
   const response = await fetch(YAHOO_GOLD_FUTURES_URL, {
     cache: "no-store",
@@ -141,7 +188,7 @@ async function fetchYahooHistory() {
 }
 
 export async function fetchGoldPriceSnapshot() {
-  const quote = await fetchStooqQuote();
+  const quote = await fetchSpotQuote();
   const history = await fetchYahooHistory();
 
   return derivePriceSnapshot(history, quote);
