@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { buildCotPositionRows, describeCotDelta } from "@/lib/cot";
+import { buildCotPositionAnalysis, buildCotPositionRows, describeCotDelta } from "@/lib/cot";
 import type { CotSnapshot } from "@/lib/types";
 
 function makeSnapshot(overrides: Partial<CotSnapshot>): CotSnapshot {
@@ -48,6 +48,8 @@ describe("COT positioning helpers", () => {
     expect(rows[0].changeShort).toBe(0);
     expect(rows[0].changeNet).toBe(30);
     expect(rows[0].changeOpenInterest).toBe(100);
+    expect(rows[0].previousReportDate).toBe("2026-04-14");
+    expect(rows[0].previousLong).toBe(390);
     expect(rows[0].longOpenInterestShare).toBeCloseTo(38.18, 2);
     expect(rows[0].shortOpenInterestShare).toBeCloseTo(14.55, 2);
   });
@@ -78,5 +80,35 @@ describe("COT positioning helpers", () => {
     expect(describeCotDelta({ changeLong: 0, changeShort: 0, changeNet: 0 })).toContain(
       "без седмична промяна",
     );
+  });
+
+  test("builds a detailed Bulgarian COT comparison analysis", () => {
+    const row = buildCotPositionRows([
+      makeSnapshot({
+        id: "combined-2026-04-21",
+        reportDate: "2026-04-21",
+        openInterest: 556894,
+        managedMoneyLong: 125908,
+        managedMoneyShort: 30410,
+        managedMoneyNet: 95498,
+        weeklyDelta: -3352,
+      }),
+      makeSnapshot({
+        id: "combined-2026-04-14",
+        reportDate: "2026-04-14",
+        openInterest: 565169,
+        managedMoneyLong: 128638,
+        managedMoneyShort: 29788,
+        managedMoneyNet: 98850,
+      }),
+    ])[0];
+    const analysis = buildCotPositionAnalysis(row);
+
+    expect(analysis.comparisonLabel).toContain("21.04.2026");
+    expect(analysis.comparisonLabel).toContain("14.04.2026");
+    expect(analysis.bias).toBe("cooling");
+    expect(analysis.longAnalysis).toContain("Long позициите");
+    expect(analysis.shortAnalysis).toContain("Short позициите");
+    expect(analysis.conclusion).toContain("златото все още има спекулативна long подкрепа");
   });
 });
