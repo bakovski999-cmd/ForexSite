@@ -13,6 +13,13 @@ import { getDashboardRepository } from "@/lib/data/repository";
 import { env, hasOpenAI } from "@/lib/env";
 import { isLiveCalendarEvent, isLiveNewsItem } from "@/lib/live-data";
 import { buildSignalRun } from "@/lib/scoring";
+import {
+  hasCotData,
+  hasLiveGdeltNews,
+  hasMacroData,
+  hasUsableLivePrice,
+  sourceHealthFromAttempt,
+} from "@/lib/source-health";
 import type { DashboardSnapshot, MacroSeries, NewsItem, SourceHealth, SyncRun } from "@/lib/types";
 
 function makeSyncRun(
@@ -43,6 +50,20 @@ function replaceAlphaVantageHealth(current: DashboardSnapshot, health: SourceHea
     alphaVantage: health,
     openai: (hasOpenAI ? "fresh" : "fallback") as SourceHealth,
   };
+}
+
+async function withRetry<T>(label: string, task: () => Promise<T>, attempts = 2) {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await task();
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(`${label} request failed.`);
 }
 
 function dedupeNewsItems(items: NewsItem[]) {
@@ -136,29 +157,39 @@ export async function syncDashboardSnapshot(options?: { force?: boolean }) {
   const shouldFetchPublicData = env.NODE_ENV !== "test";
 
   const [alphaResult, gdeltResult, cotCombinedResult, cotFuturesResult, macroResult] = await Promise.allSettled([
-    fetchAlphaVantageBundle(),
-    shouldFetchPublicData ? fetchGdeltGoldNews() : Promise.resolve([]),
-    shouldFetchPublicData ? fetchCotSeries("combined") : Promise.reject(new Error("Public CFTC sync skipped in tests")),
-    shouldFetchPublicData ? fetchCotSeries("futures_only") : Promise.reject(new Error("Public CFTC sync skipped in tests")),
+    withRetry("alpha-vantage", () => fetchAlphaVantageBundle(), 2),
+    shouldFetchPublicData ? withRetry("gdelt", () => fetchGdeltGoldNews(), 2) : Promise.resolve([]),
+    shouldFetchPublicData
+      ? withRetry("cftc-combined", () => fetchCotSeries("combined"), 2)
+      : Promise.reject(new Error("Public CFTC sync skipped in tests")),
+    shouldFetchPublicData
+      ? withRetry("cftc-futures", () => fetchCotSeries("futures_only"), 2)
+      : Promise.reject(new Error("Public CFTC sync skipped in tests")),
     env.FRED_API_KEY
-      ? Promise.all([
-          fetchFredSeries("DTWEXBGS"),
-          fetchFredSeries("DFII10"),
-          fetchFredSeries("DGS10"),
-          fetchFredSeries("FEDFUNDS"),
-          fetchFredSeries("CPIAUCSL"),
-        ])
+      ? withRetry("fred", () =>
+          Promise.all([
+            fetchFredSeries("DTWEXBGS"),
+            fetchFredSeries("DFII10"),
+            fetchFredSeries("DGS10"),
+            fetchFredSeries("FEDFUNDS"),
+            fetchFredSeries("CPIAUCSL"),
+          ]),
+        )
       : Promise.reject(new Error("Missing FRED_API_KEY")),
   ]);
 
   const alphaCandidate = alphaResult.status === "fulfilled" ? alphaResult.value : null;
+  const alphaHealth = sourceHealthFromAttempt(
+    alphaCandidate?.health === "fresh",
+    hasUsableLivePrice(current.price),
+  );
   const alpha =
     alphaCandidate?.health === "fresh"
       ? alphaCandidate
       : {
           price: current.price,
           news: alphaCandidate?.news ?? ([] as NewsItem[]),
-          health: "fallback" as const,
+          health: alphaHealth,
         };
   const gdeltNews = gdeltResult.status === "fulfilled" ? gdeltResult.value : [];
   const cotSeries =
@@ -168,13 +199,14 @@ export async function syncDashboardSnapshot(options?: { force?: boolean }) {
   const macroSeries: MacroSeries[] =
     macroResult.status === "fulfilled" ? macroResult.value : current.macroSeries;
   const normalizedNews = dedupeNewsItems([...alpha.news, ...gdeltNews].filter(isLiveNewsItem)).slice(0, 12);
-
-  const analyzedNews = await Promise.all(
-    normalizedNews.slice(0, 10).map(async (item) => {
-      const analysis = await analyzeNewsItem(item);
-      return { item, analysis };
-    }),
-  );
+  const analyzedNews = normalizedNews.length
+    ? await Promise.all(
+        normalizedNews.slice(0, 10).map(async (item) => {
+          const analysis = await analyzeNewsItem(item);
+          return { item, analysis };
+        }),
+      )
+    : current.news.slice(0, 10);
 
   const signal = buildSignalRun({
     news: analyzedNews,
@@ -194,12 +226,13 @@ export async function syncDashboardSnapshot(options?: { force?: boolean }) {
     signalHistory: [signal, ...current.signalHistory].slice(0, 8),
     staleFlags: {
       ...replaceAlphaVantageHealth(current, alpha.health),
-      gdelt: gdeltResult.status === "fulfilled" && gdeltNews.length ? "fresh" : "fallback",
-      fred: macroResult.status === "fulfilled" ? "fresh" : "fallback",
+      gdelt: sourceHealthFromAttempt(gdeltResult.status === "fulfilled", hasLiveGdeltNews(current.news)),
+      fred: sourceHealthFromAttempt(macroResult.status === "fulfilled", hasMacroData(current.macroSeries)),
       cftc:
-        cotCombinedResult.status === "fulfilled" && cotFuturesResult.status === "fulfilled"
-          ? "fresh"
-          : "stale",
+        sourceHealthFromAttempt(
+          cotCombinedResult.status === "fulfilled" && cotFuturesResult.status === "fulfilled",
+          hasCotData(current.cotSeries),
+        ),
     },
     syncRuns: mergeSyncRuns(
       current,
