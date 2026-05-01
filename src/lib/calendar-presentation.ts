@@ -126,7 +126,7 @@ export function getGoldNewsImpactScore(
 export function getCalendarDirectionPresentation(
   event: Pick<
     EconomicCalendarEvent,
-    "actual" | "actualStatus" | "eventType" | "expectedGoldImpact" | "forecast" | "title"
+    "actual" | "actualSource" | "actualStatus" | "eventType" | "expectedGoldImpact" | "forecast" | "title"
   >,
 ): CalendarDirectionPresentation {
   if (!event.actual) {
@@ -140,6 +140,13 @@ export function getCalendarDirectionPresentation(
     return {
       direction: "mixed",
       label: "Тонът е решаващ",
+    };
+  }
+
+  if (isPublishedReleasePackage(event)) {
+    return {
+      direction: "mixed",
+      label: "Пакет от данни",
     };
   }
 
@@ -371,6 +378,16 @@ function isToneBasedFedEvent(
   );
 }
 
+function isPublishedReleasePackage(
+  event: Pick<EconomicCalendarEvent, "actual" | "actualSource" | "title">,
+) {
+  return (
+    event.actual === "Публикувано" &&
+    event.actualSource === "FRED release calendar" &&
+    /(gross domestic product|personal income and outlays|retail sales|industrial production)/i.test(event.title)
+  );
+}
+
 function getReleaseAnalysis(event: EconomicCalendarEvent) {
   if (!event.actual) {
     if (event.actualStatus === "source_pending") {
@@ -383,6 +400,10 @@ function getReleaseAnalysis(event: EconomicCalendarEvent) {
   const actual = parseComparableValue(event.actual);
   const forecast = parseComparableValue(event.forecast);
   const source = event.actualSource ? ` Източник: ${event.actualSource}.` : "";
+
+  if (isPublishedReleasePackage(event)) {
+    return `Release пакетът е публикуван.${source} Този ред няма една обща actual стойност, защото съдържа няколко отделни показателя. За анализ гледай конкретните редове от същия release, например GDP, GDP Price Index, Core PCE, Personal Income или Spending, където има отделна стойност, очакване и прочит за златото.`;
+  }
 
   if (isToneBasedFedEvent(event)) {
     return `Събитието е публикувано, но то няма числова actual стойност като CPI или GDP.${source} Пазарът чете тона: дали Fed звучи по-меко, по-твърдо или потвърждава очакванията. Затова посоката идва от езика в statement-а, пресконференцията, реакцията на USD и доходностите.`;

@@ -1431,6 +1431,7 @@ function normalizeFredReleaseDate(
   const scenarios = officialScenarioFor(rule);
   const startsAt = dateTimeUtc(release.date, rule.timeUtc);
   const isFutureRelease = new Date(startsAt).getTime() > Date.now();
+  const isReleasePackage = !rule.blsFactKey;
   const title = rule.title;
   const event = {
     country: "САЩ",
@@ -1438,7 +1439,12 @@ function normalizeFredReleaseDate(
     startsAt,
     title,
   };
-  const actual = isFutureRelease ? undefined : fact?.actual;
+  const actual = isFutureRelease ? undefined : fact?.actual ?? (isReleasePackage ? "Публикувано" : undefined);
+  const actualSource = actual
+    ? fact
+      ? "FRED + BLS official data"
+      : "FRED release calendar"
+    : undefined;
 
   return {
     id: `fred-release-${release.release_id}-${release.date}`,
@@ -1451,9 +1457,9 @@ function normalizeFredReleaseDate(
     eventType: inferCalendarEventType(rule.title),
     relevance: rule.relevance,
     previous: fact?.previous,
-    forecastStatus: "unavailable_free",
+    forecastStatus: isReleasePackage ? "not_applicable" : "unavailable_free",
     actual,
-    actualSource: actual ? "FRED + BLS official data" : undefined,
+    actualSource,
     actualUpdatedAt: actual ? new Date().toISOString() : undefined,
     actualStatus: getCalendarActualStatus({ actual, startsAt }),
     latestActual: fact?.actual,

@@ -185,6 +185,30 @@ describe("calendar presentation", () => {
     expect(getCalendarEventDetail(event).releaseAnalysis).toContain("European Central Bank");
   });
 
+  test("marks published FRED package releases as data bundles", () => {
+    const event: EconomicCalendarEvent = {
+      ...baseEvent,
+      title: "Gross Domestic Product (GDP)",
+      eventType: "growth",
+      actual: "Публикувано",
+      actualStatus: "published",
+      actualSource: "FRED release calendar",
+      expectedGoldImpact: "mixed",
+      forecastStatus: "not_applicable",
+    };
+    const panels = getCalendarValuePanels(event);
+    const direction = getCalendarDirectionPresentation(event);
+    const detail = getCalendarEventDetail(event);
+
+    expect(panels.find((panel) => panel.key === "forecast")?.value).toBe("-");
+    expect(direction).toEqual({
+      direction: "mixed",
+      label: "Пакет от данни",
+    });
+    expect(detail.releaseAnalysis).toContain("няма една обща actual стойност");
+    expect(detail.releaseAnalysis).toContain("конкретните редове");
+  });
+
   test("explains employment events through USD, yields and risk sentiment", () => {
     const detail = getCalendarEventDetail({
       ...baseEvent,

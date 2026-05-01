@@ -154,6 +154,25 @@ describe("market data normalization", () => {
     expect(events[0].impact).toBe("high");
   });
 
+  test("FRED package releases become published instead of source-pending after release time", () => {
+    const events = mapFredReleaseDatesToCalendarEvents([
+      {
+        release_id: 53,
+        release_name: "Gross Domestic Product",
+        date: "2020-04-30",
+      },
+    ]);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      title: "Gross Domestic Product (GDP)",
+      forecastStatus: "not_applicable",
+      actual: "Публикувано",
+      actualSource: "FRED release calendar",
+      actualStatus: "published",
+    });
+  });
+
   test("ForexFactory weekly export maps all economic events and excludes holidays", () => {
     const events = mapForexFactoryCalendarItemsToEvents([
       {
