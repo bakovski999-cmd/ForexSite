@@ -1,4 +1,10 @@
-import type { CalendarRelevance, DriverTag, EconomicCalendarEvent, NewsAnalysis } from "@/lib/types";
+import type {
+  CalendarRelevance,
+  DriverTag,
+  EconomicCalendarEvent,
+  NewsAnalysis,
+  SignalDirection,
+} from "@/lib/types";
 
 export const pendingActualLabel = "чака се";
 export const sourcePendingActualLabel = "чака се от източника";
@@ -23,6 +29,11 @@ export type CalendarEventDetail = {
   example: string;
   releaseAnalysis: string;
   driverDetails: CalendarEventDriverDetail[];
+};
+
+export type CalendarDirectionPresentation = {
+  direction: SignalDirection;
+  label: string;
 };
 
 const driverDetailCopy: Record<DriverTag, CalendarEventDriverDetail> = {
@@ -107,6 +118,63 @@ export function getGoldNewsImpactScore(
   }
 
   return Math.abs(analysis.directionalScore) * analysis.confidence;
+}
+
+export function getCalendarDirectionPresentation(
+  event: Pick<
+    EconomicCalendarEvent,
+    "actual" | "actualStatus" | "eventType" | "expectedGoldImpact" | "forecast" | "title"
+  >,
+): CalendarDirectionPresentation {
+  if (!event.actual) {
+    return {
+      direction: event.expectedGoldImpact,
+      label: "Зависи от резултата",
+    };
+  }
+
+  if (isToneBasedFedEvent(event)) {
+    return {
+      direction: "mixed",
+      label: "Тонът е решаващ",
+    };
+  }
+
+  const actual = parseComparableValue(event.actual);
+  const forecast = parseComparableValue(event.forecast);
+
+  if (actual !== null && forecast !== null && actual === forecast) {
+    return {
+      direction: "neutral",
+      label: "В рамките на очакването",
+    };
+  }
+
+  if (event.expectedGoldImpact === "bullish") {
+    return {
+      direction: "bullish",
+      label: "Подкрепя златото",
+    };
+  }
+
+  if (event.expectedGoldImpact === "bearish") {
+    return {
+      direction: "bearish",
+      label: "Натиск за златото",
+    };
+  }
+
+  if (event.expectedGoldImpact === "neutral") {
+    return {
+      direction: "neutral",
+      label: "Неутрално",
+    };
+  }
+
+  return {
+    direction: "mixed",
+    label: event.actualStatus === "published" ? "Смесен прочит" : "Зависи от резултата",
+  };
 }
 
 export function getCalendarValuePanels(event: EconomicCalendarEvent): CalendarValuePanel[] {
@@ -239,6 +307,16 @@ function parseComparableValue(value: string | undefined) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function isToneBasedFedEvent(
+  event: Pick<EconomicCalendarEvent, "actual" | "eventType" | "title">,
+) {
+  return (
+    event.eventType === "central_bank" &&
+    /(fomc statement|fomc press conference)/i.test(event.title) &&
+    Boolean(event.actual)
+  );
+}
+
 function getReleaseAnalysis(event: EconomicCalendarEvent) {
   if (!event.actual) {
     if (event.actualStatus === "source_pending") {
@@ -252,8 +330,16 @@ function getReleaseAnalysis(event: EconomicCalendarEvent) {
   const forecast = parseComparableValue(event.forecast);
   const source = event.actualSource ? ` Източник: ${event.actualSource}.` : "";
 
+  if (isToneBasedFedEvent(event)) {
+    return `Събитието е публикувано, но то няма числова actual стойност като CPI или GDP.${source} Пазарът чете тона: дали Fed звучи по-меко, по-твърдо или потвърждава очакванията. Затова посоката идва от езика в statement-а, пресконференцията, реакцията на USD и доходностите.`;
+  }
+
   if (actual === null || forecast === null) {
     return `Публикуван е нов факт: ${event.actual}.${source} Ако тонът или стойността са по-меко четене за USD/доходности, това обикновено помага на златото; ако подкрепят по-високи лихви и по-силен долар, ефектът често е натиск върху XAU.`;
+  }
+
+  if (actual === forecast) {
+    return `Публикуван е нов факт ${event.actual}, при очаквана стойност ${event.forecast}; резултатът е в рамките на очакването. Това обикновено е по-слаб числов directional сигнал за златото, но реакция пак може да има от тона, ревизии, позициониране или движението в USD и доходностите.${source}`;
   }
 
   const relation =

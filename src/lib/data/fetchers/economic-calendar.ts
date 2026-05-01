@@ -98,7 +98,7 @@ type ReleaseRule = {
   timeUtc: string;
 };
 
-type OfficialActualCadence = "monthly" | "quarterly" | "weekly";
+type OfficialActualCadence = "daily" | "monthly" | "quarterly" | "weekly";
 
 type OfficialActualMetric = "valuePercent" | "percentChange" | "thousandsK";
 
@@ -236,6 +236,15 @@ const fredCalendarRules: ReleaseRule[] = [
 
 const officialActualRules: OfficialActualRule[] = [
   {
+    pattern: /^federal funds rate$/i,
+    seriesId: "DFEDTARU",
+    cadence: "daily",
+    metric: "valuePercent",
+    decimals: 2,
+    source: "FRED / Federal Reserve target rate",
+    sourceUrl: "https://fred.stlouisfed.org/series/DFEDTARU",
+  },
+  {
     pattern: /^advance gdp q\/q$/i,
     seriesId: "A191RL1Q225SBEA",
     cadence: "quarterly",
@@ -331,6 +340,14 @@ function formatBlsPeriod(point: BlsSeriesDataPoint) {
 function formatOfficialPeriod(date: string, cadence: OfficialActualCadence) {
   const [year, month, day] = date.split("-").map(Number);
 
+  if (cadence === "daily") {
+    const labelDate = new Date(Date.UTC(year, month - 1, day));
+    const dayLabel = String(labelDate.getUTCDate()).padStart(2, "0");
+    const monthLabel = String(labelDate.getUTCMonth() + 1).padStart(2, "0");
+
+    return `${dayLabel}.${monthLabel}.${labelDate.getUTCFullYear()}`;
+  }
+
   if (cadence === "weekly") {
     const labelDate = new Date(Date.UTC(year, month - 1, day));
     const dayLabel = String(labelDate.getUTCDate()).padStart(2, "0");
@@ -395,7 +412,7 @@ function inferDrivers(item: TradingEconomicsCalendarItem): DriverTag[] {
   const text = `${item.Category ?? ""} ${item.Event ?? ""}`.toLowerCase();
   const drivers = new Set<DriverTag>();
 
-  if (/(cpi|pce|ppi|inflation|earnings|prices)/.test(text)) {
+  if (/(cpi|pce|ppi|inflation|earnings|prices|employment cost|labor cost|labour cost|wage|compensation)/.test(text)) {
     drivers.add("inflation");
     drivers.add("fed");
     drivers.add("real_yields");
@@ -466,8 +483,12 @@ function inferDirection(item: TradingEconomicsCalendarItem): SignalDirection {
   const forecast = numeric(item.Forecast || item.TEForecast);
   const text = `${item.Category ?? ""} ${item.Event ?? ""}`.toLowerCase();
 
-  if (actual === null || forecast === null || actual === forecast) {
+  if (actual === null || forecast === null) {
     return normalizeImpact(item.Importance) === "high" ? "mixed" : "neutral";
+  }
+
+  if (actual === forecast) {
+    return "neutral";
   }
 
   const hotterOrStronger = actual > forecast;
@@ -476,7 +497,7 @@ function inferDirection(item: TradingEconomicsCalendarItem): SignalDirection {
     return hotterOrStronger ? "bullish" : "bearish";
   }
 
-  if (/(cpi|pce|ppi|inflation|earnings|prices|payroll|non farm|nonfarm|gdp|pmi|ism|retail|confidence|jolts)/.test(text)) {
+  if (/(cpi|pce|ppi|inflation|earnings|prices|employment cost|labor cost|labour cost|wage|compensation|payroll|non farm|nonfarm|gdp|pmi|ism|retail|confidence|jolts)/.test(text)) {
     return hotterOrStronger ? "bearish" : "bullish";
   }
 
@@ -521,7 +542,7 @@ function scenarioFor(item: TradingEconomicsCalendarItem) {
     };
   }
 
-  if (/(cpi|pce|ppi|inflation|earnings|prices)/.test(text)) {
+  if (/(cpi|pce|ppi|inflation|earnings|prices|employment cost|labor cost|labour cost|wage|compensation)/.test(text)) {
     return {
       bullish:
         "По-мек инфлационен резултат може да намали real-yield натиска и да подкрепи златото.",
@@ -683,7 +704,7 @@ function normalizeForexFactoryItem(item: ForexFactoryCalendarItem): EconomicCale
 
 function getOfficialActualFactForEvent(
   event: EconomicCalendarEvent,
-  facts: Map<string, OfficialActualFact>,
+  facts: Map<string, OfficialActualFact[]>,
 ) {
   const rule = findOfficialActualRule(event.title);
 
@@ -691,18 +712,27 @@ function getOfficialActualFactForEvent(
     return null;
   }
 
-  const fact = facts.get(rule.pattern.source);
+  const ruleFacts = facts.get(rule.pattern.source) ?? [];
+  const fact = ruleFacts.find((candidate) => isOfficialFactFreshForEvent(rule, candidate, event.startsAt));
 
-  if (!fact || !isOfficialFactFreshForEvent(rule, fact, event.startsAt)) {
+  if (!fact) {
     return null;
   }
 
   return fact;
 }
 
+function isReleaseOnlyFedEvent(event: Pick<EconomicCalendarEvent, "title" | "eventType">) {
+  return (
+    event.eventType === "central_bank" &&
+    /(fomc statement|fomc press conference)/i.test(event.title)
+  );
+}
+
 function enrichEventWithOfficialActual(
   event: EconomicCalendarEvent,
-  facts: Map<string, OfficialActualFact>,
+  facts: Map<string, OfficialActualFact[]>,
+  now = new Date(),
 ): EconomicCalendarEvent {
   if (event.actual) {
     return {
@@ -713,12 +743,25 @@ function enrichEventWithOfficialActual(
 
   const fact = getOfficialActualFactForEvent(event, facts);
   const startsAtMs = new Date(event.startsAt).getTime();
-  const isReleased = Number.isFinite(startsAtMs) && startsAtMs <= Date.now();
+  const isReleased = Number.isFinite(startsAtMs) && startsAtMs <= now.getTime();
+
+  if (!fact && isReleased && isReleaseOnlyFedEvent(event)) {
+    return {
+      ...event,
+      actual: "Публикувано",
+      actualSource: event.source || "Federal Reserve",
+      actualUpdatedAt: now.toISOString(),
+      actualStatus: "published",
+      source: event.source || "Federal Reserve",
+      sourceUrl: event.sourceUrl ?? "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      expectedGoldImpact: "mixed",
+    };
+  }
 
   if (!fact || !isReleased) {
     return {
       ...event,
-      actualStatus: getCalendarActualStatus(event),
+      actualStatus: getCalendarActualStatus(event, now),
     };
   }
 
@@ -737,7 +780,7 @@ function enrichEventWithOfficialActual(
     ...event,
     actual: fact.actual,
     actualSource: fact.source,
-    actualUpdatedAt: new Date().toISOString(),
+    actualUpdatedAt: now.toISOString(),
     actualStatus: "published",
     latestActual: event.latestActual ?? event.previous,
     latestActualPeriod: event.latestActualPeriod,
@@ -747,11 +790,12 @@ function enrichEventWithOfficialActual(
   };
 }
 
-function enrichCalendarEventsWithOfficialActuals(
+export function enrichCalendarEventsWithOfficialActuals(
   events: EconomicCalendarEvent[],
-  facts: Map<string, OfficialActualFact>,
+  facts: Map<string, OfficialActualFact[]>,
+  now = new Date(),
 ) {
-  return events.map((event) => enrichEventWithOfficialActual(event, facts));
+  return events.map((event) => enrichEventWithOfficialActual(event, facts, now));
 }
 
 export function mapForexFactoryCalendarItemsToEvents(items: ForexFactoryCalendarItem[]) {
@@ -938,6 +982,7 @@ function isOfficialFactFreshForEvent(
   }
 
   const maxAgeDays = {
+    daily: 3,
     monthly: 70,
     quarterly: 140,
     weekly: 14,
@@ -956,7 +1001,7 @@ async function fetchFredObservations(seriesId: string): Promise<FredObservation[
   url.searchParams.set("api_key", env.FRED_API_KEY);
   url.searchParams.set("file_type", "json");
   url.searchParams.set("sort_order", "desc");
-  url.searchParams.set("limit", "3");
+  url.searchParams.set("limit", "8");
 
   const response = await fetch(url, {
     cache: "no-store",
@@ -972,7 +1017,7 @@ async function fetchFredObservations(seriesId: string): Promise<FredObservation[
 }
 
 async function fetchOfficialActualFacts() {
-  const facts = new Map<string, OfficialActualFact>();
+  const facts = new Map<string, OfficialActualFact[]>();
 
   if (!env.FRED_API_KEY) {
     return facts;
@@ -992,26 +1037,27 @@ async function fetchOfficialActualFacts() {
 
   for (const rule of officialActualRules) {
     const observations = observationsBySeriesId.get(rule.seriesId) ?? [];
-    const latest = observations[0];
-    const previous = observations[1];
+    const ruleFacts: OfficialActualFact[] = [];
 
-    if (!latest) {
-      continue;
-    }
+    observations.forEach((observation, index) => {
+      const actual = formatOfficialActual(rule, observation, observations[index + 1]);
 
-    const actual = formatOfficialActual(rule, latest, previous);
+      if (!actual) {
+        return;
+      }
 
-    if (!actual) {
-      continue;
-    }
-
-    facts.set(rule.pattern.source, {
-      actual,
-      period: formatOfficialPeriod(latest.date, rule.cadence),
-      observationDate: latest.date,
-      source: rule.source,
-      sourceUrl: rule.sourceUrl,
+      ruleFacts.push({
+        actual,
+        period: formatOfficialPeriod(observation.date, rule.cadence),
+        observationDate: observation.date,
+        source: rule.source,
+        sourceUrl: rule.sourceUrl,
+      });
     });
+
+    if (ruleFacts.length) {
+      facts.set(rule.pattern.source, ruleFacts);
+    }
   }
 
   return facts;
@@ -1221,7 +1267,7 @@ export async function fetchFreeOfficialCalendarEvents(): Promise<EconomicCalenda
   const officialActualFacts =
     officialActualResult.status === "fulfilled"
       ? officialActualResult.value
-      : new Map<string, OfficialActualFact>();
+      : new Map<string, OfficialActualFact[]>();
   const fredEvents =
     fredResult.status === "fulfilled" ? mapFredReleaseDatesToCalendarEvents(fredResult.value, blsFacts) : [];
   const fomcEvents = fomcResult.status === "fulfilled" ? fomcResult.value : [];

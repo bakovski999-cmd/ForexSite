@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { normalizeNewsFeed } from "@/lib/data/fetchers/alpha-vantage";
 import { parseCotCsv } from "@/lib/data/fetchers/cftc";
 import {
+  enrichCalendarEventsWithOfficialActuals,
   mapForexFactoryCalendarItemsToEvents,
   mapFredReleaseDatesToCalendarEvents,
 } from "@/lib/data/fetchers/economic-calendar";
@@ -234,6 +235,85 @@ describe("market data normalization", () => {
     expect(first.find((event) => event.title === "Advance GDP q/q")?.id).toBe(
       second.find((event) => event.title === "Advance GDP q/q")?.id,
     );
+  });
+
+  test("wage pressure calendar events get directional labels after actuals publish", () => {
+    const [event] = mapForexFactoryCalendarItemsToEvents([
+      {
+        title: "Employment Cost Index q/q",
+        country: "USD",
+        date: "2026-04-30T08:30:00-04:00",
+        impact: "High",
+        previous: "0.7%",
+        forecast: "0.8%",
+        actual: "0.9%",
+      },
+    ]);
+
+    expect(event.expectedGoldImpact).toBe("bearish");
+    expect(event.affectedDrivers).toContain("inflation");
+  });
+
+  test("official Fed funds actual uses the observation on or before the event date", () => {
+    const [event] = mapForexFactoryCalendarItemsToEvents([
+      {
+        title: "Federal Funds Rate",
+        country: "USD",
+        date: "2026-04-29T14:00:00-04:00",
+        impact: "High",
+        forecast: "3.75%",
+        previous: "3.75%",
+      },
+    ]);
+    const [enriched] = enrichCalendarEventsWithOfficialActuals(
+      [event],
+      new Map([
+        [
+          "^federal funds rate$",
+          [
+            {
+              actual: "4.00%",
+              period: "30.04.2026",
+              observationDate: "2026-04-30",
+              source: "FRED / Federal Reserve target rate",
+              sourceUrl: "https://fred.stlouisfed.org/series/DFEDTARU",
+            },
+            {
+              actual: "3.75%",
+              period: "29.04.2026",
+              observationDate: "2026-04-29",
+              source: "FRED / Federal Reserve target rate",
+              sourceUrl: "https://fred.stlouisfed.org/series/DFEDTARU",
+            },
+          ],
+        ],
+      ]),
+      new Date("2026-05-01T04:00:00.000Z"),
+    );
+
+    expect(enriched.actual).toBe("3.75%");
+    expect(enriched.actualStatus).toBe("published");
+    expect(enriched.expectedGoldImpact).toBe("neutral");
+  });
+
+  test("past FOMC statement events are marked as published without numeric actuals", () => {
+    const [event] = mapForexFactoryCalendarItemsToEvents([
+      {
+        title: "FOMC Statement",
+        country: "USD",
+        date: "2026-04-29T14:00:00-04:00",
+        impact: "High",
+      },
+    ]);
+    const [enriched] = enrichCalendarEventsWithOfficialActuals(
+      [event],
+      new Map(),
+      new Date("2026-05-01T04:00:00.000Z"),
+    );
+
+    expect(enriched.actual).toBe("Публикувано");
+    expect(enriched.actualStatus).toBe("published");
+    expect(enriched.expectedGoldImpact).toBe("mixed");
   });
 
   test("sync remains stable in demo mode across repeated runs", async () => {

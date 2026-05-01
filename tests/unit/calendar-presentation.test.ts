@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  getCalendarDirectionPresentation,
   getCalendarEventDetail,
   getGoldNewsImpactScore,
   getCalendarValuePanels,
@@ -85,6 +86,49 @@ describe("calendar presentation", () => {
     expect(detail.releaseAnalysis).toContain("2.0%");
     expect(detail.releaseAnalysis).toContain("под очакването");
     expect(detail.releaseAnalysis).toContain("FRED / BEA official GDP");
+  });
+
+  test("shows equal actual and forecast as within expectations", () => {
+    const direction = getCalendarDirectionPresentation({
+      ...baseEvent,
+      forecast: "3.75%",
+      actual: "3.75%",
+      expectedGoldImpact: "neutral",
+    });
+    const detail = getCalendarEventDetail({
+      ...baseEvent,
+      forecast: "3.75%",
+      forecastStatus: "provided",
+      actual: "3.75%",
+      expectedGoldImpact: "neutral",
+    });
+
+    expect(direction).toEqual({
+      direction: "neutral",
+      label: "В рамките на очакването",
+    });
+    expect(detail.releaseAnalysis).toContain("в рамките на очакването");
+  });
+
+  test("marks published FOMC text events as tone-driven", () => {
+    const event: EconomicCalendarEvent = {
+      ...baseEvent,
+      title: "FOMC Statement",
+      eventType: "central_bank",
+      actual: "Публикувано",
+      actualStatus: "published",
+      actualSource: "ForexFactory weekly export",
+      expectedGoldImpact: "mixed",
+    };
+    const direction = getCalendarDirectionPresentation(event);
+    const detail = getCalendarEventDetail(event);
+
+    expect(direction).toEqual({
+      direction: "mixed",
+      label: "Тонът е решаващ",
+    });
+    expect(detail.releaseAnalysis).toContain("няма числова actual стойност");
+    expect(detail.releaseAnalysis).toContain("тона");
   });
 
   test("explains employment events through USD, yields and risk sentiment", () => {

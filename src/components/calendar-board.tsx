@@ -44,6 +44,7 @@ import {
 } from "@/lib/calendar-filters";
 import { getPendingReleasedCalendarEvents } from "@/lib/calendar-history";
 import {
+  getCalendarDirectionPresentation,
   getCalendarEventDetail,
   getCalendarValuePanels,
   isStrongGoldCalendarEvent,
@@ -62,13 +63,6 @@ const relevanceLabels: Record<CalendarRelevance, string> = {
   direct: "Директно за злато",
   strong: "Силен макро ефект",
   context: "Контекст",
-};
-
-const directionLabels: Record<SignalDirection, string> = {
-  bullish: "Подкрепя златото",
-  bearish: "Натиск за златото",
-  neutral: "Неутрално",
-  mixed: "Зависи от резултата",
 };
 
 function impactClass(impact: CalendarImpact) {
@@ -210,6 +204,7 @@ function CalendarEventDetailModal({
   onClose: () => void;
 }) {
   const detail = getCalendarEventDetail(event);
+  const direction = getCalendarDirectionPresentation(event);
 
   return (
     <div
@@ -320,11 +315,11 @@ function CalendarEventDetailModal({
           <div
             className={cn(
               "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium",
-              directionClass(event.expectedGoldImpact),
+              directionClass(direction.direction),
             )}
           >
-            <DirectionIcon direction={event.expectedGoldImpact} />
-            {directionLabels[event.expectedGoldImpact]}
+            <DirectionIcon direction={direction.direction} />
+            {direction.label}
           </div>
           {event.sourceUrl ? (
             <a
@@ -834,6 +829,7 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
               <div className="space-y-2">
                 {dayEvents.map((event) => {
                   const alert = alertsById.get(event.id);
+                  const direction = getCalendarDirectionPresentation(event);
                   const settings =
                     alert ??
                     buildAlertForEvent(event, {
@@ -889,11 +885,11 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
                         <div
                           className={cn(
                             "inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium xl:w-full xl:justify-center",
-                            directionClass(event.expectedGoldImpact),
+                            directionClass(direction.direction),
                           )}
                         >
-                          <DirectionIcon direction={event.expectedGoldImpact} />
-                          <span className="truncate">{directionLabels[event.expectedGoldImpact]}</span>
+                          <DirectionIcon direction={direction.direction} />
+                          <span className="truncate">{direction.label}</span>
                         </div>
 
                         <div className="flex justify-end">
