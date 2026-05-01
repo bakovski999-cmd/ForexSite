@@ -163,10 +163,18 @@ type EcbOfficialActualRule = BaseOfficialActualRule & {
   metric: "valuePercent";
 };
 
+type IsmOfficialActualRule = BaseOfficialActualRule & {
+  provider: "ism";
+  officialUrls: string[];
+  publicFallbackUrl: string;
+  metric: "indexValue";
+};
+
 type OfficialActualRule =
   | FredOfficialActualRule
   | EurostatOfficialActualRule
-  | EcbOfficialActualRule;
+  | EcbOfficialActualRule
+  | IsmOfficialActualRule;
 
 type OfficialActualFact = {
   actual: string;
@@ -408,6 +416,34 @@ const officialActualRules: OfficialActualRule[] = [
     decimals: 2,
     source: "ECB Data Portal / Main refinancing rate",
     sourceUrl: "https://data.ecb.europa.eu/data/datasets/FM/FM.D.U2.EUR.4F.KR.MRR_FR.LEV",
+  },
+  {
+    provider: "ism",
+    pattern: /^ism manufacturing pmi$/i,
+    cadence: "monthly",
+    metric: "indexValue",
+    decimals: 1,
+    source: "ISM official report",
+    sourceUrl: "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/",
+    officialUrls: [
+      "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/pmi/",
+      "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/pmi/april/",
+    ],
+    publicFallbackUrl: "https://www.investing.com/economic-calendar/ism-manufacturing-pmi-173",
+  },
+  {
+    provider: "ism",
+    pattern: /^ism manufacturing prices$/i,
+    cadence: "monthly",
+    metric: "indexValue",
+    decimals: 1,
+    source: "ISM official report",
+    sourceUrl: "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/",
+    officialUrls: [
+      "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/pmi/",
+      "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/pmi/april/",
+    ],
+    publicFallbackUrl: "https://www.investing.com/economic-calendar/ism-manufacturing-prices-174",
   },
 ];
 
@@ -957,7 +993,7 @@ function enrichEventWithOfficialActual(
     latestActual: event.latestActual ?? event.previous,
     latestActualPeriod: event.latestActualPeriod,
     source: event.source,
-    sourceUrl: event.sourceUrl ?? fact.sourceUrl,
+    sourceUrl: fact.sourceUrl ?? event.sourceUrl,
     expectedGoldImpact: inferDirection(normalizedItem),
   };
 }
@@ -1226,6 +1262,153 @@ export function mapEcbJsonDataToOfficialFacts(
     .sort((left, right) => right.observationDate.localeCompare(left.observationDate));
 }
 
+function decodeHtml(value: string) {
+  return value
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/<!--\s*-->/g, " ");
+}
+
+function htmlToText(value: string) {
+  return decodeHtml(value)
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseEnglishDate(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(`${value} UTC`);
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString().slice(0, 10) : null;
+}
+
+function fallbackObservationDate(text: string) {
+  const releaseDate = text.match(
+    /\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},\s+\d{4}\b/i,
+  )?.[0];
+
+  return parseEnglishDate(releaseDate) ?? new Date().toISOString().slice(0, 10);
+}
+
+function formatIndexActual(value: string, decimals = 1) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed.toFixed(decimals) : value;
+}
+
+export function parseIsmManufacturingReportActuals(html: string) {
+  const text = htmlToText(html);
+  const pmi = text.match(/Manufacturing PMI\s*®?\s+registered\s+([+-]?\d+(?:\.\d+)?)\s+percent/i)?.[1];
+  const prices = text.match(
+    /Prices Index[^.]{0,260}?\bregister(?:ed|ing)\s+([+-]?\d+(?:\.\d+)?)\s+percent/i,
+  )?.[1];
+
+  return {
+    pmi: pmi ? formatIndexActual(pmi) : undefined,
+    prices: prices ? formatIndexActual(prices) : undefined,
+    observationDate: fallbackObservationDate(text),
+  };
+}
+
+export function parseInvestingCalendarActual(html: string) {
+  const text = htmlToText(html);
+  const releaseBlock = text.match(
+    /Latest Release\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})\s+Actual\s+([+-]?\d+(?:\.\d+)?)/i,
+  );
+
+  if (!releaseBlock) {
+    return null;
+  }
+
+  return {
+    actual: formatIndexActual(releaseBlock[2]),
+    observationDate: parseEnglishDate(releaseBlock[1]) ?? new Date().toISOString().slice(0, 10),
+  };
+}
+
+function mapIsmHtmlToOfficialFacts(
+  rule: IsmOfficialActualRule,
+  html: string,
+  source: string,
+  sourceUrl: string,
+) {
+  const parsed = parseIsmManufacturingReportActuals(html);
+  const actual = /prices/i.test(rule.pattern.source) ? parsed.prices : parsed.pmi;
+
+  if (!actual) {
+    return [];
+  }
+
+  return [{
+    actual,
+    period: `release ${formatOfficialPeriod(parsed.observationDate, "daily")}`,
+    observationDate: parsed.observationDate,
+    source,
+    sourceUrl,
+  } satisfies OfficialActualFact];
+}
+
+function mapInvestingHtmlToOfficialFacts(rule: IsmOfficialActualRule, html: string) {
+  const parsed = parseInvestingCalendarActual(html);
+
+  if (!parsed) {
+    return [];
+  }
+
+  return [{
+    actual: parsed.actual,
+    period: `release ${formatOfficialPeriod(parsed.observationDate, "daily")}`,
+    observationDate: parsed.observationDate,
+    source: "Investing.com economic calendar fallback",
+    sourceUrl: rule.publicFallbackUrl,
+  } satisfies OfficialActualFact];
+}
+
+async function fetchText(url: string) {
+  const response = await fetch(url, {
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      "user-agent":
+        "Mozilla/5.0 (compatible; GoldIntelligenceDashboard/1.0; +https://example.com)",
+    },
+    cache: "no-store",
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Calendar fallback request failed for ${url}: ${response.status}`);
+  }
+
+  return response.text();
+}
+
+async function fetchIsmOfficialFacts(rule: IsmOfficialActualRule) {
+  for (const url of rule.officialUrls) {
+    try {
+      const facts = mapIsmHtmlToOfficialFacts(rule, await fetchText(url), rule.source, url);
+
+      if (facts.length) {
+        return facts;
+      }
+    } catch {
+      // ISM may challenge automated requests; the public calendar fallback below keeps the row useful.
+    }
+  }
+
+  try {
+    return mapInvestingHtmlToOfficialFacts(rule, await fetchText(rule.publicFallbackUrl));
+  } catch {
+    return [];
+  }
+}
+
 function isOfficialFactFreshForEvent(
   rule: OfficialActualRule,
   fact: OfficialActualFact,
@@ -1335,6 +1518,9 @@ async function fetchOfficialActualFacts() {
   const ecbRules = officialActualRules.filter(
     (rule): rule is EcbOfficialActualRule => rule.provider === "ecb",
   );
+  const ismRules = officialActualRules.filter(
+    (rule): rule is IsmOfficialActualRule => rule.provider === "ism",
+  );
 
   if (env.FRED_API_KEY) {
     const uniqueSeriesIds = [...new Set(fredRules.map((rule) => rule.seriesId))];
@@ -1379,8 +1565,11 @@ async function fetchOfficialActualFacts() {
   const ecbResults = await Promise.allSettled(
     ecbRules.map(async (rule) => [rule, await fetchEcbOfficialFacts(rule)] as const),
   );
+  const ismResults = await Promise.allSettled(
+    ismRules.map(async (rule) => [rule, await fetchIsmOfficialFacts(rule)] as const),
+  );
 
-  for (const result of [...eurostatResults, ...ecbResults]) {
+  for (const result of [...eurostatResults, ...ecbResults, ...ismResults]) {
     if (result.status === "fulfilled") {
       setOfficialFacts(facts, result.value[0], result.value[1]);
     }

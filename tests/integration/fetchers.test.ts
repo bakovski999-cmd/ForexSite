@@ -8,6 +8,8 @@ import {
   mapEurostatDatasetToOfficialFacts,
   mapForexFactoryCalendarItemsToEvents,
   mapFredReleaseDatesToCalendarEvents,
+  parseInvestingCalendarActual,
+  parseIsmManufacturingReportActuals,
 } from "@/lib/data/fetchers/economic-calendar";
 import { mapFredSeries } from "@/lib/data/fetchers/fred";
 import { normalizeGdeltArticles } from "@/lib/data/fetchers/gdelt";
@@ -256,6 +258,67 @@ describe("market data normalization", () => {
     expect(first.find((event) => event.title === "Advance GDP q/q")?.id).toBe(
       second.find((event) => event.title === "Advance GDP q/q")?.id,
     );
+  });
+
+  test("ISM report parser reads manufacturing PMI and prices values", () => {
+    const actuals = parseIsmManufacturingReportActuals(`
+      <p>The Manufacturing PMI<sup>®</sup>&nbsp;registered 52.7 percent in April,
+      the same reading as March.</p>
+      <p>The Prices Index remained in expansion, registering 84.6 percent,
+      a 6.3-percentage point jump from March's reading of 78.3 percent.</p>
+    `);
+
+    expect(actuals.pmi).toBe("52.7");
+    expect(actuals.prices).toBe("84.6");
+  });
+
+  test("Investing fallback parser reads latest actual and release date", () => {
+    const actual = parseInvestingCalendarActual(`
+      <span>Latest Release</span><span>May 01, 2026</span>
+      <span>Actual</span><span>52.7</span>
+      <span>Forecast</span><span>53.1</span>
+    `);
+
+    expect(actual).toEqual({
+      actual: "52.7",
+      observationDate: "2026-05-01",
+    });
+  });
+
+  test("ForexFactory ISM event without actual is enriched from fallback facts", () => {
+    const [event] = mapForexFactoryCalendarItemsToEvents([
+      {
+        title: "ISM Manufacturing PMI",
+        country: "USD",
+        date: "2026-05-01T10:00:00-04:00",
+        impact: "Medium",
+        forecast: "53.1",
+        previous: "52.7",
+      },
+    ]);
+    const [enriched] = enrichCalendarEventsWithOfficialActuals(
+      [event],
+      new Map([
+        [
+          "^ism manufacturing pmi$",
+          [{
+            actual: "52.7",
+            period: "release 01.05.2026",
+            observationDate: "2026-05-01",
+            source: "Investing.com economic calendar fallback",
+            sourceUrl: "https://www.investing.com/economic-calendar/ism-manufacturing-pmi-173",
+          }],
+        ],
+      ]),
+      new Date("2026-05-01T15:00:00.000Z"),
+    );
+
+    expect(enriched).toMatchObject({
+      actual: "52.7",
+      actualSource: "Investing.com economic calendar fallback",
+      actualStatus: "published",
+      expectedGoldImpact: "bullish",
+    });
   });
 
   test("wage pressure calendar events get directional labels after actuals publish", () => {

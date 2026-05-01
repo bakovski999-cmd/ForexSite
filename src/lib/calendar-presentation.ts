@@ -7,7 +7,7 @@ import type {
 } from "@/lib/types";
 
 export const pendingActualLabel = "чака се";
-export const sourcePendingActualLabel = "чака се от източника";
+export const sourcePendingActualLabel = "чака ForexFactory/official fallback";
 export const unavailableFreeForecastLabel = "Няма безплатен консенсус";
 
 type CalendarValuePanel = {

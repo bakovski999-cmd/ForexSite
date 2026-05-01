@@ -1017,8 +1017,8 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
           <div className="rounded-[22px] border border-white/8 bg-white/[0.03] p-5">
             <p className="text-sm font-semibold text-white">Official fallback слой</p>
             <p className="mt-3 text-sm leading-7 text-slate-300">
-              FRED, BLS, Fed, Eurostat и ECB добавят official actual/status стойности,
-              когато ForexFactory закъснее или е rate-limited.
+              FRED, BLS, Fed, Eurostat, ECB и ISM добавят actual/status стойности.
+              При липсващ official API сайтът ползва public calendar fallback.
             </p>
           </div>
           <div className="rounded-[22px] border border-white/8 bg-white/[0.03] p-5">
