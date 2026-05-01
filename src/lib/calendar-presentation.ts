@@ -216,7 +216,7 @@ export function getCalendarValuePanels(event: EconomicCalendarEvent): CalendarVa
       hint: event.actual
         ? `Публикувана стойност${event.actualSource ? ` от ${event.actualSource}` : ""}`
         : event.actualStatus === "source_pending"
-          ? "Release часът е минал; сайтът проверява докато източникът публикува стойността"
+          ? `Release часът е минал; сайтът проверява ${event.source}, докато се появи надежден actual`
           : "Ще се обнови при release",
     },
   ];
@@ -366,7 +366,7 @@ function isToneBasedFedEvent(
 ) {
   return (
     event.eventType === "central_bank" &&
-    /(fomc statement|fomc press conference)/i.test(event.title) &&
+    /(fomc statement|fomc press conference|monetary policy statement|ecb press conference)/i.test(event.title) &&
     Boolean(event.actual)
   );
 }
@@ -374,7 +374,7 @@ function isToneBasedFedEvent(
 function getReleaseAnalysis(event: EconomicCalendarEvent) {
   if (!event.actual) {
     if (event.actualStatus === "source_pending") {
-      return "Release часът е минал, но безплатният календарен източник още не е публикувал новия факт. Сайтът ще продължи да проверява и ще попълни стойността веднага щом се появи надежден actual.";
+      return `Release часът е минал, но ${event.source} още не е дал надежден actual за този ред. Сайтът ще продължи да проверява официалните fallback източници и ще попълни стойността веднага щом се появи.`;
     }
 
     return "Новият факт още не е публикуван. Засега анализът е сценарен: пазарът ще сравни actual стойността с forecast-а и ще реагира през USD, доходности, Fed очаквания и risk sentiment.";

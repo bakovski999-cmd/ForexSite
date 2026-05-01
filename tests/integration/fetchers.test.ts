@@ -4,6 +4,8 @@ import { normalizeNewsFeed } from "@/lib/data/fetchers/alpha-vantage";
 import { parseCotCsv } from "@/lib/data/fetchers/cftc";
 import {
   enrichCalendarEventsWithOfficialActuals,
+  mapEcbJsonDataToOfficialFacts,
+  mapEurostatDatasetToOfficialFacts,
   mapForexFactoryCalendarItemsToEvents,
   mapFredReleaseDatesToCalendarEvents,
 } from "@/lib/data/fetchers/economic-calendar";
@@ -314,6 +316,207 @@ describe("market data normalization", () => {
     expect(enriched.actual).toBe("Публикувано");
     expect(enriched.actualStatus).toBe("published");
     expect(enriched.expectedGoldImpact).toBe("mixed");
+  });
+
+  test("Eurostat GDP mapper returns the latest official quarter", () => {
+    const rule: Parameters<typeof mapEurostatDatasetToOfficialFacts>[0] = {
+      provider: "eurostat",
+      pattern: /^german prelim gdp q\/q$/i,
+      dataset: "namq_10_gdp",
+      params: {},
+      cadence: "quarterly",
+      metric: "valuePercent",
+      decimals: 1,
+      source: "Eurostat / German GDP",
+      sourceUrl: "https://ec.europa.eu/eurostat/databrowser/view/namq_10_gdp/default/table",
+    };
+    const facts = mapEurostatDatasetToOfficialFacts(rule, {
+      id: ["freq", "unit", "s_adj", "na_item", "geo", "time"],
+      size: [1, 1, 1, 1, 1, 2],
+      dimension: {
+        time: {
+          category: {
+            index: {
+              "2025-Q4": 0,
+              "2026-Q1": 1,
+            },
+          },
+        },
+      },
+      value: {
+        "0": 0.2,
+        "1": 0.3,
+      },
+    });
+
+    expect(facts[0]).toMatchObject({
+      actual: "0.3%",
+      period: "Q1 2026",
+      observationDate: "2026-03-31",
+      source: "Eurostat / German GDP",
+    });
+  });
+
+  test("Eurostat CPI mapper returns monthly flash-style values", () => {
+    const rule: Parameters<typeof mapEurostatDatasetToOfficialFacts>[0] = {
+      provider: "eurostat",
+      pattern: /^cpi flash estimate y\/y$/i,
+      dataset: "ei_cphi_m",
+      params: {},
+      cadence: "monthly",
+      metric: "valuePercent",
+      decimals: 1,
+      source: "Eurostat / HICP flash inflation",
+      sourceUrl: "https://ec.europa.eu/eurostat/databrowser/view/ei_cphi_m/default/table",
+    };
+    const facts = mapEurostatDatasetToOfficialFacts(rule, {
+      id: ["freq", "unit", "coicop", "geo", "time"],
+      size: [1, 1, 1, 1, 2],
+      dimension: {
+        time: {
+          category: {
+            index: {
+              "2026-03": 0,
+              "2026-04": 1,
+            },
+          },
+        },
+      },
+      value: {
+        "0": 2.5,
+        "1": 2.6,
+      },
+    });
+
+    expect(facts[0]).toMatchObject({
+      actual: "2.6%",
+      period: "април 2026",
+      observationDate: "2026-04-01",
+      source: "Eurostat / HICP flash inflation",
+    });
+  });
+
+  test("ECB Data Portal mapper returns the latest policy rate", () => {
+    const rule: Parameters<typeof mapEcbJsonDataToOfficialFacts>[0] = {
+      provider: "ecb",
+      pattern: /^main refinancing rate$/i,
+      dataPath: "FM/D.U2.EUR.4F.KR.MRR_FR.LEV",
+      cadence: "daily",
+      metric: "valuePercent",
+      decimals: 2,
+      source: "ECB Data Portal / Main refinancing rate",
+      sourceUrl: "https://data.ecb.europa.eu/data/datasets/FM/FM.D.U2.EUR.4F.KR.MRR_FR.LEV",
+    };
+    const facts = mapEcbJsonDataToOfficialFacts(rule, {
+      dataSets: [
+        {
+          series: {
+            "0:0:0:0:0:0:0": {
+              observations: {
+                "0": [2.15],
+                "1": [2.15],
+              },
+            },
+          },
+        },
+      ],
+      structure: {
+        dimensions: {
+          observation: [
+            {
+              id: "TIME_PERIOD",
+              role: "time",
+              values: [
+                { id: "2026-04-29" },
+                { id: "2026-04-30" },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(facts[0]).toMatchObject({
+      actual: "2.15%",
+      period: "30.04.2026",
+      observationDate: "2026-04-30",
+      source: "ECB Data Portal / Main refinancing rate",
+    });
+  });
+
+  test("EUR events receive official actuals when ForexFactory actual is missing", () => {
+    const [gdpEvent, rateEvent, statementEvent] = mapForexFactoryCalendarItemsToEvents([
+      {
+        title: "German Prelim GDP q/q",
+        country: "EUR",
+        date: "2026-04-30T04:00:00-04:00",
+        impact: "Medium",
+        previous: "0.3%",
+        forecast: "0.1%",
+      },
+      {
+        title: "Main Refinancing Rate",
+        country: "EUR",
+        date: "2026-04-30T08:15:00-04:00",
+        impact: "High",
+        previous: "2.15%",
+        forecast: "2.15%",
+      },
+      {
+        title: "Monetary Policy Statement",
+        country: "EUR",
+        date: "2026-04-30T08:15:00-04:00",
+        impact: "High",
+      },
+    ]);
+    const enriched = enrichCalendarEventsWithOfficialActuals(
+      [gdpEvent, rateEvent, statementEvent],
+      new Map([
+        [
+          "^german prelim gdp q\\/q$",
+          [
+            {
+              actual: "0.3%",
+              period: "Q1 2026",
+              observationDate: "2026-03-31",
+              source: "Eurostat / German GDP",
+              sourceUrl: "https://ec.europa.eu/eurostat/databrowser/view/namq_10_gdp/default/table",
+            },
+          ],
+        ],
+        [
+          "^main refinancing rate$",
+          [
+            {
+              actual: "2.15%",
+              period: "30.04.2026",
+              observationDate: "2026-04-30",
+              source: "ECB Data Portal / Main refinancing rate",
+              sourceUrl: "https://data.ecb.europa.eu/data/datasets/FM/FM.D.U2.EUR.4F.KR.MRR_FR.LEV",
+            },
+          ],
+        ],
+      ]),
+      new Date("2026-05-01T04:00:00.000Z"),
+    );
+
+    expect(enriched[0]).toMatchObject({
+      actual: "0.3%",
+      actualStatus: "published",
+      actualSource: "Eurostat / German GDP",
+    });
+    expect(enriched[1]).toMatchObject({
+      actual: "2.15%",
+      actualStatus: "published",
+      actualSource: "ECB Data Portal / Main refinancing rate",
+      expectedGoldImpact: "neutral",
+    });
+    expect(enriched[2]).toMatchObject({
+      actual: "Публикувано",
+      actualStatus: "published",
+      actualSource: "European Central Bank",
+      expectedGoldImpact: "mixed",
+    });
   });
 
   test("sync remains stable in demo mode across repeated runs", async () => {

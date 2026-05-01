@@ -165,6 +165,26 @@ describe("calendar presentation", () => {
     expect(detail.releaseAnalysis).toContain("тона");
   });
 
+  test("marks published ECB statement events as tone-driven", () => {
+    const event: EconomicCalendarEvent = {
+      ...baseEvent,
+      country: "EUR",
+      currency: "EUR",
+      title: "Monetary Policy Statement",
+      eventType: "central_bank",
+      actual: "Публикувано",
+      actualStatus: "published",
+      actualSource: "European Central Bank",
+      expectedGoldImpact: "mixed",
+    };
+
+    expect(getCalendarDirectionPresentation(event)).toEqual({
+      direction: "mixed",
+      label: "Тонът е решаващ",
+    });
+    expect(getCalendarEventDetail(event).releaseAnalysis).toContain("European Central Bank");
+  });
+
   test("explains employment events through USD, yields and risk sentiment", () => {
     const detail = getCalendarEventDetail({
       ...baseEvent,

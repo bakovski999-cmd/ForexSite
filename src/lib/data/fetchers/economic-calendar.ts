@@ -56,6 +56,40 @@ type FredObservationsResponse = {
   observations?: FredObservation[];
 };
 
+type EurostatDatasetResponse = {
+  value?: Record<string, number>;
+  id?: string[];
+  size?: number[];
+  dimension?: {
+    time?: {
+      category?: {
+        index?: Record<string, number>;
+        label?: Record<string, string>;
+      };
+    };
+  };
+};
+
+type EcbJsonDataResponse = {
+  dataSets?: Array<{
+    series?: Record<string, {
+      observations?: Record<string, [number, ...unknown[]]>;
+    }>;
+  }>;
+  structure?: {
+    dimensions?: {
+      observation?: Array<{
+        id?: string;
+        role?: string;
+        values?: Array<{
+          id?: string;
+          name?: string;
+        }>;
+      }>;
+    };
+  };
+};
+
 type BlsSeriesDataPoint = {
   year: string;
   period: string;
@@ -102,15 +136,37 @@ type OfficialActualCadence = "daily" | "monthly" | "quarterly" | "weekly";
 
 type OfficialActualMetric = "valuePercent" | "percentChange" | "thousandsK";
 
-type OfficialActualRule = {
+type BaseOfficialActualRule = {
   pattern: RegExp;
-  seriesId: string;
   cadence: OfficialActualCadence;
-  metric: OfficialActualMetric;
   decimals?: number;
   source: string;
   sourceUrl: string;
 };
+
+type FredOfficialActualRule = BaseOfficialActualRule & {
+  provider: "fred";
+  seriesId: string;
+  metric: OfficialActualMetric;
+};
+
+type EurostatOfficialActualRule = BaseOfficialActualRule & {
+  provider: "eurostat";
+  dataset: string;
+  params: Record<string, string>;
+  metric: "valuePercent";
+};
+
+type EcbOfficialActualRule = BaseOfficialActualRule & {
+  provider: "ecb";
+  dataPath: string;
+  metric: "valuePercent";
+};
+
+type OfficialActualRule =
+  | FredOfficialActualRule
+  | EurostatOfficialActualRule
+  | EcbOfficialActualRule;
 
 type OfficialActualFact = {
   actual: string;
@@ -236,6 +292,7 @@ const fredCalendarRules: ReleaseRule[] = [
 
 const officialActualRules: OfficialActualRule[] = [
   {
+    provider: "fred",
     pattern: /^federal funds rate$/i,
     seriesId: "DFEDTARU",
     cadence: "daily",
@@ -245,6 +302,7 @@ const officialActualRules: OfficialActualRule[] = [
     sourceUrl: "https://fred.stlouisfed.org/series/DFEDTARU",
   },
   {
+    provider: "fred",
     pattern: /^advance gdp q\/q$/i,
     seriesId: "A191RL1Q225SBEA",
     cadence: "quarterly",
@@ -254,6 +312,7 @@ const officialActualRules: OfficialActualRule[] = [
     sourceUrl: "https://fred.stlouisfed.org/series/A191RL1Q225SBEA",
   },
   {
+    provider: "fred",
     pattern: /gdp price index q\/q/i,
     seriesId: "A191RI1Q225SBEA",
     cadence: "quarterly",
@@ -263,6 +322,7 @@ const officialActualRules: OfficialActualRule[] = [
     sourceUrl: "https://fred.stlouisfed.org/series/A191RI1Q225SBEA",
   },
   {
+    provider: "fred",
     pattern: /^core pce price index m\/m$/i,
     seriesId: "PCEPILFE",
     cadence: "monthly",
@@ -272,6 +332,7 @@ const officialActualRules: OfficialActualRule[] = [
     sourceUrl: "https://fred.stlouisfed.org/series/PCEPILFE",
   },
   {
+    provider: "fred",
     pattern: /^employment cost index q\/q$/i,
     seriesId: "ECIALLCIV",
     cadence: "quarterly",
@@ -281,12 +342,72 @@ const officialActualRules: OfficialActualRule[] = [
     sourceUrl: "https://fred.stlouisfed.org/series/ECIALLCIV",
   },
   {
+    provider: "fred",
     pattern: /^(unemployment claims|initial jobless claims|jobless claims)$/i,
     seriesId: "ICSA",
     cadence: "weekly",
     metric: "thousandsK",
     source: "FRED / DOL official initial claims",
     sourceUrl: "https://fred.stlouisfed.org/series/ICSA",
+  },
+  {
+    provider: "eurostat",
+    pattern: /^german prelim gdp q\/q$/i,
+    dataset: "namq_10_gdp",
+    params: {
+      freq: "Q",
+      unit: "CLV_PCH_PRE",
+      s_adj: "SCA",
+      na_item: "B1GQ",
+      geo: "DE",
+    },
+    cadence: "quarterly",
+    metric: "valuePercent",
+    decimals: 1,
+    source: "Eurostat / German GDP",
+    sourceUrl: "https://ec.europa.eu/eurostat/databrowser/view/namq_10_gdp/default/table",
+  },
+  {
+    provider: "eurostat",
+    pattern: /^core cpi flash estimate y\/y$/i,
+    dataset: "ei_cphi_m",
+    params: {
+      freq: "M",
+      unit: "RT12",
+      indic: "CP-HI00XEF",
+      geo: "EA20",
+    },
+    cadence: "monthly",
+    metric: "valuePercent",
+    decimals: 1,
+    source: "Eurostat / HICP flash core inflation",
+    sourceUrl: "https://ec.europa.eu/eurostat/databrowser/view/ei_cphi_m/default/table",
+  },
+  {
+    provider: "eurostat",
+    pattern: /^cpi flash estimate y\/y$/i,
+    dataset: "ei_cphi_m",
+    params: {
+      freq: "M",
+      unit: "RT12",
+      indic: "TOTAL",
+      geo: "EA20",
+    },
+    cadence: "monthly",
+    metric: "valuePercent",
+    decimals: 1,
+    source: "Eurostat / HICP flash inflation",
+    sourceUrl: "https://ec.europa.eu/eurostat/databrowser/view/ei_cphi_m/default/table",
+  },
+  {
+    provider: "ecb",
+    pattern: /^main refinancing rate$/i,
+    dataPath: "FM/D.U2.EUR.4F.KR.MRR_FR.LEV",
+    cadence: "daily",
+    metric: "valuePercent",
+    decimals: 2,
+    source: "ECB Data Portal / Main refinancing rate",
+    sourceUrl: "https://data.ecb.europa.eu/data/datasets/FM/FM.D.U2.EUR.4F.KR.MRR_FR.LEV",
   },
 ];
 
@@ -365,6 +486,41 @@ function formatOfficialPeriod(date: string, cadence: OfficialActualCadence) {
   return `${bgMonthNames[month - 1] ?? month} ${year}`;
 }
 
+function formatEurostatPeriod(time: string, cadence: OfficialActualCadence) {
+  const quarterMatch = time.match(/^(\d{4})-Q([1-4])$/);
+
+  if (quarterMatch) {
+    return `Q${quarterMatch[2]} ${quarterMatch[1]}`;
+  }
+
+  const monthMatch = time.match(/^(\d{4})-(\d{2})$/);
+
+  if (monthMatch && cadence === "monthly") {
+    const month = Number(monthMatch[2]);
+    return `${bgMonthNames[month - 1] ?? month} ${monthMatch[1]}`;
+  }
+
+  return formatOfficialPeriod(time, cadence);
+}
+
+function eurostatTimeToObservationDate(time: string) {
+  const quarterMatch = time.match(/^(\d{4})-Q([1-4])$/);
+
+  if (quarterMatch) {
+    const year = Number(quarterMatch[1]);
+    const quarter = Number(quarterMatch[2]);
+    const month = quarter * 3;
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  }
+
+  if (/^\d{4}-\d{2}$/.test(time)) {
+    return `${time}-01`;
+  }
+
+  return time;
+}
+
 function formatPercent(value: number, decimals = 1) {
   return `${value.toFixed(decimals)}%`;
 }
@@ -419,7 +575,7 @@ function inferDrivers(item: TradingEconomicsCalendarItem): DriverTag[] {
     drivers.add("usd");
   }
 
-  if (/(fed|fomc|interest rate|rate decision)/.test(text)) {
+  if (/(fed|fomc|ecb|central bank|monetary policy|interest rate|rate decision|refinancing rate)/.test(text)) {
     drivers.add("fed");
     drivers.add("real_yields");
     drivers.add("nominal_yields");
@@ -501,7 +657,7 @@ function inferDirection(item: TradingEconomicsCalendarItem): SignalDirection {
     return hotterOrStronger ? "bearish" : "bullish";
   }
 
-  if (/(treasury|yield|auction|interest rate|fed|fomc)/.test(text)) {
+  if (/(treasury|yield|auction|interest rate|fed|fomc|ecb|refinancing rate)/.test(text)) {
     return hotterOrStronger ? "bearish" : "bullish";
   }
 
@@ -519,8 +675,8 @@ function explanationFor(item: TradingEconomicsCalendarItem, drivers: DriverTag[]
     return "Трудовият пазар влияе върху долара и доходностите, защото променя очакванията дали Fed може да омекне или трябва да остане твърд.";
   }
 
-  if (/(fed|fomc|interest rate|rate decision)/.test(text)) {
-    return "Fed събитията са директен драйвер за златото, защото движат реалните доходности, долара и очакванията за бъдещата цена на парите.";
+  if (/(fed|fomc|ecb|central bank|monetary policy|interest rate|rate decision|refinancing rate)/.test(text)) {
+    return "Събитията на централните банки са директен драйвер за златото, защото движат реалните доходности, валутите и очакванията за бъдещата цена на парите.";
   }
 
   if (/(gdp|pmi|ism|retail|confidence|sentiment)/.test(text)) {
@@ -551,7 +707,7 @@ function scenarioFor(item: TradingEconomicsCalendarItem) {
     };
   }
 
-  if (/(fed|fomc|interest rate|rate decision)/.test(text)) {
+  if (/(fed|fomc|ecb|central bank|monetary policy|interest rate|rate decision|refinancing rate)/.test(text)) {
     return {
       bullish:
         "По-мек тон от Fed може да отслаби долара и реалните доходности, което е позитивно за злато.",
@@ -725,8 +881,22 @@ function getOfficialActualFactForEvent(
 function isReleaseOnlyFedEvent(event: Pick<EconomicCalendarEvent, "title" | "eventType">) {
   return (
     event.eventType === "central_bank" &&
-    /(fomc statement|fomc press conference)/i.test(event.title)
+    /(fomc statement|fomc press conference|monetary policy statement|ecb press conference)/i.test(event.title)
   );
+}
+
+function releaseOnlySourceFor(event: EconomicCalendarEvent) {
+  if (event.currency === "EUR" || /ecb|monetary policy/i.test(event.title)) {
+    return {
+      source: "European Central Bank",
+      sourceUrl: "https://www.ecb.europa.eu/press/pr/date/html/index.en.html",
+    };
+  }
+
+  return {
+    source: event.source || "Federal Reserve",
+    sourceUrl: event.sourceUrl ?? "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+  };
 }
 
 function enrichEventWithOfficialActual(
@@ -746,14 +916,16 @@ function enrichEventWithOfficialActual(
   const isReleased = Number.isFinite(startsAtMs) && startsAtMs <= now.getTime();
 
   if (!fact && isReleased && isReleaseOnlyFedEvent(event)) {
+    const releaseSource = releaseOnlySourceFor(event);
+
     return {
       ...event,
       actual: "Публикувано",
-      actualSource: event.source || "Federal Reserve",
+      actualSource: releaseSource.source,
       actualUpdatedAt: now.toISOString(),
       actualStatus: "published",
-      source: event.source || "Federal Reserve",
-      sourceUrl: event.sourceUrl ?? "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      source: event.source || releaseSource.source,
+      sourceUrl: event.sourceUrl ?? releaseSource.sourceUrl,
       expectedGoldImpact: "mixed",
     };
   }
@@ -969,6 +1141,91 @@ function formatOfficialActual(rule: OfficialActualRule, latest: FredObservation,
   return formatPercent((latestValue / previousValue - 1) * 100, rule.decimals ?? 1);
 }
 
+function flatIndexToCoordinates(index: number, sizes: number[]) {
+  return sizes.map((size, dimensionIndex) => {
+    const stride = sizes.slice(dimensionIndex + 1).reduce((product, current) => product * current, 1);
+    return Math.floor(index / stride) % size;
+  });
+}
+
+export function mapEurostatDatasetToOfficialFacts(
+  rule: EurostatOfficialActualRule,
+  payload: EurostatDatasetResponse,
+): OfficialActualFact[] {
+  const ids = payload.id ?? [];
+  const sizes = payload.size ?? [];
+  const timeDimensionIndex = ids.indexOf("time");
+  const timeIndex = payload.dimension?.time?.category?.index ?? {};
+
+  if (timeDimensionIndex === -1 || !sizes.length || !payload.value) {
+    return [];
+  }
+
+  const timeByPosition = new Map<number, string>(
+    Object.entries(timeIndex).map(([time, index]) => [index, time]),
+  );
+
+  return Object.entries(payload.value)
+    .map(([flatIndex, value]) => {
+      const index = Number(flatIndex);
+      if (!Number.isFinite(index) || !Number.isFinite(value)) {
+        return null;
+      }
+
+      const coordinates = flatIndexToCoordinates(index, sizes);
+      const time = timeByPosition.get(coordinates[timeDimensionIndex]);
+
+      if (!time) {
+        return null;
+      }
+
+      return {
+        actual: formatPercent(value, rule.decimals ?? 1),
+        period: formatEurostatPeriod(time, rule.cadence),
+        observationDate: eurostatTimeToObservationDate(time),
+        source: rule.source,
+        sourceUrl: rule.sourceUrl,
+      } satisfies OfficialActualFact;
+    })
+    .filter((fact): fact is OfficialActualFact => Boolean(fact))
+    .sort((left, right) => right.observationDate.localeCompare(left.observationDate));
+}
+
+export function mapEcbJsonDataToOfficialFacts(
+  rule: EcbOfficialActualRule,
+  payload: EcbJsonDataResponse,
+): OfficialActualFact[] {
+  const timeDimension = payload.structure?.dimensions?.observation?.find(
+    (dimension) => dimension.id === "TIME_PERIOD" || dimension.role === "time",
+  );
+  const observations = Object.values(payload.dataSets?.[0]?.series ?? {})
+    .flatMap((series) => Object.entries(series.observations ?? {}));
+
+  if (!timeDimension?.values?.length || !observations.length) {
+    return [];
+  }
+
+  return observations
+    .map(([timeIndex, observation]) => {
+      const time = timeDimension.values?.[Number(timeIndex)]?.id;
+      const value = observation[0];
+
+      if (!time || !Number.isFinite(value)) {
+        return null;
+      }
+
+      return {
+        actual: formatPercent(value, rule.decimals ?? 2),
+        period: formatOfficialPeriod(time, rule.cadence),
+        observationDate: time,
+        source: rule.source,
+        sourceUrl: rule.sourceUrl,
+      } satisfies OfficialActualFact;
+    })
+    .filter((fact): fact is OfficialActualFact => Boolean(fact))
+    .sort((left, right) => right.observationDate.localeCompare(left.observationDate));
+}
+
 function isOfficialFactFreshForEvent(
   rule: OfficialActualRule,
   fact: OfficialActualFact,
@@ -1016,47 +1273,116 @@ async function fetchFredObservations(seriesId: string): Promise<FredObservation[
   return (payload.observations ?? []).filter((observation) => parseFredNumber(observation.value) !== null);
 }
 
-async function fetchOfficialActualFacts() {
-  const facts = new Map<string, OfficialActualFact[]>();
+async function fetchEurostatOfficialFacts(rule: EurostatOfficialActualRule) {
+  const url = new URL(
+    `https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/${rule.dataset}`,
+  );
+  url.searchParams.set("format", "JSON");
+  url.searchParams.set("lang", "en");
+  url.searchParams.set("lastTimePeriod", "8");
 
-  if (!env.FRED_API_KEY) {
-    return facts;
+  for (const [key, value] of Object.entries(rule.params)) {
+    url.searchParams.set(key, value);
   }
 
-  const uniqueSeriesIds = [...new Set(officialActualRules.map((rule) => rule.seriesId))];
-  const results = await Promise.allSettled(
-    uniqueSeriesIds.map(async (seriesId) => [seriesId, await fetchFredObservations(seriesId)] as const),
-  );
-  const observationsBySeriesId = new Map<string, FredObservation[]>();
+  const response = await fetch(url, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(15000),
+  });
 
-  for (const result of results) {
-    if (result.status === "fulfilled") {
-      observationsBySeriesId.set(result.value[0], result.value[1]);
+  if (!response.ok) {
+    throw new Error(`Eurostat request failed for ${rule.dataset}: ${response.status}`);
+  }
+
+  return mapEurostatDatasetToOfficialFacts(rule, await response.json() as EurostatDatasetResponse);
+}
+
+async function fetchEcbOfficialFacts(rule: EcbOfficialActualRule) {
+  const url = new URL(`https://data-api.ecb.europa.eu/service/data/${rule.dataPath}`);
+  url.searchParams.set("lastNObservations", "8");
+  url.searchParams.set("format", "jsondata");
+
+  const response = await fetch(url, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`ECB Data Portal request failed for ${rule.dataPath}: ${response.status}`);
+  }
+
+  return mapEcbJsonDataToOfficialFacts(rule, await response.json() as EcbJsonDataResponse);
+}
+
+function setOfficialFacts(
+  facts: Map<string, OfficialActualFact[]>,
+  rule: OfficialActualRule,
+  ruleFacts: OfficialActualFact[],
+) {
+  if (ruleFacts.length) {
+    facts.set(rule.pattern.source, ruleFacts);
+  }
+}
+
+async function fetchOfficialActualFacts() {
+  const facts = new Map<string, OfficialActualFact[]>();
+  const fredRules = officialActualRules.filter(
+    (rule): rule is FredOfficialActualRule => rule.provider === "fred",
+  );
+  const eurostatRules = officialActualRules.filter(
+    (rule): rule is EurostatOfficialActualRule => rule.provider === "eurostat",
+  );
+  const ecbRules = officialActualRules.filter(
+    (rule): rule is EcbOfficialActualRule => rule.provider === "ecb",
+  );
+
+  if (env.FRED_API_KEY) {
+    const uniqueSeriesIds = [...new Set(fredRules.map((rule) => rule.seriesId))];
+    const results = await Promise.allSettled(
+      uniqueSeriesIds.map(async (seriesId) => [seriesId, await fetchFredObservations(seriesId)] as const),
+    );
+    const observationsBySeriesId = new Map<string, FredObservation[]>();
+
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        observationsBySeriesId.set(result.value[0], result.value[1]);
+      }
+    }
+
+    for (const rule of fredRules) {
+      const observations = observationsBySeriesId.get(rule.seriesId) ?? [];
+      const ruleFacts: OfficialActualFact[] = [];
+
+      observations.forEach((observation, index) => {
+        const actual = formatOfficialActual(rule, observation, observations[index + 1]);
+
+        if (!actual) {
+          return;
+        }
+
+        ruleFacts.push({
+          actual,
+          period: formatOfficialPeriod(observation.date, rule.cadence),
+          observationDate: observation.date,
+          source: rule.source,
+          sourceUrl: rule.sourceUrl,
+        });
+      });
+
+      setOfficialFacts(facts, rule, ruleFacts);
     }
   }
 
-  for (const rule of officialActualRules) {
-    const observations = observationsBySeriesId.get(rule.seriesId) ?? [];
-    const ruleFacts: OfficialActualFact[] = [];
+  const eurostatResults = await Promise.allSettled(
+    eurostatRules.map(async (rule) => [rule, await fetchEurostatOfficialFacts(rule)] as const),
+  );
+  const ecbResults = await Promise.allSettled(
+    ecbRules.map(async (rule) => [rule, await fetchEcbOfficialFacts(rule)] as const),
+  );
 
-    observations.forEach((observation, index) => {
-      const actual = formatOfficialActual(rule, observation, observations[index + 1]);
-
-      if (!actual) {
-        return;
-      }
-
-      ruleFacts.push({
-        actual,
-        period: formatOfficialPeriod(observation.date, rule.cadence),
-        observationDate: observation.date,
-        source: rule.source,
-        sourceUrl: rule.sourceUrl,
-      });
-    });
-
-    if (ruleFacts.length) {
-      facts.set(rule.pattern.source, ruleFacts);
+  for (const result of [...eurostatResults, ...ecbResults]) {
+    if (result.status === "fulfilled") {
+      setOfficialFacts(facts, result.value[0], result.value[1]);
     }
   }
 
@@ -1254,7 +1580,9 @@ export function mapFredReleaseDatesToCalendarEvents(
     .filter((event): event is EconomicCalendarEvent => Boolean(event));
 }
 
-export async function fetchFreeOfficialCalendarEvents(): Promise<EconomicCalendarEvent[]> {
+export async function fetchFreeOfficialCalendarEvents(
+  retainedEvents: EconomicCalendarEvent[] = [],
+): Promise<EconomicCalendarEvent[]> {
   const [fredResult, blsResult, fomcResult, forexFactoryResult, officialActualResult] = await Promise.allSettled([
     fetchFredReleaseDates(),
     fetchBlsLatestFacts(),
@@ -1275,11 +1603,15 @@ export async function fetchFreeOfficialCalendarEvents(): Promise<EconomicCalenda
     forexFactoryResult.status === "fulfilled"
       ? enrichCalendarEventsWithOfficialActuals(forexFactoryResult.value, officialActualFacts)
       : [];
+  const retainedEventsWithOfficialActuals =
+    forexFactoryResult.status === "fulfilled"
+      ? []
+      : enrichCalendarEventsWithOfficialActuals(retainedEvents, officialActualFacts);
   const now = new Date();
   const lowWatermark = addDays(now, -14).getTime();
   const highWatermark = addDays(now, 90).getTime();
 
-  return [...forexFactoryEvents, ...fredEvents, ...fomcEvents]
+  return [...retainedEventsWithOfficialActuals, ...forexFactoryEvents, ...fredEvents, ...fomcEvents]
     .filter((event) => {
       const time = new Date(event.startsAt).getTime();
       return time >= lowWatermark && time <= highWatermark;

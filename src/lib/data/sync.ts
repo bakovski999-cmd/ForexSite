@@ -90,7 +90,7 @@ async function fetchCalendarForSync(current: DashboardSnapshot) {
     const source = env.TRADING_ECONOMICS_API_KEY ? "trading-economics-calendar" : "free-calendar";
     const events = env.TRADING_ECONOMICS_API_KEY
       ? await fetchTradingEconomicsCalendarEvents()
-      : await fetchFreeOfficialCalendarEvents();
+      : await fetchFreeOfficialCalendarEvents(lastLiveEvents);
 
     if (!events.length) {
       return {
@@ -108,6 +108,9 @@ async function fetchCalendarForSync(current: DashboardSnapshot) {
         items: events.length,
         liveItems: liveEvents.length,
         retainedItems: mergedEvents.length,
+        actualSources: [
+          ...new Set(mergedEvents.map((event) => event.actualSource).filter(Boolean)),
+        ].slice(0, 8),
       }),
     };
   } catch (error) {

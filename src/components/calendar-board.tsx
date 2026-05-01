@@ -493,7 +493,12 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
       const newestReleaseAgeMs = Math.min(
         ...pendingReleasedEvents.map((event) => Date.now() - new Date(event.startsAt).getTime()),
       );
-      const nextDelayMs = newestReleaseAgeMs <= 30 * 60 * 1000 ? 60_000 : 5 * 60_000;
+      const nextDelayMs =
+        newestReleaseAgeMs <= 10 * 60 * 1000
+          ? 30_000
+          : newestReleaseAgeMs <= 60 * 60 * 1000
+            ? 60_000
+            : 5 * 60_000;
 
       try {
         const response = await fetch("/api/refresh", {
@@ -1010,10 +1015,10 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
             </p>
           </div>
           <div className="rounded-[22px] border border-white/8 bg-white/[0.03] p-5">
-            <p className="text-sm font-semibold text-white">FRED, BLS и Fed слой</p>
+            <p className="text-sm font-semibold text-white">Official fallback слой</p>
             <p className="mt-3 text-sm leading-7 text-slate-300">
-              Официалните източници пазят календара стабилен: FRED дава release dates, BLS
-              добавя последни actual стойности, а Fed добавя FOMC решенията.
+              FRED, BLS, Fed, Eurostat и ECB добавят official actual/status стойности,
+              когато ForexFactory закъснее или е rate-limited.
             </p>
           </div>
           <div className="rounded-[22px] border border-white/8 bg-white/[0.03] p-5">
