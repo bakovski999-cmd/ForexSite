@@ -110,6 +110,40 @@ describe("calendar presentation", () => {
     expect(detail.releaseAnalysis).toContain("в рамките на очакването");
   });
 
+  test("colors comparable calendar values by gold impact while keeping forecast neutral", () => {
+    const panels = getCalendarValuePanels({
+      ...baseEvent,
+      title: "Advance GDP q/q",
+      eventType: "growth",
+      previous: "1.4%",
+      forecast: "2.2%",
+      forecastStatus: "provided",
+      actual: "2.0%",
+      expectedGoldImpact: "bullish",
+    });
+
+    expect(panels.find((panel) => panel.key === "latest")?.tone).toBe("bullish");
+    expect(panels.find((panel) => panel.key === "forecast")?.tone).toBe("neutral");
+    expect(panels.find((panel) => panel.key === "actual")?.tone).toBe("bullish");
+  });
+
+  test("keeps expected values neutral and colors hotter wage data as bearish", () => {
+    const panels = getCalendarValuePanels({
+      ...baseEvent,
+      title: "Employment Cost Index q/q",
+      eventType: "employment",
+      previous: "0.7%",
+      forecast: "0.8%",
+      forecastStatus: "provided",
+      actual: "0.9%",
+      expectedGoldImpact: "bearish",
+    });
+
+    expect(panels.find((panel) => panel.key === "latest")?.tone).toBe("bullish");
+    expect(panels.find((panel) => panel.key === "forecast")?.tone).toBe("neutral");
+    expect(panels.find((panel) => panel.key === "actual")?.tone).toBe("bearish");
+  });
+
   test("marks published FOMC text events as tone-driven", () => {
     const event: EconomicCalendarEvent = {
       ...baseEvent,

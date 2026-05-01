@@ -103,6 +103,22 @@ function StrongXauBadge() {
   );
 }
 
+function valuePanelClass(tone: "bullish" | "bearish" | "neutral") {
+  return {
+    bullish: "border-emerald-300/18 bg-emerald-300/[0.055]",
+    bearish: "border-rose-300/18 bg-rose-300/[0.055]",
+    neutral: "border-white/8 bg-white/[0.035]",
+  }[tone];
+}
+
+function valueTextClass(tone: "bullish" | "bearish" | "neutral") {
+  return {
+    bullish: "text-emerald-100",
+    bearish: "text-rose-100",
+    neutral: "text-white",
+  }[tone];
+}
+
 function groupByDay(events: EconomicCalendarEvent[]) {
   return events.reduce<Record<string, EconomicCalendarEvent[]>>((groups, event) => {
     const key = formatSofiaDateKey(event.startsAt) || event.startsAt.slice(0, 10);
@@ -166,12 +182,15 @@ function CompactValueCells({ event }: { event: EconomicCalendarEvent }) {
       {getCalendarValuePanels(event).map((panel) => (
         <div
           key={panel.key}
-          className="min-w-0 rounded-xl border border-white/8 bg-white/[0.035] px-2.5 py-2"
+          className={cn("min-w-0 rounded-xl border px-2.5 py-2", valuePanelClass(panel.tone))}
         >
           <p className="truncate text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
             {panel.label}
           </p>
-          <p className="mt-1 truncate text-sm font-semibold leading-5 text-white" title={panel.value}>
+          <p
+            className={cn("mt-1 truncate text-sm font-semibold leading-5", valueTextClass(panel.tone))}
+            title={panel.value}
+          >
             {panel.value}
           </p>
         </div>
@@ -184,11 +203,13 @@ function FullValuePanels({ event }: { event: EconomicCalendarEvent }) {
   return (
     <div className="grid gap-3 md:grid-cols-3">
       {getCalendarValuePanels(event).map((panel) => (
-        <div key={panel.key} className="rounded-2xl border border-white/8 bg-white/[0.04] p-4">
+        <div key={panel.key} className={cn("rounded-2xl border p-4", valuePanelClass(panel.tone))}>
           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
             {panel.label}
           </p>
-          <p className="mt-2 break-words text-lg font-semibold text-white">{panel.value}</p>
+          <p className={cn("mt-2 break-words text-lg font-semibold", valueTextClass(panel.tone))}>
+            {panel.value}
+          </p>
           {panel.hint ? <p className="mt-2 text-xs leading-5 text-slate-400">{panel.hint}</p> : null}
         </div>
       ))}

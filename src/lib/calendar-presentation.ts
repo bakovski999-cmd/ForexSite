@@ -14,8 +14,11 @@ type CalendarValuePanel = {
   key: "latest" | "forecast" | "actual";
   label: string;
   value: string;
+  tone: CalendarValueTone;
   hint?: string;
 };
+
+type CalendarValueTone = "bullish" | "bearish" | "neutral";
 
 type CalendarEventDriverDetail = {
   key: DriverTag;
@@ -193,6 +196,7 @@ export function getCalendarValuePanels(event: EconomicCalendarEvent): CalendarVa
       key: "latest",
       label: "Последна",
       value: latestValue,
+      tone: getComparableValueTone(event, latestValue, event.forecast),
       hint: event.latestActualPeriod
         ? `Официална стойност за ${event.latestActualPeriod}`
         : "Последна налична стойност",
@@ -201,12 +205,14 @@ export function getCalendarValuePanels(event: EconomicCalendarEvent): CalendarVa
       key: "forecast",
       label: "Очаквана",
       value: forecastValue,
+      tone: "neutral",
       hint: event.forecast ? "Консенсус/прогноза" : "Без надежден free forecast",
     },
     {
       key: "actual",
       label: "Нов факт",
       value: actualValue,
+      tone: event.actual ? getComparableValueTone(event, event.actual, event.forecast) : "neutral",
       hint: event.actual
         ? `Публикувана стойност${event.actualSource ? ` от ${event.actualSource}` : ""}`
         : event.actualStatus === "source_pending"
@@ -305,6 +311,54 @@ function parseComparableValue(value: string | undefined) {
 
   const parsed = Number(value.replace(/[$,%KMkBb\s]/g, ""));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getComparableValueTone(
+  event: Pick<EconomicCalendarEvent, "eventType" | "forecast" | "title">,
+  value: string | undefined,
+  benchmark: string | undefined,
+): CalendarValueTone {
+  const actual = parseComparableValue(value);
+  const forecast = parseComparableValue(benchmark);
+
+  if (actual === null || forecast === null || actual === forecast) {
+    return "neutral";
+  }
+
+  const direction = inferGoldDirectionFromSurprise(event, actual > forecast);
+
+  if (direction === "bullish" || direction === "bearish") {
+    return direction;
+  }
+
+  return "neutral";
+}
+
+function inferGoldDirectionFromSurprise(
+  event: Pick<EconomicCalendarEvent, "eventType" | "title">,
+  hotterOrStronger: boolean,
+): SignalDirection {
+  const text = titleToDirectionText(event);
+
+  if (/(unemployment|jobless claims|initial claims|continuing claims)/.test(text)) {
+    return hotterOrStronger ? "bullish" : "bearish";
+  }
+
+  if (
+    /(cpi|pce|ppi|inflation|earnings|prices|employment cost|labor cost|labour cost|wage|compensation|payroll|non farm|nonfarm|gdp|pmi|ism|retail|confidence|jolts)/.test(text)
+  ) {
+    return hotterOrStronger ? "bearish" : "bullish";
+  }
+
+  if (/(treasury|yield|auction|interest rate|fed|fomc|rate)/.test(text)) {
+    return hotterOrStronger ? "bearish" : "bullish";
+  }
+
+  return "neutral";
+}
+
+function titleToDirectionText(event: Pick<EconomicCalendarEvent, "eventType" | "title">) {
+  return `${event.eventType} ${event.title}`.toLowerCase();
 }
 
 function isToneBasedFedEvent(
