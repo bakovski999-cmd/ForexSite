@@ -7,6 +7,7 @@ import {
   getCalendarImpactStrength,
   getGoldNewsImpactScore,
   getCalendarValuePanels,
+  getDailyCurrencyAnalyses,
   isStrongGoldCalendarEvent,
   isStrongGoldNews,
 } from "@/lib/calendar-presentation";
@@ -360,5 +361,135 @@ describe("calendar presentation", () => {
     });
 
     expect(direct.score).toBeGreaterThan(context.score);
+  });
+
+  test("builds a USD daily analysis where stronger ISM prices outweigh weak PMI", () => {
+    const analyses = getDailyCurrencyAnalyses([
+      {
+        ...baseEvent,
+        id: "ism-pmi",
+        title: "ISM Manufacturing PMI",
+        impact: "medium",
+        eventType: "business_surveys",
+        relevance: "strong",
+        previous: "52.7",
+        forecast: "53.1",
+        actual: "52.7",
+        expectedGoldImpact: "bullish",
+        affectedDrivers: ["usd", "nominal_yields", "risk"],
+      },
+      {
+        ...baseEvent,
+        id: "ism-prices",
+        title: "ISM Manufacturing Prices",
+        impact: "medium",
+        eventType: "inflation",
+        relevance: "direct",
+        previous: "78.3",
+        forecast: "80.0",
+        actual: "84.6",
+        expectedGoldImpact: "bearish",
+        affectedDrivers: ["inflation", "fed", "usd"],
+      },
+    ]);
+    const usd = analyses.find((analysis) => analysis.currency === "USD");
+
+    expect(analyses).toHaveLength(1);
+    expect(usd?.currencyBias).toBe("mixed");
+    expect(usd?.keyEventTitle).toBe("ISM Manufacturing Prices");
+    expect(usd?.summary).toContain("по-силен USD");
+    expect(usd?.goldImpact).toContain("натиск");
+    expect(usd?.tradingExample).toContain("ценовият натиск");
+  });
+
+  test("lets inflation strength dominate activity PMI in the currency panel", () => {
+    const [analysis] = getDailyCurrencyAnalyses([
+      {
+        ...baseEvent,
+        id: "activity",
+        title: "ISM Manufacturing PMI",
+        impact: "medium",
+        eventType: "business_surveys",
+        relevance: "strong",
+        forecast: "53.1",
+        actual: "52.7",
+        affectedDrivers: ["usd", "nominal_yields", "risk"],
+      },
+      {
+        ...baseEvent,
+        id: "prices",
+        title: "ISM Manufacturing Prices",
+        impact: "medium",
+        eventType: "inflation",
+        relevance: "direct",
+        forecast: "80.0",
+        actual: "84.6",
+        affectedDrivers: ["inflation", "fed", "usd"],
+      },
+    ]);
+
+    expect(analysis.keyEventTitle).toBe("ISM Manufacturing Prices");
+    expect(analysis.eventBreakdown[0]?.title).toBe("ISM Manufacturing Prices");
+  });
+
+  test("creates one currency analysis for a single visible event", () => {
+    const analyses = getDailyCurrencyAnalyses([
+      {
+        ...baseEvent,
+        id: "advance-gdp",
+        title: "Advance GDP q/q",
+        eventType: "growth",
+        forecast: "2.2%",
+        actual: "2.0%",
+        affectedDrivers: ["usd", "nominal_yields", "risk"],
+      },
+    ]);
+
+    expect(analyses).toHaveLength(1);
+    expect(analyses[0]?.currency).toBe("USD");
+    expect(analyses[0]?.eventBreakdown).toHaveLength(1);
+  });
+
+  test("creates separate daily analyses for USD and EUR", () => {
+    const analyses = getDailyCurrencyAnalyses([
+      {
+        ...baseEvent,
+        id: "usd-cpi",
+        currency: "USD",
+        country: "САЩ",
+        title: "Core CPI m/m",
+        forecast: "0.3%",
+        actual: "0.4%",
+      },
+      {
+        ...baseEvent,
+        id: "eur-cpi",
+        currency: "EUR",
+        country: "EUR",
+        title: "CPI Flash Estimate y/y",
+        forecast: "2.2%",
+        actual: "2.1%",
+      },
+    ]);
+
+    expect(analyses.map((analysis) => analysis.currency).sort()).toEqual(["EUR", "USD"]);
+  });
+
+  test("keeps events without actual as scenario analysis", () => {
+    const [analysis] = getDailyCurrencyAnalyses([
+      {
+        ...baseEvent,
+        id: "pending-fed",
+        title: "Federal Funds Rate",
+        eventType: "central_bank",
+        forecast: "3.75%",
+        actual: undefined,
+        affectedDrivers: ["fed", "real_yields", "usd"],
+      },
+    ]);
+
+    expect(analysis.currencyBias).toBe("pending");
+    expect(analysis.finalCurrencyRead).toContain("липсват публикувани actual");
+    expect(analysis.eventBreakdown[0]?.plainRead).toContain("сценарий");
   });
 });

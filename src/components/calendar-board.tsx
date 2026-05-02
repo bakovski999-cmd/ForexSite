@@ -8,6 +8,7 @@ import {
   Bell,
   BellRing,
   CalendarClock,
+  ChevronDown,
   Check,
   Clock3,
   Filter,
@@ -49,7 +50,10 @@ import {
   getCalendarEventDetail,
   getCalendarImpactStrength,
   getCalendarValuePanels,
+  getDailyCurrencyAnalyses,
   isStrongGoldCalendarEvent,
+  type DailyCurrencyAnalysis,
+  type DailyCurrencyBias,
 } from "@/lib/calendar-presentation";
 import { formatSofiaDateKey, formatSofiaDay, formatSofiaTime } from "@/lib/format";
 import type {
@@ -452,6 +456,87 @@ function readJsonStorage(key: string) {
   } catch {
     return null;
   }
+}
+
+function currencyAnalysisClass(bias: DailyCurrencyBias) {
+  return {
+    positive: "border-emerald-300/20 bg-emerald-300/[0.055] text-emerald-100",
+    negative: "border-rose-300/20 bg-rose-300/[0.055] text-rose-100",
+    mixed: "border-amber-300/22 bg-amber-300/[0.07] text-amber-100",
+    neutral: "border-slate-300/18 bg-slate-300/[0.055] text-slate-200",
+    pending: "border-sky-300/18 bg-sky-300/[0.055] text-sky-100",
+  }[bias];
+}
+
+function CurrencyAnalysisPanel({ analysis }: { analysis: DailyCurrencyAnalysis }) {
+  return (
+    <details className="group/currency rounded-[20px] border border-amber-300/14 bg-[#10192d]/72 open:border-amber-300/24 open:bg-[#111d34]">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 p-4 marker:hidden">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-white">{analysis.currency} дневен анализ</p>
+            <span
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                currencyAnalysisClass(analysis.currencyBias),
+              )}
+            >
+              {analysis.badgeLabel}
+            </span>
+          </div>
+          <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-400">{analysis.headline}</p>
+        </div>
+        <div className="flex items-center gap-2 text-xs font-medium text-amber-100">
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
+            Тежест {analysis.score}%
+          </span>
+          <ChevronDown className="size-4 transition group-open/currency:rotate-180" />
+        </div>
+      </summary>
+
+      <div className="border-t border-white/8 px-4 pb-4 pt-3">
+        <p className="text-sm leading-6 text-slate-200">{analysis.summary}</p>
+
+        <div className="mt-4 grid gap-3 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="rounded-[18px] border border-white/8 bg-white/[0.035] p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-100">Кои новини тежат</p>
+            <div className="mt-3 space-y-2">
+              {analysis.eventBreakdown.map((item) => (
+                <div key={item.eventId} className="rounded-2xl border border-white/8 bg-[#0c1426]/75 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-white">{item.title}</p>
+                    <span className="rounded-full border border-amber-300/18 bg-amber-300/[0.08] px-2 py-0.5 text-[11px] font-semibold text-amber-100">
+                      {item.impactScore}% · {item.impactLabel}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs font-medium text-slate-300">{item.valueLine}</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-400">{item.plainRead}</p>
+                  <p className={cn("mt-2 text-xs leading-5", currencyAnalysisClass(item.bias))}>
+                    {item.effectLine}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-3">
+            <div className="rounded-[18px] border border-white/8 bg-white/[0.035] p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-100">Краен прочит</p>
+              <p className="mt-2 text-sm leading-6 text-slate-200">{analysis.finalCurrencyRead}</p>
+            </div>
+            <div className="rounded-[18px] border border-white/8 bg-white/[0.035] p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-100">Как влияе на златото</p>
+              <p className="mt-2 text-sm leading-6 text-slate-200">{analysis.goldImpact}</p>
+            </div>
+            <div className="rounded-[18px] border border-white/8 bg-white/[0.035] p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-100">Търговски пример</p>
+              <p className="mt-2 text-sm leading-6 text-slate-200">{analysis.tradingExample}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </details>
+  );
 }
 
 export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
@@ -909,181 +994,193 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
             </div>
           ) : null}
 
-          {Object.entries(groupedEvents).map(([day, dayEvents]) => (
-            <div key={day} className="rounded-[24px] border border-white/8 bg-white/[0.03] p-4">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex size-10 items-center justify-center rounded-2xl bg-amber-300/[0.12] text-amber-100">
-                    <CalendarClock className="size-5" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold capitalize text-white">{formatSofiaDay(day)}</p>
-                    <p className="text-xs text-slate-400">{dayEvents.length} събития</p>
+          {Object.entries(groupedEvents).map(([day, dayEvents]) => {
+            const dayAnalyses = getDailyCurrencyAnalyses(dayEvents);
+
+            return (
+              <div key={day} className="rounded-[24px] border border-white/8 bg-white/[0.03] p-4">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-2xl bg-amber-300/[0.12] text-amber-100">
+                      <CalendarClock className="size-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold capitalize text-white">{formatSofiaDay(day)}</p>
+                      <p className="text-xs text-slate-400">{dayEvents.length} събития</p>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="hidden grid-cols-[74px_78px_minmax(220px,1fr)_minmax(270px,390px)_154px_48px] gap-3 px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 xl:grid">
-                <span>Час</span>
-                <span>Валута</span>
-                <span>Новина</span>
-                <span>Стойности</span>
-                <span>Посока</span>
-                <span className="text-right">Аларма</span>
-              </div>
+                {dayAnalyses.length ? (
+                  <div className="mb-4 grid gap-3">
+                    {dayAnalyses.map((analysis) => (
+                      <CurrencyAnalysisPanel key={analysis.currency} analysis={analysis} />
+                    ))}
+                  </div>
+                ) : null}
 
-              <div className="space-y-2">
-                {dayEvents.map((event) => {
-                  const alert = alertsById.get(event.id);
-                  const direction = getCalendarDirectionPresentation(event);
-                  const settings =
-                    alert ??
-                    buildAlertForEvent(event, {
-                      notifyBeforeMinutes: 10,
-                      notifyOnPublish: true,
-                    });
+                <div className="hidden grid-cols-[74px_78px_minmax(220px,1fr)_minmax(270px,390px)_154px_48px] gap-3 px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 xl:grid">
+                  <span>Час</span>
+                  <span>Валута</span>
+                  <span>Новина</span>
+                  <span>Стойности</span>
+                  <span>Посока</span>
+                  <span className="text-right">Аларма</span>
+                </div>
 
-                  return (
-                    <div key={event.id} className="relative">
-                      <article
-                        role="button"
-                        tabIndex={0}
-                        data-testid="calendar-event-row"
-                        onClick={() => setSelectedEvent(event)}
-                        onKeyDown={(keyboardEvent) => {
-                          if (keyboardEvent.key === "Enter" || keyboardEvent.key === " ") {
-                            keyboardEvent.preventDefault();
-                            setSelectedEvent(event);
-                          }
-                        }}
-                        className="grid cursor-pointer gap-3 rounded-[18px] border border-white/8 bg-[#0c1426]/90 p-3 transition hover:border-amber-300/28 hover:bg-[#111c32] focus:outline-none focus:ring-2 focus:ring-amber-300/35 xl:grid-cols-[74px_78px_minmax(220px,1fr)_minmax(270px,390px)_154px_48px] xl:items-center"
-                      >
-                        <div className="flex items-center gap-2 text-sm font-semibold text-white">
-                          <Clock3 className="size-4 text-amber-200" />
-                          {formatSofiaTime(event.startsAt)}
-                        </div>
+                <div className="space-y-2">
+                  {dayEvents.map((event) => {
+                    const alert = alertsById.get(event.id);
+                    const direction = getCalendarDirectionPresentation(event);
+                    const settings =
+                      alert ??
+                      buildAlertForEvent(event, {
+                        notifyBeforeMinutes: 10,
+                        notifyOnPublish: true,
+                      });
 
-                        <div className="text-xs font-medium text-slate-400">
-                          <p className="text-slate-200">{event.currency}</p>
-                          <p className="mt-0.5 truncate">{event.country}</p>
-                        </div>
-
-                        <div className="min-w-0">
-                          <h2 className="truncate text-base font-semibold text-white" title={event.title}>
-                            {event.title}
-                          </h2>
-                          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                            <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", impactClass(event.impact))}>
-                              {calendarImpactLabels[event.impact]} impact
-                            </span>
-                            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[11px] text-slate-200">
-                              {calendarEventTypeLabels[event.eventType]}
-                            </span>
-                            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[11px] text-slate-200">
-                              {relevanceLabels[event.relevance]}
-                            </span>
-                            {isStrongGoldCalendarEvent(event) ? <StrongXauBadge /> : null}
-                          </div>
-                          <ImpactStrengthMeter event={event} />
-                        </div>
-
-                        <CompactValueCells event={event} />
-
-                        <div
-                          className={cn(
-                            "inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium xl:w-full xl:justify-center",
-                            directionClass(direction.direction),
-                          )}
+                    return (
+                      <div key={event.id} className="relative">
+                        <article
+                          role="button"
+                          tabIndex={0}
+                          data-testid="calendar-event-row"
+                          onClick={() => setSelectedEvent(event)}
+                          onKeyDown={(keyboardEvent) => {
+                            if (keyboardEvent.key === "Enter" || keyboardEvent.key === " ") {
+                              keyboardEvent.preventDefault();
+                              setSelectedEvent(event);
+                            }
+                          }}
+                          className="grid cursor-pointer gap-3 rounded-[18px] border border-white/8 bg-[#0c1426]/90 p-3 transition hover:border-amber-300/28 hover:bg-[#111c32] focus:outline-none focus:ring-2 focus:ring-amber-300/35 xl:grid-cols-[74px_78px_minmax(220px,1fr)_minmax(270px,390px)_154px_48px] xl:items-center"
                         >
-                          <DirectionIcon direction={direction.direction} />
-                          <span className="truncate">{direction.label}</span>
-                        </div>
-
-                        <div className="flex justify-end">
-                          <button
-                            type="button"
-                            onClick={(mouseEvent) => {
-                              mouseEvent.stopPropagation();
-                              setActiveAlertId((current) => (current === event.id ? null : event.id));
-                            }}
-                            className={cn(
-                              "flex size-10 items-center justify-center rounded-full border text-xs font-semibold transition",
-                              alert
-                                ? "border-amber-300/35 bg-amber-300/14 text-amber-100"
-                                : "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]",
-                            )}
-                            aria-label={`${alert ? "Редактирай аларма" : "Добави аларма"} за ${event.title}`}
-                          >
-                            {alert ? <BellRing className="size-4" /> : <Bell className="size-4" />}
-                          </button>
-                        </div>
-                      </article>
-
-                      {activeAlertId === event.id ? (
-                        <div className="absolute right-2 top-[calc(100%-4px)] z-20 w-[min(360px,calc(100vw-2rem))] rounded-2xl border border-amber-300/18 bg-[#121c31] p-3 shadow-[0_22px_60px_rgba(0,0,0,0.38)]">
-                          <p className="text-sm font-semibold text-white">Аларма за събитието</p>
-                          {!alert ? (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                void upsertAlert(event, {
-                                  notifyBeforeMinutes: 10,
-                                  notifyOnPublish: true,
-                                })
-                              }
-                              className="mt-3 inline-flex h-9 items-center gap-2 rounded-full border border-amber-300/30 bg-amber-300/14 px-3 text-xs font-semibold text-amber-100 transition hover:bg-amber-300/20"
-                            >
-                              <BellRing className="size-4" />
-                              Активирай аларма
-                            </button>
-                          ) : null}
-                          <div className="mt-3 space-y-2">
-                            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-200">
-                              <input
-                                type="checkbox"
-                                checked={Boolean(settings.notifyBeforeMinutes)}
-                                onChange={() =>
-                                  void upsertAlert(event, {
-                                    notifyBeforeMinutes: settings.notifyBeforeMinutes ? null : 10,
-                                    notifyOnPublish: settings.notifyOnPublish,
-                                  })
-                                }
-                                className="size-4 accent-amber-300"
-                              />
-                              10 минути преди събитието
-                            </label>
-                            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-200">
-                              <input
-                                type="checkbox"
-                                checked={settings.notifyOnPublish}
-                                onChange={() =>
-                                  void upsertAlert(event, {
-                                    notifyBeforeMinutes: settings.notifyBeforeMinutes,
-                                    notifyOnPublish: !settings.notifyOnPublish,
-                                  })
-                                }
-                                className="size-4 accent-amber-300"
-                              />
-                              При публикуван резултат
-                            </label>
+                          <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                            <Clock3 className="size-4 text-amber-200" />
+                            {formatSofiaTime(event.startsAt)}
                           </div>
-                          {alert ? (
+
+                          <div className="text-xs font-medium text-slate-400">
+                            <p className="text-slate-200">{event.currency}</p>
+                            <p className="mt-0.5 truncate">{event.country}</p>
+                          </div>
+
+                          <div className="min-w-0">
+                            <h2 className="truncate text-base font-semibold text-white" title={event.title}>
+                              {event.title}
+                            </h2>
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                              <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", impactClass(event.impact))}>
+                                {calendarImpactLabels[event.impact]} impact
+                              </span>
+                              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[11px] text-slate-200">
+                                {calendarEventTypeLabels[event.eventType]}
+                              </span>
+                              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[11px] text-slate-200">
+                                {relevanceLabels[event.relevance]}
+                              </span>
+                              {isStrongGoldCalendarEvent(event) ? <StrongXauBadge /> : null}
+                            </div>
+                            <ImpactStrengthMeter event={event} />
+                          </div>
+
+                          <CompactValueCells event={event} />
+
+                          <div
+                            className={cn(
+                              "inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium xl:w-full xl:justify-center",
+                              directionClass(direction.direction),
+                            )}
+                          >
+                            <DirectionIcon direction={direction.direction} />
+                            <span className="truncate">{direction.label}</span>
+                          </div>
+
+                          <div className="flex justify-end">
                             <button
                               type="button"
-                              onClick={() => removeAlert(event.id)}
-                              className="mt-3 inline-flex h-9 items-center rounded-full border border-white/10 bg-white/[0.04] px-3 text-xs font-medium text-slate-200 transition hover:bg-white/[0.08]"
+                              onClick={(mouseEvent) => {
+                                mouseEvent.stopPropagation();
+                                setActiveAlertId((current) => (current === event.id ? null : event.id));
+                              }}
+                              className={cn(
+                                "flex size-10 items-center justify-center rounded-full border text-xs font-semibold transition",
+                                alert
+                                  ? "border-amber-300/35 bg-amber-300/14 text-amber-100"
+                                  : "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]",
+                              )}
+                              aria-label={`${alert ? "Редактирай аларма" : "Добави аларма"} за ${event.title}`}
                             >
-                              Премахни алармата
+                              {alert ? <BellRing className="size-4" /> : <Bell className="size-4" />}
                             </button>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
+                          </div>
+                        </article>
+
+                        {activeAlertId === event.id ? (
+                          <div className="absolute right-2 top-[calc(100%-4px)] z-20 w-[min(360px,calc(100vw-2rem))] rounded-2xl border border-amber-300/18 bg-[#121c31] p-3 shadow-[0_22px_60px_rgba(0,0,0,0.38)]">
+                            <p className="text-sm font-semibold text-white">Аларма за събитието</p>
+                            {!alert ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void upsertAlert(event, {
+                                    notifyBeforeMinutes: 10,
+                                    notifyOnPublish: true,
+                                  })
+                                }
+                                className="mt-3 inline-flex h-9 items-center gap-2 rounded-full border border-amber-300/30 bg-amber-300/14 px-3 text-xs font-semibold text-amber-100 transition hover:bg-amber-300/20"
+                              >
+                                <BellRing className="size-4" />
+                                Активирай аларма
+                              </button>
+                            ) : null}
+                            <div className="mt-3 space-y-2">
+                              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-200">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(settings.notifyBeforeMinutes)}
+                                  onChange={() =>
+                                    void upsertAlert(event, {
+                                      notifyBeforeMinutes: settings.notifyBeforeMinutes ? null : 10,
+                                      notifyOnPublish: settings.notifyOnPublish,
+                                    })
+                                  }
+                                  className="size-4 accent-amber-300"
+                                />
+                                10 минути преди събитието
+                              </label>
+                              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-200">
+                                <input
+                                  type="checkbox"
+                                  checked={settings.notifyOnPublish}
+                                  onChange={() =>
+                                    void upsertAlert(event, {
+                                      notifyBeforeMinutes: settings.notifyBeforeMinutes,
+                                      notifyOnPublish: !settings.notifyOnPublish,
+                                    })
+                                  }
+                                  className="size-4 accent-amber-300"
+                                />
+                                При публикуван резултат
+                              </label>
+                            </div>
+                            {alert ? (
+                              <button
+                                type="button"
+                                onClick={() => removeAlert(event.id)}
+                                className="mt-3 inline-flex h-9 items-center rounded-full border border-white/10 bg-white/[0.04] px-3 text-xs font-medium text-slate-200 transition hover:bg-white/[0.08]"
+                              >
+                                Премахни алармата
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </SectionCard>
 

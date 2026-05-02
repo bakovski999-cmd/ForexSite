@@ -49,6 +49,34 @@ export type CalendarDirectionPresentation = {
   label: string;
 };
 
+export type DailyCurrencyBias = "positive" | "negative" | "mixed" | "neutral" | "pending";
+
+export type DailyCurrencyEventBreakdown = {
+  eventId: string;
+  title: string;
+  impactScore: number;
+  impactLabel: string;
+  valueLine: string;
+  plainRead: string;
+  effectLine: string;
+  bias: DailyCurrencyBias;
+};
+
+export type DailyCurrencyAnalysis = {
+  currency: string;
+  currencyBias: DailyCurrencyBias;
+  goldBias: SignalDirection;
+  headline: string;
+  summary: string;
+  keyEventTitle: string;
+  eventBreakdown: DailyCurrencyEventBreakdown[];
+  finalCurrencyRead: string;
+  goldImpact: string;
+  tradingExample: string;
+  badgeLabel: string;
+  score: number;
+};
+
 const driverDetailCopy: Record<DriverTag, CalendarEventDriverDetail> = {
   usd: {
     key: "usd",
@@ -500,6 +528,552 @@ export function getCalendarEventDetail(event: EconomicCalendarEvent): CalendarEv
     releaseAnalysis,
     driverDetails: getDriverDetails(event),
   };
+}
+
+export function getDailyCurrencyAnalyses(events: EconomicCalendarEvent[]): DailyCurrencyAnalysis[] {
+  const groups = events.reduce<Record<string, EconomicCalendarEvent[]>>((accumulator, event) => {
+    accumulator[event.currency] ??= [];
+    accumulator[event.currency].push(event);
+    return accumulator;
+  }, {});
+
+  return Object.entries(groups)
+    .sort(([firstCurrency], [secondCurrency]) => firstCurrency.localeCompare(secondCurrency))
+    .map(([currency, currencyEvents]) => getDailyCurrencyAnalysis(currency, currencyEvents));
+}
+
+export function getDailyCurrencyAnalysis(
+  currency: string,
+  events: EconomicCalendarEvent[],
+): DailyCurrencyAnalysis {
+  const sortedEvents = [...events].sort((first, second) => {
+    const firstTime = new Date(first.startsAt).getTime();
+    const secondTime = new Date(second.startsAt).getTime();
+    return firstTime - secondTime || first.title.localeCompare(second.title);
+  });
+  const reads = sortedEvents.map(getCurrencyEventRead);
+  const weightedReads = reads.filter((read) => read.sign !== 0);
+  const positiveReads = weightedReads.filter((read) => read.sign > 0);
+  const negativeReads = weightedReads.filter((read) => read.sign < 0);
+  const totalWeight = weightedReads.reduce((sum, read) => sum + read.weight, 0);
+  const weightedScore = weightedReads.reduce((sum, read) => sum + read.sign * read.weight, 0);
+  const scoreRatio = totalWeight ? weightedScore / totalWeight : 0;
+  const strongestReadScore = reads.reduce((maxScore, read) => Math.max(maxScore, read.strength.score), 0);
+  const score = totalWeight ? Math.round(Math.min(100, Math.abs(scoreRatio) * 55 + strongestReadScore * 0.45)) : 0;
+  const hasPending = reads.some((read) => read.bias === "pending");
+  const currencyBias = getDailyCurrencyBias(positiveReads.length, negativeReads.length, weightedScore, totalWeight, hasPending);
+  const dominantCurrencyBias = scoreRatio > 0.12 ? "positive" : scoreRatio < -0.12 ? "negative" : "neutral";
+  const goldBias = getDailyGoldBias(currency, reads);
+  const keyRead =
+    reads
+      .filter((read) => read.bias !== "pending")
+      .sort((first, second) => second.weight - first.weight)[0] ??
+    reads.sort((first, second) => second.weight - first.weight)[0];
+  const keyEventTitle = keyRead?.event.title ?? "Няма ключова новина";
+  const eventBreakdown = reads
+    .sort((first, second) => second.weight - first.weight)
+    .map((read) => ({
+      eventId: read.event.id,
+      title: read.event.title,
+      impactScore: read.strength.score,
+      impactLabel: read.strength.tier,
+      valueLine: read.valueLine,
+      plainRead: read.plainRead,
+      effectLine: read.effectLine,
+      bias: read.bias,
+    }));
+  const headline = getDailyHeadline(currency, currencyBias, dominantCurrencyBias, goldBias);
+  const summary = getDailySummary(currency, currencyBias, dominantCurrencyBias, keyEventTitle, hasPending, reads);
+  const finalCurrencyRead = getFinalCurrencyRead(currency, currencyBias, dominantCurrencyBias, score, positiveReads.length, negativeReads.length);
+  const goldImpact = getDailyGoldImpact(currency, goldBias, currencyBias, dominantCurrencyBias);
+  const tradingExample = getDailyTradingExample(currency, currencyBias, dominantCurrencyBias, goldBias, keyRead, reads);
+
+  return {
+    currency,
+    currencyBias,
+    goldBias,
+    headline,
+    summary,
+    keyEventTitle,
+    eventBreakdown,
+    finalCurrencyRead,
+    goldImpact,
+    tradingExample,
+    badgeLabel: getDailyBadgeLabel(currency, currencyBias, dominantCurrencyBias, goldBias),
+    score,
+  };
+}
+
+type CurrencyEventRead = {
+  event: EconomicCalendarEvent;
+  strength: CalendarImpactStrength;
+  valueLine: string;
+  plainRead: string;
+  effectLine: string;
+  bias: DailyCurrencyBias;
+  sign: -1 | 0 | 1;
+  weight: number;
+};
+
+function getCurrencyEventRead(event: EconomicCalendarEvent): CurrencyEventRead {
+  const strength = getCalendarImpactStrength(event);
+  const actual = parseComparableValue(event.actual);
+  const forecast = parseComparableValue(event.forecast);
+  const titleText = titleToDirectionText(event);
+
+  if (!event.actual) {
+    return {
+      event,
+      strength,
+      valueLine: event.forecast
+        ? `Очаква се ${event.forecast}; нов факт още не е публикуван.`
+        : "Още няма публикуван нов факт.",
+      plainRead: "Това остава сценарий, защото пазарът още няма числото, с което да сравни очакването.",
+      effectLine: `Ефект: засега няма категоричен прочит за ${event.currency}; реакцията идва след публикуването.`,
+      bias: "pending",
+      sign: 0,
+      weight: strength.score,
+    };
+  }
+
+  if (isToneBasedFedEvent(event) || isPublishedReleasePackage(event) || actual === null || forecast === null) {
+    const isPublished = event.actual === "Публикувано";
+    return {
+      event,
+      strength,
+      valueLine: isPublished ? "Събитието е публикувано, но няма едно просто число." : `Нов факт: ${event.actual}.`,
+      plainRead:
+        event.eventType === "speeches" || event.eventType === "central_bank"
+          ? "Тук тонът е решаващ: пазарът чете дали езикът е по-твърд за лихвите или по-мек."
+          : "Това е пакет или текстово събитие, затова се чете през детайлите, а не през едно число.",
+      effectLine: `Ефект: сценарен прочит за ${event.currency}; гледат се тонът, USD, доходностите и реакцията на пазара.`,
+      bias: "mixed",
+      sign: 0,
+      weight: strength.score,
+    };
+  }
+
+  const higherThanForecast = actual > forecast;
+  const lowerThanForecast = actual < forecast;
+
+  if (!higherThanForecast && !lowerThanForecast) {
+    return {
+      event,
+      strength,
+      valueLine: `${event.actual} при очакване ${event.forecast}.`,
+      plainRead: `${getShortEventName(event)} е точно около очакването. С по-прости думи: числото не носи нова изненада спрямо прогнозата.`,
+      effectLine: `Ефект: неутрално за ${event.currency}; реакция може да има само от ревизии, тон или позициониране.`,
+      bias: "neutral",
+      sign: 0,
+      weight: strength.score,
+    };
+  }
+
+  const badWhenHigher = isBadForCurrencyWhenHigher(titleText);
+  const sign: -1 | 1 = badWhenHigher
+    ? higherThanForecast ? -1 : 1
+    : higherThanForecast ? 1 : -1;
+  const bias: DailyCurrencyBias = sign > 0 ? "positive" : "negative";
+  const relation = higherThanForecast ? "над очакването" : "под очакването";
+
+  return {
+    event,
+    strength,
+    valueLine: `${event.actual} при очакване ${event.forecast}.`,
+    plainRead: `${getShortEventName(event)} е ${relation}. ${getPlainEventExplanation(event, higherThanForecast, badWhenHigher)}`,
+    effectLine: getCurrencyEffectLine(event, sign),
+    bias,
+    sign,
+    weight: strength.score,
+  };
+}
+
+function getDailyCurrencyBias(
+  positiveCount: number,
+  negativeCount: number,
+  weightedScore: number,
+  totalWeight: number,
+  hasPending: boolean,
+): DailyCurrencyBias {
+  if (!totalWeight) {
+    return hasPending ? "pending" : "neutral";
+  }
+
+  const ratio = weightedScore / totalWeight;
+
+  if (positiveCount > 0 && negativeCount > 0) {
+    return "mixed";
+  }
+
+  if (ratio > 0.12) {
+    return "positive";
+  }
+
+  if (ratio < -0.12) {
+    return "negative";
+  }
+
+  return "neutral";
+}
+
+function getDailyGoldBias(currency: string, reads: CurrencyEventRead[]): SignalDirection {
+  const weightedGoldReads = reads.flatMap((read) => {
+    if (read.bias === "pending") {
+      return [];
+    }
+
+    if (currency === "USD" && (read.bias === "positive" || read.bias === "negative")) {
+      return [{ sign: read.bias === "positive" ? -1 : 1, weight: read.weight }];
+    }
+
+    const direction = getCalendarDirectionPresentation(read.event).direction;
+
+    if (direction === "bullish") {
+      return [{ sign: 1, weight: read.weight }];
+    }
+
+    if (direction === "bearish") {
+      return [{ sign: -1, weight: read.weight }];
+    }
+
+    return [];
+  });
+
+  const totalWeight = weightedGoldReads.reduce((sum, read) => sum + read.weight, 0);
+
+  if (!totalWeight) {
+    return reads.some((read) => read.bias === "pending") ? "mixed" : "neutral";
+  }
+
+  const weightedScore = weightedGoldReads.reduce((sum, read) => sum + read.sign * read.weight, 0);
+  const hasBullish = weightedGoldReads.some((read) => read.sign > 0);
+  const hasBearish = weightedGoldReads.some((read) => read.sign < 0);
+
+  if (hasBullish && hasBearish) {
+    return "mixed";
+  }
+
+  if (weightedScore / totalWeight > 0.12) {
+    return "bullish";
+  }
+
+  if (weightedScore / totalWeight < -0.12) {
+    return "bearish";
+  }
+
+  return "neutral";
+}
+
+function getDailyHeadline(
+  currency: string,
+  currencyBias: DailyCurrencyBias,
+  dominantCurrencyBias: DailyCurrencyBias,
+  goldBias: SignalDirection,
+) {
+  if (currencyBias === "pending") {
+    return `${currency}: чака се нов факт`;
+  }
+
+  if (currencyBias === "mixed") {
+    const side = dominantCurrencyBias === "positive" ? `по-силен ${currency}` : dominantCurrencyBias === "negative" ? `по-слаб ${currency}` : "балансиран прочит";
+    return `${currency}: смесени данни, превес към ${side}`;
+  }
+
+  if (currencyBias === "positive") {
+    return `${currency}: по-силен валутен прочит`;
+  }
+
+  if (currencyBias === "negative") {
+    return `${currency}: по-слаб валутен прочит`;
+  }
+
+  return goldBias === "neutral" ? `${currency}: в рамките на очакването` : `${currency}: неутрален валутен прочит`;
+}
+
+function getDailySummary(
+  currency: string,
+  currencyBias: DailyCurrencyBias,
+  dominantCurrencyBias: DailyCurrencyBias,
+  keyEventTitle: string,
+  hasPending: boolean,
+  reads: CurrencyEventRead[],
+) {
+  const pendingText = hasPending
+    ? " Част от редовете още нямат публикуван нов факт, затова те се четат само като сценарий."
+    : "";
+  const keyText = `Най-голяма тежест има "${keyEventTitle}", защото силата на влияние е най-висока сред видимите новини за ${currency}.`;
+
+  if (currencyBias === "pending") {
+    return `${keyText} Все още няма достатъчно публикувани actual стойности, за да има финален дневен прочит.${pendingText}`;
+  }
+
+  if (currencyBias === "mixed") {
+    const side =
+      dominantCurrencyBias === "positive"
+        ? `по-силен ${currency}`
+        : dominantCurrencyBias === "negative"
+          ? `по-слаб ${currency}`
+          : "балансиран прочит";
+    return `${keyText} Данните са смесени, но по-важната новина тежи повече и накланя общия прочит към ${side}.${pendingText}`;
+  }
+
+  const directionText =
+    currencyBias === "positive"
+      ? `по-силен ${currency}`
+      : currencyBias === "negative"
+        ? `по-слаб ${currency}`
+        : "неутрален резултат";
+  const actualCount = reads.filter((read) => read.bias !== "pending").length;
+
+  return `${keyText} От ${actualCount} публикувани реда общият прочит е ${directionText}.${pendingText}`;
+}
+
+function getFinalCurrencyRead(
+  currency: string,
+  currencyBias: DailyCurrencyBias,
+  dominantCurrencyBias: DailyCurrencyBias,
+  score: number,
+  positiveCount: number,
+  negativeCount: number,
+) {
+  if (currencyBias === "pending") {
+    return `Крайното тегло за ${currency} още не е готово: липсват публикувани actual стойности.`;
+  }
+
+  if (currencyBias === "mixed") {
+    const side =
+      dominantCurrencyBias === "positive"
+        ? `по-силен ${currency}`
+        : dominantCurrencyBias === "negative"
+          ? `по-слаб ${currency}`
+          : "неутрално";
+    return `Крайното тегло е смесено: ${positiveCount} реда подкрепят валутата, ${negativeCount} реда тежат срещу нея. Превесът е към ${side}, защото по-силните новини получават по-голяма тежест.`;
+  }
+
+  if (currencyBias === "positive") {
+    return `Крайното тегло е: по-силен ${currency}. Увереността на прочита е около ${score}%, защото публикуваните данни са основно над/по-добри спрямо очакването.`;
+  }
+
+  if (currencyBias === "negative") {
+    return `Крайното тегло е: по-слаб ${currency}. Увереността на прочита е около ${score}%, защото публикуваните данни са основно под/по-лоши спрямо очакването.`;
+  }
+
+  return `Крайното тегло е неутрално: числата са близо до очакването или сигналите се компенсират.`;
+}
+
+function getDailyGoldImpact(
+  currency: string,
+  goldBias: SignalDirection,
+  currencyBias: DailyCurrencyBias,
+  dominantCurrencyBias: DailyCurrencyBias,
+) {
+  if (currency === "USD") {
+    if (currencyBias === "pending") {
+      return "За златото това още е сценарий. Когато излезе actual, USD каналът е ключов: по-силен долар обикновено натиска XAU, а по-слаб долар обикновено го подкрепя.";
+    }
+
+    const usdSide =
+      currencyBias === "mixed"
+        ? dominantCurrencyBias
+        : currencyBias;
+
+    if (usdSide === "positive") {
+      return "За златото това е по-скоро натиск: по-силен USD прави XAU по-скъп за купувачи извън САЩ, а по-високи доходности (лихвите по облигациите) намаляват привлекателността на актив без лихва.";
+    }
+
+    if (usdSide === "negative") {
+      return "За златото това е по-скоро подкрепа: по-слаб USD и по-меки очаквания за доходности правят XAU по-лесен за купуване и намаляват конкуренцията от облигациите.";
+    }
+  }
+
+  if (goldBias === "bullish") {
+    return `За златото прочитът е подкрепящ, но при ${currency} каналът често е индиректен: минава през USD cross-effect, риск апетит и очаквания за централната банка.`;
+  }
+
+  if (goldBias === "bearish") {
+    return `За златото прочитът е натиск, но при ${currency} ефектът обикновено е по-индиректен от USD новините и трябва да се потвърди от движението в долара и доходностите.`;
+  }
+
+  if (goldBias === "neutral") {
+    return `За златото ефектът е ограничен или неутрален. При ${currency} новините често са контекст, освен ако не променят силно global risk sentiment (дали пазарът търси риск или защита).`;
+  }
+
+  return `За златото прочитът е смесен. При ${currency} гледаме дали новината променя USD, риск апетита, инфлационните очаквания или централната банка.`;
+}
+
+function getDailyTradingExample(
+  currency: string,
+  currencyBias: DailyCurrencyBias,
+  dominantCurrencyBias: DailyCurrencyBias,
+  goldBias: SignalDirection,
+  keyRead: CurrencyEventRead | undefined,
+  reads: CurrencyEventRead[],
+) {
+  const keyTitle = keyRead?.event.title ?? "ключовата новина";
+  const keyValue = keyRead?.valueLine ?? "още няма публикувана стойност";
+
+  if (currencyBias === "pending") {
+    return `Търговски пример: ако след публикуването ${keyTitle} излезе по-силно от очакваното, трейдърът първо гледа дали това подкрепя ${currency}. Ако излезе по-слабо, гледа обратния сценарий. До actual стойността няма нужда да се прави категоричен извод.`;
+  }
+
+  if (currency === "USD" && currencyBias === "mixed") {
+    const inflationRead = reads.find((read) => read.event.eventType === "inflation");
+    const activityRead = reads.find((read) => read.event.eventType === "business_surveys" || read.event.eventType === "growth");
+
+    if (inflationRead && activityRead) {
+      return `Търговски пример: представи си, че активността е по-слаба (${activityRead.valueLine}), но инфлационният сигнал е по-силен (${inflationRead.valueLine}). С по-прости думи: бизнесът не ускорява силно, но ценовият натиск (натиск цените да растат) остава висок. Пазарът може да купува USD, защото Fed (централната банка на САЩ) има по-малко причина да бърза с по-меки лихви. Това често означава по-силен долар и натиск върху златото, дори част от данните да изглеждат слаби.`;
+    }
+  }
+
+  const currencyText =
+    currencyBias === "mixed"
+      ? dominantCurrencyBias === "positive"
+        ? `лек превес към по-силен ${currency}`
+        : dominantCurrencyBias === "negative"
+          ? `лек превес към по-слаб ${currency}`
+          : "балансиран прочит"
+      : currencyBias === "positive"
+        ? `по-силен ${currency}`
+        : currencyBias === "negative"
+          ? `по-слаб ${currency}`
+          : "неутрален прочит";
+  const goldText =
+    goldBias === "bullish"
+      ? "подкрепа за златото"
+      : goldBias === "bearish"
+        ? "натиск върху златото"
+        : goldBias === "neutral"
+          ? "ограничен ефект върху златото"
+          : "смесена реакция в златото";
+
+  return `Търговски пример: ако трейдър гледа ${keyTitle}, той сравнява новия факт с очакването: ${keyValue} Ако това накланя деня към ${currencyText}, следва да провери дали USD и доходностите потвърждават реакцията. За XAU крайният прочит е ${goldText}, но най-добре се потвърждава от реалното движение след release-а.`;
+}
+
+function getDailyBadgeLabel(
+  currency: string,
+  currencyBias: DailyCurrencyBias,
+  dominantCurrencyBias: DailyCurrencyBias,
+  goldBias: SignalDirection,
+) {
+  if (currencyBias === "pending") {
+    return "Крайно тегло: чака actual";
+  }
+
+  const currencyText =
+    currencyBias === "mixed"
+      ? dominantCurrencyBias === "positive"
+        ? `смесено, превес ${currency}`
+        : dominantCurrencyBias === "negative"
+          ? `смесено, натиск ${currency}`
+          : "смесено"
+      : currencyBias === "positive"
+        ? `по-силен ${currency}`
+        : currencyBias === "negative"
+          ? `по-слаб ${currency}`
+          : "неутрално";
+  const goldText =
+    goldBias === "bullish"
+      ? "подкрепа за XAU"
+      : goldBias === "bearish"
+        ? "натиск за XAU"
+        : goldBias === "neutral"
+          ? "неутрално за XAU"
+          : "смесено за XAU";
+
+  return `Крайно тегло: ${currencyText} / ${goldText}`;
+}
+
+function getShortEventName(event: Pick<EconomicCalendarEvent, "eventType" | "title">) {
+  const text = titleToDirectionText(event);
+
+  if (/(prices|price index|cpi|pce|ppi)/.test(text)) {
+    return "Инфлационната част";
+  }
+
+  if (/(pmi|ism|manufacturing|services)/.test(text)) {
+    return "PMI/ISM";
+  }
+
+  if (/(gdp|gross domestic product)/.test(text)) {
+    return "GDP";
+  }
+
+  if (/(employment cost|wage|earnings|payroll|nfp|employment)/.test(text)) {
+    return "Трудовият сигнал";
+  }
+
+  if (/(unemployment|jobless claims|initial claims|continuing claims)/.test(text)) {
+    return "Заявките/безработицата";
+  }
+
+  if (/(rate|fomc|fed|ecb|monetary policy)/.test(text)) {
+    return "Лихвеният сигнал";
+  }
+
+  return event.title;
+}
+
+function getPlainEventExplanation(
+  event: Pick<EconomicCalendarEvent, "eventType" | "title">,
+  higherThanForecast: boolean,
+  badWhenHigher: boolean,
+) {
+  const text = titleToDirectionText(event);
+
+  if (badWhenHigher) {
+    return higherThanForecast
+      ? "С по-прости думи: има повече слабост в труда/заявките, което тежи на валутата."
+      : "С по-прости думи: има по-малко слабост в труда/заявките, което подкрепя валутата.";
+  }
+
+  if (/(prices|price index|cpi|pce|ppi|inflation)/.test(text)) {
+    return higherThanForecast
+      ? "С по-прости думи: бизнесите/потребителите виждат по-високи цени, което може да означава по-силен инфлационен натиск (натиск цените да растат)."
+      : "С по-прости думи: ценовият натиск е по-мек от прогнозата, което намалява натиска върху централната банка.";
+  }
+
+  if (/(pmi|ism|manufacturing|services)/.test(text)) {
+    return higherThanForecast
+      ? "С по-прости думи: бизнес активността е по-силна от очакваното."
+      : "С по-прости думи: секторът още може да расте, но по-бавно от прогнозата.";
+  }
+
+  if (/(gdp|retail|confidence|sales)/.test(text)) {
+    return higherThanForecast
+      ? "С по-прости думи: икономиката изглежда по-жива от прогнозата."
+      : "С по-прости думи: икономиката изглежда по-мека от прогнозата.";
+  }
+
+  if (/(employment cost|wage|earnings|payroll|nfp|employment)/.test(text)) {
+    return higherThanForecast
+      ? "С по-прости думи: трудовият пазар или разходите за труд са по-силни от очакваното."
+      : "С по-прости думи: трудовият сигнал е по-мек от очакваното.";
+  }
+
+  if (/(rate|yield|auction|fomc|fed|ecb|monetary policy)/.test(text)) {
+    return higherThanForecast
+      ? "С по-прости думи: лихвеният сигнал е по-твърд (по-високи лихви/доходности) от прогнозата."
+      : "С по-прости думи: лихвеният сигнал е по-мек (по-ниски лихви/доходности) от прогнозата.";
+  }
+
+  return higherThanForecast
+    ? "С по-прости думи: числото е по-силно от прогнозата."
+    : "С по-прости думи: числото е по-слабо от прогнозата.";
+}
+
+function getCurrencyEffectLine(event: EconomicCalendarEvent, sign: -1 | 1) {
+  const currencyEffect = sign > 0 ? `плюс за ${event.currency}` : `минус за ${event.currency}`;
+
+  if (event.currency === "USD") {
+    const goldEffect = sign > 0 ? "по-силен долар и натиск за златото" : "по-слаб долар и подкрепа за златото";
+    return `Ефект: ${currencyEffect}; за XAU това обикновено значи ${goldEffect}.`;
+  }
+
+  return `Ефект: ${currencyEffect}; за XAU влиянието е по-индиректно и се гледа през USD, риск апетита и доходностите.`;
+}
+
+function isBadForCurrencyWhenHigher(text: string) {
+  return /(unemployment|jobless claims|initial claims|continuing claims)/.test(text);
 }
 
 function parseComparableValue(value: string | undefined) {
