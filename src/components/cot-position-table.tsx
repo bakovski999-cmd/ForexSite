@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 
 type Tone = CotChangeTone | "long" | "short";
+type AnalysisStepTone = "context" | "primary" | "long" | "short" | "neutral" | "gold" | "conclusion";
 
 const numberFormatter = new Intl.NumberFormat("bg-BG");
 
@@ -57,6 +58,39 @@ function deltaTextClass(tone: CotChangeTone) {
       return "text-rose-200";
     default:
       return "text-slate-200";
+  }
+}
+
+function analysisStepClass(tone: AnalysisStepTone) {
+  switch (tone) {
+    case "primary":
+      return "border-amber-300/24 bg-amber-300/[0.08]";
+    case "long":
+      return "border-emerald-300/16 bg-emerald-300/[0.045]";
+    case "short":
+      return "border-rose-300/16 bg-rose-300/[0.045]";
+    case "gold":
+      return "border-sky-300/18 bg-sky-300/[0.05]";
+    case "conclusion":
+      return "border-amber-300/28 bg-amber-300/10";
+    default:
+      return "border-white/8 bg-white/[0.035]";
+  }
+}
+
+function analysisStepNumberClass(tone: AnalysisStepTone) {
+  switch (tone) {
+    case "primary":
+    case "conclusion":
+      return "border-amber-300/30 bg-amber-300/16 text-amber-100";
+    case "long":
+      return "border-emerald-300/24 bg-emerald-300/12 text-emerald-100";
+    case "short":
+      return "border-rose-300/24 bg-rose-300/12 text-rose-100";
+    case "gold":
+      return "border-sky-300/24 bg-sky-300/12 text-sky-100";
+    default:
+      return "border-white/12 bg-white/[0.05] text-slate-200";
   }
 }
 
@@ -227,19 +261,73 @@ export function CotPositionTable({ rows }: { rows: CotPositionRow[] }) {
               />
             </div>
 
-            <div className="mt-6 grid gap-4 lg:grid-cols-2">
-              <AnalysisBlock title="Общ обзор" text={selectedAnalysis.overview} />
-              <AnalysisBlock title="Как влияе на златото" text={selectedAnalysis.goldImpact} />
-              <AnalysisBlock title="Long позиции" text={selectedAnalysis.longAnalysis} />
-              <AnalysisBlock title="Short позиции" text={selectedAnalysis.shortAnalysis} />
-              <AnalysisBlock title="Net позиция" text={selectedAnalysis.netAnalysis} />
-              <AnalysisBlock title="Open interest" text={selectedAnalysis.openInterestAnalysis} />
+            <div className="mt-6 rounded-[24px] border border-white/8 bg-white/[0.025] p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">
+                Ред за четене
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-slate-300">
+                {["Контекст", "Net", "Long", "Short", "Open Interest", "Злато", "Извод"].map((item, index) => (
+                  <span
+                    key={item}
+                    className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1"
+                  >
+                    {index + 1}. {item}
+                  </span>
+                ))}
+              </div>
             </div>
 
-            <div className="mt-5 rounded-[22px] border border-amber-300/18 bg-amber-300/10 p-5 text-base leading-8 text-amber-50">
-              <p className="font-semibold text-amber-200">Изводът</p>
-              <p className="mt-2">{selectedAnalysis.conclusion}</p>
-            </div>
+            <ol className="mt-5 space-y-3">
+              <AnalysisStep
+                number={1}
+                title="Общ обзор"
+                subtitle="Първо разбери какво сравнява редът."
+                text={selectedAnalysis.overview}
+                tone="context"
+              />
+              <AnalysisStep
+                number={2}
+                title="Net позиция"
+                subtitle="Това е основният COT сигнал: Long минус Short."
+                text={selectedAnalysis.netAnalysis}
+                tone="primary"
+              />
+              <AnalysisStep
+                number={3}
+                title="Long позиции"
+                subtitle="Показва дали спекулантите добавят или махат bullish експозиция."
+                text={selectedAnalysis.longAnalysis}
+                tone="long"
+              />
+              <AnalysisStep
+                number={4}
+                title="Short позиции"
+                subtitle="Показва дали се добавя натиск срещу златото или се покриват къси позиции."
+                text={selectedAnalysis.shortAnalysis}
+                tone="short"
+              />
+              <AnalysisStep
+                number={5}
+                title="Open interest"
+                subtitle="Проверява дали промяната идва с ново участие или със затваряне/редуциране."
+                text={selectedAnalysis.openInterestAnalysis}
+                tone="neutral"
+              />
+              <AnalysisStep
+                number={6}
+                title="Как влияе на златото"
+                subtitle="След числата идва пазарният прочит за XAU."
+                text={selectedAnalysis.goldImpact}
+                tone="gold"
+              />
+              <AnalysisStep
+                number={7}
+                title="Финален извод"
+                subtitle="Накрая събери всичко в един работен прочит."
+                text={selectedAnalysis.conclusion}
+                tone="conclusion"
+              />
+            </ol>
           </div>
         </div>
       ) : null}
@@ -271,11 +359,43 @@ function MetricPill({
   );
 }
 
-function AnalysisBlock({ title, text }: { title: string; text: string }) {
+function AnalysisStep({
+  number,
+  title,
+  subtitle,
+  text,
+  tone,
+}: {
+  number: number;
+  title: string;
+  subtitle: string;
+  text: string;
+  tone: AnalysisStepTone;
+}) {
   return (
-    <div className="rounded-[22px] border border-white/8 bg-white/[0.035] p-5">
-      <p className="text-sm font-semibold text-white">{title}</p>
-      <p className="mt-3 text-sm leading-7 text-slate-300">{text}</p>
-    </div>
+    <li className={cn("rounded-[22px] border p-5", analysisStepClass(tone))}>
+      <div className="grid gap-4 sm:grid-cols-[52px_1fr]">
+        <div
+          className={cn(
+            "flex size-11 items-center justify-center rounded-2xl border text-sm font-bold tabular-nums",
+            analysisStepNumberClass(tone),
+          )}
+        >
+          {number}
+        </div>
+        <div>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <p className="text-base font-semibold text-white">{title}</p>
+            {number === 2 ? (
+              <span className="rounded-full border border-amber-300/22 bg-amber-300/12 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-100">
+                най-важно
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-1 text-xs font-medium leading-5 text-slate-500">{subtitle}</p>
+          <p className="mt-3 text-sm leading-7 text-slate-300">{text}</p>
+        </div>
+      </div>
+    </li>
   );
 }
