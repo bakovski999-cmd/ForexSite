@@ -46,4 +46,9 @@ test("demo login opens the dashboard and navigates core views", async ({ page })
 
   await page.getByRole("link", { name: "Сигнал" }).click();
   await expect(page.getByText("Как е сметната посоката и къде тежат факторите.")).toBeVisible();
+
+  await page.getByRole("link", { name: "Риск калкулатор" }).click();
+  await expect(page.getByText("Провери liquidation цената и планираната печалба.")).toBeVisible();
+  await expect(page.getByText("Ако цената падне до")).toBeVisible();
+  await expect(page.getByText("печалбата ще е")).toBeVisible();
 });

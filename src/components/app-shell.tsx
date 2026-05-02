@@ -1,6 +1,14 @@
 "use client";
 
-import { BarChart3, CalendarDays, Newspaper, Radar, TrendingUp, Waypoints } from "lucide-react";
+import {
+  BarChart3,
+  Calculator,
+  CalendarDays,
+  Newspaper,
+  Radar,
+  TrendingUp,
+  Waypoints,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -18,6 +26,7 @@ const navigation = [
   { href: "/cot", label: "COT позиции", icon: BarChart3 },
   { href: "/macro", label: "Макро", icon: TrendingUp },
   { href: "/signal-lab", label: "Сигнал", icon: Waypoints },
+  { href: "/risk-calculator", label: "Риск калкулатор", icon: Calculator },
 ];
 
 export function AppShell({
@@ -65,7 +74,7 @@ export function AppShell({
             </div>
           </div>
 
-          <nav className="mt-5 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+          <nav className="mt-5 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-7">
             {navigation.map((item) => {
               const active = pathname === item.href;
               const Icon = item.icon;
