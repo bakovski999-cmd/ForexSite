@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
 
 import {
   buildCotPositionAnalysis,
@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 
 type Tone = CotChangeTone | "long" | "short";
 type AnalysisStepTone = "context" | "primary" | "long" | "short" | "neutral" | "gold" | "conclusion";
+type PatternTone = "cooling" | "bullish" | "bearish" | "neutral";
 
 const numberFormatter = new Intl.NumberFormat("bg-BG");
 
@@ -92,6 +93,44 @@ function analysisStepNumberClass(tone: AnalysisStepTone) {
     default:
       return "border-white/12 bg-white/[0.05] text-slate-200";
   }
+}
+
+function patternCardClass(tone: PatternTone) {
+  switch (tone) {
+    case "bullish":
+      return "border-emerald-300/18 bg-emerald-300/[0.055]";
+    case "cooling":
+      return "border-amber-300/20 bg-amber-300/[0.055]";
+    case "bearish":
+      return "border-rose-300/18 bg-rose-300/[0.055]";
+    default:
+      return "border-sky-300/16 bg-sky-300/[0.045]";
+  }
+}
+
+function patternLabelClass(tone: PatternTone) {
+  switch (tone) {
+    case "bullish":
+      return "border-emerald-300/18 bg-emerald-300/10 text-emerald-100";
+    case "cooling":
+      return "border-amber-300/18 bg-amber-300/10 text-amber-100";
+    case "bearish":
+      return "border-rose-300/18 bg-rose-300/10 text-rose-100";
+    default:
+      return "border-sky-300/16 bg-sky-300/10 text-sky-100";
+  }
+}
+
+function movementPhrase(value: number, noun: string) {
+  if (value > 0) {
+    return `${noun} се увеличават`;
+  }
+
+  if (value < 0) {
+    return `${noun} намаляват`;
+  }
+
+  return `${noun} са без промяна`;
 }
 
 function ValueCell({
@@ -328,6 +367,8 @@ export function CotPositionTable({ rows }: { rows: CotPositionRow[] }) {
                 tone="conclusion"
               />
             </ol>
+
+            <CotLearningExample row={selectedRow} />
           </div>
         </div>
       ) : null}
@@ -397,5 +438,137 @@ function AnalysisStep({
         </div>
       </div>
     </li>
+  );
+}
+
+function CotLearningExample({ row }: { row: CotPositionRow }) {
+  const hasPrevious =
+    row.previousLong !== undefined &&
+    row.previousShort !== undefined &&
+    row.previousNet !== undefined &&
+    row.previousOpenInterest !== undefined;
+
+  return (
+    <details className="group mt-5 rounded-[24px] border border-amber-300/14 bg-amber-300/[0.035] p-4 open:bg-amber-300/[0.05]">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-2xl border border-white/8 bg-white/[0.035] px-4 py-3 text-left transition hover:bg-white/[0.06] [&::-webkit-details-marker]:hidden">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">
+            Пример и визуален прочит
+          </p>
+          <p className="mt-1 text-sm font-semibold text-white">
+            Отвори, ако искаш по-просто търговско обяснение на COT реда
+          </p>
+        </div>
+        <ChevronDown className="size-5 shrink-0 text-amber-100 transition group-open:rotate-180" />
+      </summary>
+
+      <div className="mt-4 space-y-4">
+        <div className="rounded-[22px] border border-white/8 bg-slate-950/28 p-4">
+          <p className="text-sm font-semibold text-white">Прост пример с текущата седмица</p>
+          <div className="mt-3 space-y-3 text-sm leading-7 text-slate-300">
+            {hasPrevious ? (
+              <>
+                <p>
+                  Представи си, че гледаме как големите спекулативни участници променят своите
+                  “залози” от една COT седмица към следващата. Миналата седмица те са имали{" "}
+                  <span className="font-semibold text-emerald-100">
+                    {formatNumber(row.previousLong ?? 0)} long
+                  </span>{" "}
+                  и{" "}
+                  <span className="font-semibold text-rose-100">
+                    {formatNumber(row.previousShort ?? 0)} short
+                  </span>{" "}
+                  контракта. Тази седмица long са{" "}
+                  <span className="font-semibold text-emerald-100">{formatNumber(row.long)}</span>, а
+                  short са <span className="font-semibold text-rose-100">{formatNumber(row.short)}</span>.
+                </p>
+                <p>
+                  Реалната промяна е:{" "}
+                  <span className={cn("font-semibold", deltaTextClass(getCotChangeTone(row.changeLong)))}>
+                    {movementPhrase(row.changeLong, "Long")} с {formatSignedNumber(row.changeLong)}
+                  </span>
+                  , а{" "}
+                  <span className={cn("font-semibold", deltaTextClass(getCotChangeTone(row.changeShort)))}>
+                    {movementPhrase(row.changeShort, "Short")} с {formatSignedNumber(row.changeShort)}
+                  </span>
+                  . Net позицията се движи от{" "}
+                  <span className="font-semibold text-slate-100">
+                    {formatSignedNumber(row.previousNet ?? 0)}
+                  </span>{" "}
+                  към <span className="font-semibold text-slate-100">{formatSignedNumber(row.net)}</span>.
+                </p>
+              </>
+            ) : (
+              <p>
+                Представи си COT като седмична снимка на големите участници: колко контракта са
+                заложени за покачване, колко са заложени срещу покачване и дали общата net картина се
+                подобрява или отслабва.
+              </p>
+            )}
+            <p>
+              По-просто: ако long страната намалява, short страната расте и net позицията пада,
+              пазарът може още да е net long, но bullish импулсът вече не е толкова силен. Това не е
+              автоматична прогноза за спад; то казва, че подкрепата от позиционирането е по-слаба.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-3 lg:grid-cols-2">
+          <CotPatternCard
+            tone="cooling"
+            title="Охлаждане на bullish импулса"
+            signals={["Long намалява", "Short се увеличава", "Net пада"]}
+            result="Спекулантите намаляват long натиска и добавят short страна. Златото още може да е подкрепено, но импулсът отслабва."
+          />
+          <CotPatternCard
+            tone="bullish"
+            title="Засилване на bullish импулса"
+            signals={["Long расте", "Short пада", "Net расте"]}
+            result="Това е най-чистият позитивен COT прочит: повече bullish експозиция и по-малко short натиск."
+          />
+          <CotPatternCard
+            tone="bearish"
+            title="По-сериозен bearish натиск"
+            signals={["Long пада", "Short расте", "Open Interest расте"]}
+            result="Тук вече има по-силен предупредителен сигнал: не само се махат long позиции, но се добавя нов short интерес."
+          />
+          <CotPatternCard
+            tone="neutral"
+            title="Затваряне на позиции"
+            signals={["Long пада", "Short пада", "Open Interest пада"]}
+            result="Това често е редуциране на участие от двете страни. Не е задължително нова посока, а по-скоро прибиране на риск."
+          />
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function CotPatternCard({
+  title,
+  signals,
+  result,
+  tone,
+}: {
+  title: string;
+  signals: string[];
+  result: string;
+  tone: PatternTone;
+}) {
+  return (
+    <div className={cn("rounded-[22px] border p-4", patternCardClass(tone))}>
+      <p className="text-sm font-semibold text-white">{title}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {signals.map((signal) => (
+          <span
+            key={signal}
+            className={cn("rounded-full border px-2.5 py-1 text-xs font-semibold", patternLabelClass(tone))}
+          >
+            {signal}
+          </span>
+        ))}
+      </div>
+      <p className="mt-3 text-sm leading-6 text-slate-300">{result}</p>
+    </div>
   );
 }
