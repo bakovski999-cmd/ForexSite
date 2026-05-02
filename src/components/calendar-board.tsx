@@ -468,6 +468,32 @@ function currencyAnalysisClass(bias: DailyCurrencyBias) {
   }[bias];
 }
 
+function goldEffectLabel(analysis: DailyCurrencyAnalysis) {
+  const intensity = analysis.score >= 75 ? "силен" : analysis.score >= 60 ? "среден" : "лек";
+
+  if (analysis.goldBias === "bullish") {
+    return `XAU: ${intensity} подкрепа`;
+  }
+
+  if (analysis.goldBias === "bearish") {
+    return `XAU: ${intensity} натиск`;
+  }
+
+  if (analysis.goldBias === "neutral") {
+    return "XAU: неутрално";
+  }
+
+  return "XAU: смесено";
+}
+
+function dailyPrevalenceLabel(analysis: DailyCurrencyAnalysis) {
+  if (analysis.currencyBias === "pending") {
+    return `Превес за ${analysis.currency}: чака actual`;
+  }
+
+  return `Превес за ${analysis.currency}: ${analysis.score}%`;
+}
+
 function CurrencyAnalysisPanel({ analysis }: { analysis: DailyCurrencyAnalysis }) {
   return (
     <details className="group/currency rounded-[20px] border border-amber-300/14 bg-[#10192d]/72 open:border-amber-300/24 open:bg-[#111d34]">
@@ -483,12 +509,15 @@ function CurrencyAnalysisPanel({ analysis }: { analysis: DailyCurrencyAnalysis }
             >
               {analysis.badgeLabel}
             </span>
+            <span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold", directionClass(analysis.goldBias))}>
+              {goldEffectLabel(analysis)}
+            </span>
           </div>
           <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-400">{analysis.headline}</p>
         </div>
         <div className="flex items-center gap-2 text-xs font-medium text-amber-100">
-          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
-            Тежест {analysis.score}%
+          <span className="rounded-full border border-amber-300/18 bg-amber-300/[0.08] px-2.5 py-1">
+            {dailyPrevalenceLabel(analysis)}
           </span>
           <ChevronDown className="size-4 transition group-open/currency:rotate-180" />
         </div>

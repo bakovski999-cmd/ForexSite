@@ -837,7 +837,7 @@ function getFinalCurrencyRead(
   negativeCount: number,
 ) {
   if (currencyBias === "pending") {
-    return `Крайното тегло за ${currency} още не е готово: липсват публикувани actual стойности.`;
+    return `Дневният превес за ${currency} още не е готов: липсват публикувани actual стойности.`;
   }
 
   if (currencyBias === "mixed") {
@@ -847,18 +847,18 @@ function getFinalCurrencyRead(
         : dominantCurrencyBias === "negative"
           ? `по-слаб ${currency}`
           : "неутрално";
-    return `Крайното тегло е смесено: ${positiveCount} реда подкрепят валутата, ${negativeCount} реда тежат срещу нея. Превесът е към ${side}, защото по-силните новини получават по-голяма тежест.`;
+    return `Дневният превес е смесен: ${positiveCount} реда подкрепят валутата, ${negativeCount} реда тежат срещу нея. Превесът е към ${side}, защото по-силните новини получават по-голяма тежест.`;
   }
 
   if (currencyBias === "positive") {
-    return `Крайното тегло е: по-силен ${currency}. Увереността на прочита е около ${score}%, защото публикуваните данни са основно над/по-добри спрямо очакването.`;
+    return `Дневният превес е: по-силен ${currency}. Убедителността на прочита е около ${score}%, защото публикуваните данни са основно над/по-добри спрямо очакването.`;
   }
 
   if (currencyBias === "negative") {
-    return `Крайното тегло е: по-слаб ${currency}. Увереността на прочита е около ${score}%, защото публикуваните данни са основно под/по-лоши спрямо очакването.`;
+    return `Дневният превес е: по-слаб ${currency}. Убедителността на прочита е около ${score}%, защото публикуваните данни са основно под/по-лоши спрямо очакването.`;
   }
 
-  return `Крайното тегло е неутрално: числата са близо до очакването или сигналите се компенсират.`;
+  return `Дневният превес е неутрален: числата са близо до очакването или сигналите се компенсират.`;
 }
 
 function getDailyGoldImpact(
@@ -956,7 +956,7 @@ function getDailyBadgeLabel(
   goldBias: SignalDirection,
 ) {
   if (currencyBias === "pending") {
-    return "Крайно тегло: чака actual";
+    return "Дневен превес: чака actual";
   }
 
   const currencyText =
@@ -980,7 +980,7 @@ function getDailyBadgeLabel(
           ? "неутрално за XAU"
           : "смесено за XAU";
 
-  return `Крайно тегло: ${currencyText} / ${goldText}`;
+  return `Дневен прочит: ${currencyText} / ${goldText}`;
 }
 
 function getShortEventName(event: Pick<EconomicCalendarEvent, "eventType" | "title">) {
