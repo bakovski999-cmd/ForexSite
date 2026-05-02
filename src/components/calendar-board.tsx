@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AlertTriangle,
   ArrowDownRight,
   ArrowRight,
   ArrowUpRight,
@@ -46,6 +47,7 @@ import { getPendingReleasedCalendarEvents } from "@/lib/calendar-history";
 import {
   getCalendarDirectionPresentation,
   getCalendarEventDetail,
+  getCalendarImpactStrength,
   getCalendarValuePanels,
   isStrongGoldCalendarEvent,
 } from "@/lib/calendar-presentation";
@@ -100,6 +102,45 @@ function StrongXauBadge() {
       <Zap className="size-3.5" />
       Силен XAU драйвер
     </span>
+  );
+}
+
+function ImpactStrengthMeter({ event }: { event: EconomicCalendarEvent }) {
+  const strength = getCalendarImpactStrength(event);
+  const showAlert = strength.score >= 75;
+  const explanation = `${strength.reason} ${strength.comparisonNote}`;
+
+  return (
+    <div className="mt-2 flex max-w-full flex-wrap items-center gap-2 text-xs text-amber-100">
+      <div
+        className="inline-flex min-w-[182px] items-center gap-2 rounded-full border border-amber-300/18 bg-amber-300/[0.055] px-2.5 py-1"
+        aria-label={`Сила на влияние ${strength.score} процента, ${strength.label}`}
+      >
+        <div className="h-2 w-20 overflow-hidden rounded-full bg-slate-700/70">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-amber-200/80 via-yellow-300/80 to-amber-400/80"
+            style={{ width: `${strength.score}%` }}
+          />
+        </div>
+        <span className="whitespace-nowrap font-semibold tabular-nums">Сила {strength.score}%</span>
+      </div>
+      <span className="whitespace-nowrap text-[11px] font-medium text-slate-400">{strength.tier}</span>
+      {showAlert ? (
+        <span
+          className="group/strength relative inline-flex size-7 items-center justify-center rounded-full border border-amber-300/24 bg-amber-300/10 text-amber-100"
+          tabIndex={0}
+          title={explanation}
+          aria-label={explanation}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <AlertTriangle className="size-3.5" />
+          <span className="pointer-events-none absolute left-1/2 top-8 z-20 w-72 -translate-x-1/2 rounded-2xl border border-amber-300/18 bg-[#111827] p-3 text-left text-xs leading-5 text-slate-200 opacity-0 shadow-2xl shadow-black/30 transition group-hover/strength:opacity-100 group-focus/strength:opacity-100">
+            <span className="block font-semibold text-amber-100">Защо е силна новина?</span>
+            <span className="mt-1 block">{explanation}</span>
+          </span>
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -943,6 +984,7 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
                             </span>
                             {isStrongGoldCalendarEvent(event) ? <StrongXauBadge /> : null}
                           </div>
+                          <ImpactStrengthMeter event={event} />
                         </div>
 
                         <CompactValueCells event={event} />

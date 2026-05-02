@@ -4,6 +4,7 @@ import {
   emptyActualLabel,
   getCalendarDirectionPresentation,
   getCalendarEventDetail,
+  getCalendarImpactStrength,
   getGoldNewsImpactScore,
   getCalendarValuePanels,
   isStrongGoldCalendarEvent,
@@ -265,5 +266,99 @@ describe("calendar presentation", () => {
         impactDirection: "bullish",
       }),
     ).toBeCloseTo(0.3);
+  });
+
+  test("scores Fed rate decisions as critical gold events", () => {
+    const strength = getCalendarImpactStrength({
+      ...baseEvent,
+      title: "Federal Funds Rate",
+      impact: "high",
+      eventType: "central_bank",
+      relevance: "direct",
+      affectedDrivers: ["fed", "real_yields", "nominal_yields", "usd"],
+    });
+
+    expect(strength.score).toBeGreaterThanOrEqual(90);
+    expect(strength.tier).toBe("Критична");
+    expect(strength.reason).toContain("Fed");
+  });
+
+  test("scores Core CPI above a standard business PMI", () => {
+    const coreCpi = getCalendarImpactStrength({
+      ...baseEvent,
+      title: "Core CPI m/m",
+      impact: "high",
+      eventType: "inflation",
+      relevance: "direct",
+      affectedDrivers: ["inflation", "fed", "real_yields", "usd"],
+    });
+    const businessPmi = getCalendarImpactStrength({
+      ...baseEvent,
+      title: "ISM Manufacturing PMI",
+      impact: "medium",
+      eventType: "business_surveys",
+      relevance: "strong",
+      affectedDrivers: ["usd", "nominal_yields", "risk"],
+    });
+
+    expect(coreCpi.score).toBeGreaterThan(businessPmi.score);
+    expect(coreCpi.tier).toBe("Критична");
+  });
+
+  test("scores ISM prices above ISM activity PMI through the inflation channel", () => {
+    const ismPrices = getCalendarImpactStrength({
+      ...baseEvent,
+      title: "ISM Manufacturing Prices",
+      impact: "medium",
+      eventType: "inflation",
+      relevance: "direct",
+      affectedDrivers: ["inflation", "fed", "usd"],
+    });
+    const ismPmi = getCalendarImpactStrength({
+      ...baseEvent,
+      title: "ISM Manufacturing PMI",
+      impact: "medium",
+      eventType: "business_surveys",
+      relevance: "strong",
+      affectedDrivers: ["usd", "nominal_yields", "risk"],
+    });
+
+    expect(ismPrices.score).toBeGreaterThan(ismPmi.score);
+    expect(ismPrices.comparisonNote).toContain("Инфлационният компонент");
+  });
+
+  test("does not overstate generic speech events", () => {
+    const strength = getCalendarImpactStrength({
+      ...baseEvent,
+      title: "President Trump Speaks",
+      impact: "medium",
+      eventType: "speeches",
+      relevance: "strong",
+      affectedDrivers: ["usd", "risk"],
+    });
+
+    expect(strength.score).toBeLessThanOrEqual(54);
+    expect(strength.tier).not.toBe("Силна");
+  });
+
+  test("scores direct gold events above context events with the same impact type", () => {
+    const direct = getCalendarImpactStrength({
+      ...baseEvent,
+      title: "Core PCE Price Index m/m",
+      impact: "medium",
+      eventType: "inflation",
+      relevance: "direct",
+      affectedDrivers: ["inflation", "fed", "real_yields", "usd"],
+    });
+    const context = getCalendarImpactStrength({
+      ...baseEvent,
+      title: "Low impact business note",
+      impact: "medium",
+      eventType: "inflation",
+      relevance: "context",
+      affectedDrivers: ["inflation"],
+    });
+
+    expect(direct.score).toBeGreaterThan(context.score);
   });
 });

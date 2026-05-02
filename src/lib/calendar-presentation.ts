@@ -1,4 +1,6 @@
 import type {
+  CalendarEventType,
+  CalendarImpact,
   CalendarRelevance,
   DriverTag,
   EconomicCalendarEvent,
@@ -18,6 +20,15 @@ type CalendarValuePanel = {
 };
 
 type CalendarValueTone = "bullish" | "bearish" | "neutral";
+type CalendarImpactStrengthTier = "Ниска" | "Средна" | "Силна" | "Критична";
+
+export type CalendarImpactStrength = {
+  score: number;
+  tier: CalendarImpactStrengthTier;
+  label: string;
+  reason: string;
+  comparisonNote: string;
+};
 
 type CalendarEventDriverDetail = {
   key: DriverTag;
@@ -90,6 +101,185 @@ const driverDetailCopy: Record<DriverTag, CalendarEventDriverDetail> = {
     description: "Новината може да отключи пробив или отхвърляне около важни нива, ако пазарът вече е напрегнат.",
   },
 };
+
+const impactStrengthBase: Record<CalendarImpact, number> = {
+  high: 38,
+  medium: 23,
+  low: 8,
+};
+
+const relevanceStrengthBonus: Record<CalendarRelevance, number> = {
+  direct: 20,
+  strong: 12,
+  context: 2,
+};
+
+const eventTypeStrengthBonus: Record<CalendarEventType, number> = {
+  central_bank: 22,
+  inflation: 20,
+  employment: 18,
+  bonds: 18,
+  growth: 12,
+  business_surveys: 10,
+  consumer_surveys: 8,
+  housing: 7,
+  speeches: 5,
+  misc: 3,
+};
+
+const driverStrengthBonus: Record<DriverTag, number> = {
+  fed: 8,
+  real_yields: 8,
+  inflation: 7,
+  usd: 6,
+  nominal_yields: 6,
+  risk: 4,
+  positioning: 4,
+  physical_demand: 3,
+  geopolitics: 3,
+  technical: 2,
+};
+
+const driverReasonLabels: Record<DriverTag, string> = {
+  fed: "Fed/лихвени очаквания",
+  real_yields: "реални доходности",
+  inflation: "инфлация",
+  usd: "USD",
+  nominal_yields: "номинални доходности",
+  risk: "risk sentiment",
+  positioning: "позициониране",
+  physical_demand: "физическо търсене",
+  geopolitics: "геополитически риск",
+  technical: "технически режим",
+};
+
+function clampScore(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function titleStrengthBonus(event: Pick<EconomicCalendarEvent, "eventType" | "title">) {
+  const text = titleToDirectionText(event);
+  let bonus = 0;
+
+  if (/(fomc|federal funds|interest rate|rate decision|monetary policy|central bank|ecb|boj|boe)/.test(text)) {
+    bonus += 8;
+  }
+
+  if (/(core cpi|consumer price index|core pce|personal consumption|non-farm|nonfarm|payroll|nfp)/.test(text)) {
+    bonus += 8;
+  }
+
+  if (/(employment cost|eci|jobless claims|unemployment claims|jolts|advance gdp|gross domestic product)/.test(text)) {
+    bonus += 5;
+  }
+
+  if (/(prices|price index|inflation expectations)/.test(text)) {
+    bonus += event.eventType === "inflation" || event.eventType === "business_surveys" ? 6 : 3;
+  }
+
+  if (/(pmi|ism|business confidence|manufacturing|services)/.test(text)) {
+    bonus += 2;
+  }
+
+  return bonus;
+}
+
+function getStrengthTier(score: number): CalendarImpactStrengthTier {
+  if (score >= 90) {
+    return "Критична";
+  }
+
+  if (score >= 75) {
+    return "Силна";
+  }
+
+  if (score >= 55) {
+    return "Средна";
+  }
+
+  return "Ниска";
+}
+
+function tierLabel(tier: CalendarImpactStrengthTier) {
+  return `${tier} сила`;
+}
+
+function joinReasonParts(parts: string[]) {
+  if (!parts.length) {
+    return "Новината има ограничен директен канал към златото и се чете основно като част от общия макро фон.";
+  }
+
+  if (parts.length === 1) {
+    return `Новината е важна за златото заради ${parts[0]}.`;
+  }
+
+  return `Новината е важна за златото заради ${parts.slice(0, -1).join(", ")} и ${parts.at(-1)}.`;
+}
+
+function getComparisonNote(event: Pick<EconomicCalendarEvent, "eventType" | "title" | "impact">) {
+  const text = titleToDirectionText(event);
+
+  if (event.eventType === "inflation" && /(prices|price index)/.test(text)) {
+    return "Инфлационният компонент често е по-силен от activity PMI, защото директно променя Fed и real-yield очакванията.";
+  }
+
+  if (event.eventType === "central_bank") {
+    return "Централните банки са сред най-силните XAU събития, защото движат едновременно USD, доходности и очаквания за цената на парите.";
+  }
+
+  if (event.eventType === "employment") {
+    return "Трудовият пазар е силен XAU драйвер, защото променя вероятността Fed да остане по-твърд или да стане по-мек.";
+  }
+
+  if (event.eventType === "business_surveys") {
+    return "PMI/ISM активността е важна, но обикновено е по-слаба от CPI, Core PCE, Fed решения и NFP, освен ако surprise-ът не е голям.";
+  }
+
+  if (event.eventType === "speeches") {
+    return "Речите могат да движат пазара, но без конкретен policy сигнал са по-несигурни от числовите release-и.";
+  }
+
+  return event.impact === "high"
+    ? "High-impact събитие: пазарът вероятно ще го сравнява с forecast-а и ще търси реакция в USD и доходностите."
+    : "Това е по-скоро контекстен сигнал и обикновено тежи по-малко от Fed, инфлация, NFP и доходности.";
+}
+
+export function getCalendarImpactStrength(event: EconomicCalendarEvent): CalendarImpactStrength {
+  const driverBonus = Math.min(
+    event.affectedDrivers.reduce((sum, driver) => sum + (driverStrengthBonus[driver] ?? 0), 0),
+    24,
+  );
+  const currencyBonus = event.currency === "USD" ? 7 : event.currency === "XAU" ? 8 : 0;
+  const titleBonus = titleStrengthBonus(event);
+
+  let score =
+    impactStrengthBase[event.impact] +
+    relevanceStrengthBonus[event.relevance] +
+    eventTypeStrengthBonus[event.eventType] +
+    driverBonus +
+    currencyBonus +
+    titleBonus;
+
+  if (event.eventType === "speeches" && !/(fed|fomc|powell|ecb|monetary|policy|rate|central bank)/i.test(event.title)) {
+    score = Math.min(score, 54);
+  }
+
+  const normalizedScore = clampScore(score);
+  const tier = getStrengthTier(normalizedScore);
+  const importantDrivers = event.affectedDrivers
+    .filter((driver) => ["fed", "real_yields", "inflation", "usd", "nominal_yields", "risk", "positioning"].includes(driver))
+    .map((driver) => driverReasonLabels[driver])
+    .slice(0, 4);
+  const reason = joinReasonParts(importantDrivers);
+
+  return {
+    score: normalizedScore,
+    tier,
+    label: tierLabel(tier),
+    reason,
+    comparisonNote: getComparisonNote(event),
+  };
+}
 
 export function isStrongGoldCalendarEvent(
   event: Pick<EconomicCalendarEvent, "impact" | "relevance">,
