@@ -121,16 +121,96 @@ function patternLabelClass(tone: PatternTone) {
   }
 }
 
-function movementPhrase(value: number, noun: string) {
+function moveToPhrase(value: number) {
   if (value > 0) {
-    return `${noun} се увеличават`;
+    return "се качват до";
   }
 
   if (value < 0) {
-    return `${noun} намаляват`;
+    return "падат до";
   }
 
-  return `${noun} са без промяна`;
+  return "остават на";
+}
+
+function netMovePhrase(value: number) {
+  if (value > 0) {
+    return "се качва";
+  }
+
+  if (value < 0) {
+    return "пада";
+  }
+
+  return "остава почти без промяна";
+}
+
+function longMeaning(value: number) {
+  if (value > 0) {
+    return "участниците, които залагат за покачване на златото, са увеличили long експозицията си";
+  }
+
+  if (value < 0) {
+    return "част от участниците, които са залагали за покачване на златото, са намалили long експозицията си";
+  }
+
+  return "long експозицията е останала почти без промяна";
+}
+
+function shortMeaning(value: number) {
+  if (value > 0) {
+    return "друга част са добавили short експозиция срещу златото";
+  }
+
+  if (value < 0) {
+    return "част от short участниците са намалили натиска срещу златото";
+  }
+
+  return "short експозицията е останала почти без промяна";
+}
+
+function balanceMeaning(net: number) {
+  if (net > 0) {
+    return "пазарът все още е повече long, отколкото short, така че големите играчи не са обърнали изцяло посоката срещу златото";
+  }
+
+  if (net < 0) {
+    return "пазарът вече е повече short, отколкото long, така че големите играчи като група са по-предпазливи или директно натискат срещу златото";
+  }
+
+  return "пазарът е почти балансиран между long и short, така че няма ясно позиционно надмощие";
+}
+
+function momentumMeaning(changeNet: number) {
+  if (changeNet > 0) {
+    return "спрямо миналата седмица ентусиазмът за покачване се е засилил. Това е bullish COT подобрение, но не е гаранция, че златото задължително ще расте.";
+  }
+
+  if (changeNet < 0) {
+    return "спрямо миналата седмица ентусиазмът за покачване е отслабнал. Това е “охлаждане”, не задължително силен bearish сигнал.";
+  }
+
+  return "спрямо миналата седмица няма ясно усилване или отслабване на ентусиазма. Това е по-скоро неутрален COT прочит.";
+}
+
+function tradingExample(row: CotPositionRow) {
+  if (row.changeLong < 0 && row.changeShort > 0 && row.changeNet < 0) {
+    return "Ако си представим, че 100 големи трейдъра са били bullish за злато, тази седмица част от тях не са станали напълно bearish, а просто са намалили риска: някои са затворили част от buy позициите си, други са добавили малки sell позиции за защита или за краткосрочен натиск. Затова картината не казва “златото задължително ще пада”, а казва: “купувачите още ги има, но вече натискат по-слабо”.";
+  }
+
+  if (row.changeLong > 0 && row.changeShort < 0 && row.changeNet > 0) {
+    return "Ако си представим, че 100 големи трейдъра следят златото, тази седмица повече от тях добавят buy позиции, а част от продавачите затварят sell позиции. Това не казва “златото задължително ще расте”, но казва: “купувачите натискат по-силно, а short натискът отслабва”.";
+  }
+
+  if (row.changeLong < 0 && row.changeShort > 0 && row.changeOpenInterest > 0) {
+    return "Ако си представим, че 100 големи трейдъра участват в пазара, тази седмица част от bullish трейдърите намаляват buy позициите си, а нов или по-агресивен short интерес влиза срещу златото. Това е по-сериозен предупредителен сигнал, защото натискът не идва само от затваряне на long, а и от добавяне на sell експозиция.";
+  }
+
+  if (row.changeLong < 0 && row.changeShort < 0 && row.changeOpenInterest < 0) {
+    return "Ако си представим, че 100 големи трейдъра са били активни в златото, тази седмица и buy, и sell страната намаляват участие. Това по-често означава прибиране на риск и затваряне на позиции, а не непременно нова ясна посока.";
+  }
+
+  return "Ако си представим, че 100 големи трейдъра пренареждат позициите си, този ред показва дали повече капитал влиза към buy страната, към sell страната или просто се затварят позиции. Затова COT не трябва да се чете като точна прогноза, а като карта на това къде се усилва или отслабва позиционният натиск.";
 }
 
 function ValueCell({
@@ -442,11 +522,9 @@ function AnalysisStep({
 }
 
 function CotLearningExample({ row }: { row: CotPositionRow }) {
-  const hasPrevious =
-    row.previousLong !== undefined &&
-    row.previousShort !== undefined &&
-    row.previousNet !== undefined &&
-    row.previousOpenInterest !== undefined;
+  const previousLong = row.previousLong ?? row.long - row.changeLong;
+  const previousShort = row.previousShort ?? row.short - row.changeShort;
+  const previousNet = row.previousNet ?? row.net - row.changeNet;
 
   return (
     <details className="group mt-5 rounded-[24px] border border-amber-300/14 bg-amber-300/[0.035] p-4 open:bg-amber-300/[0.05]">
@@ -464,51 +542,37 @@ function CotLearningExample({ row }: { row: CotPositionRow }) {
 
       <div className="mt-4 space-y-4">
         <div className="rounded-[22px] border border-white/8 bg-slate-950/28 p-4">
-          <p className="text-sm font-semibold text-white">Прост пример с текущата седмица</p>
+          <p className="text-sm font-semibold text-white">Пример за четене на COT</p>
           <div className="mt-3 space-y-3 text-sm leading-7 text-slate-300">
-            {hasPrevious ? (
-              <>
-                <p>
-                  Представи си, че гледаме как големите спекулативни участници променят своите
-                  “залози” от една COT седмица към следващата. Миналата седмица те са имали{" "}
-                  <span className="font-semibold text-emerald-100">
-                    {formatNumber(row.previousLong ?? 0)} long
-                  </span>{" "}
-                  и{" "}
-                  <span className="font-semibold text-rose-100">
-                    {formatNumber(row.previousShort ?? 0)} short
-                  </span>{" "}
-                  контракта. Тази седмица long са{" "}
-                  <span className="font-semibold text-emerald-100">{formatNumber(row.long)}</span>, а
-                  short са <span className="font-semibold text-rose-100">{formatNumber(row.short)}</span>.
-                </p>
-                <p>
-                  Реалната промяна е:{" "}
-                  <span className={cn("font-semibold", deltaTextClass(getCotChangeTone(row.changeLong)))}>
-                    {movementPhrase(row.changeLong, "Long")} с {formatSignedNumber(row.changeLong)}
-                  </span>
-                  , а{" "}
-                  <span className={cn("font-semibold", deltaTextClass(getCotChangeTone(row.changeShort)))}>
-                    {movementPhrase(row.changeShort, "Short")} с {formatSignedNumber(row.changeShort)}
-                  </span>
-                  . Net позицията се движи от{" "}
-                  <span className="font-semibold text-slate-100">
-                    {formatSignedNumber(row.previousNet ?? 0)}
-                  </span>{" "}
-                  към <span className="font-semibold text-slate-100">{formatSignedNumber(row.net)}</span>.
-                </p>
-              </>
-            ) : (
-              <p>
-                Представи си COT като седмична снимка на големите участници: колко контракта са
-                заложени за покачване, колко са заложени срещу покачване и дали общата net картина се
-                подобрява или отслабва.
-              </p>
-            )}
             <p>
-              По-просто: ако long страната намалява, short страната расте и net позицията пада,
-              пазарът може още да е net long, но bullish импулсът вече не е толкова силен. Това не е
-              автоматична прогноза за спад; то казва, че подкрепата от позиционирането е по-слаба.
+              Представи си, че големите спекуланти миналата седмица са имали{" "}
+              <span className="font-semibold text-emerald-100">
+                {formatNumber(previousLong)} long контракта
+              </span>{" "}
+              и{" "}
+              <span className="font-semibold text-rose-100">
+                {formatNumber(previousShort)} short контракта
+              </span>
+              . Тази седмица long контрактите {moveToPhrase(row.changeLong)}{" "}
+              <span className="font-semibold text-emerald-100">{formatNumber(row.long)}</span>, а short
+              контрактите {moveToPhrase(row.changeShort)}{" "}
+              <span className="font-semibold text-rose-100">{formatNumber(row.short)}</span>.
+            </p>
+            <p>
+              Това означава две неща едновременно: {longMeaning(row.changeLong)}, а{" "}
+              {shortMeaning(row.changeShort)}. Затова net позицията {netMovePhrase(row.changeNet)} от{" "}
+              <span className="font-semibold text-slate-100">{formatSignedNumber(previousNet)}</span>{" "}
+              до <span className="font-semibold text-slate-100">{formatSignedNumber(row.net)}</span>.
+            </p>
+            <p>
+              По-просто казано: {balanceMeaning(row.net)}. Но {momentumMeaning(row.changeNet)}
+            </p>
+          </div>
+
+          <div className="mt-5 rounded-[18px] border border-amber-300/12 bg-amber-300/[0.04] p-4">
+            <p className="text-sm font-semibold text-amber-100">Търговски пример</p>
+            <p className="mt-3 text-sm leading-7 text-slate-300">
+              {tradingExample(row)}
             </p>
           </div>
         </div>
