@@ -3,7 +3,11 @@ import { cookies } from "next/headers";
 
 import { env, isSupabaseConfigured } from "@/lib/env";
 
-export async function createSupabaseServerClient() {
+type SupabaseServerClientOptions = {
+  allowCookieWrites?: boolean;
+};
+
+export async function createSupabaseServerClient(options: SupabaseServerClientOptions = {}) {
   if (!isSupabaseConfigured) {
     return null;
   }
@@ -19,6 +23,10 @@ export async function createSupabaseServerClient() {
           return cookieStore.getAll();
         },
         setAll(cookiesToSet) {
+          if (!options.allowCookieWrites) {
+            return;
+          }
+
           for (const { name, value, options } of cookiesToSet) {
             cookieStore.set(name, value, options as CookieOptions);
           }

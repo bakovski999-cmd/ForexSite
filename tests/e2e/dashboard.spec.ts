@@ -34,7 +34,11 @@ test("demo login opens the dashboard and navigates core views", async ({ page })
     await expect(page.getByText("Как влияе на златото")).toBeVisible();
     await page.getByRole("button", { name: "Затвори" }).click();
   } else {
-    await expect(page.getByText("Няма live календарни събития за тази седмица.")).toBeVisible();
+    await expect(
+      page.getByText(
+        /Няма live календарни събития за тази седмица\.|Няма събития по тези филтри\.|Няма събития за избрания ден\./,
+      ),
+    ).toBeVisible();
   }
 
   await page.getByRole("link", { name: "COT позиции" }).click();

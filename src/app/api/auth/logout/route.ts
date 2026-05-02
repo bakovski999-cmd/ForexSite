@@ -10,7 +10,7 @@ export async function POST() {
   response.cookies.delete(getFirebaseSessionCookieName());
 
   if (isSupabaseConfigured) {
-    const supabase = await createSupabaseServerClient();
+    const supabase = await createSupabaseServerClient({ allowCookieWrites: true });
     await supabase?.auth.signOut();
   }
 

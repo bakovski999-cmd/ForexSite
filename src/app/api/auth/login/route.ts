@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "Demo данните не съвпадат." }, { status: 401 });
   }
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = await createSupabaseServerClient({ allowCookieWrites: true });
   if (!supabase) {
     return NextResponse.json({ message: "Supabase client is unavailable." }, { status: 500 });
   }

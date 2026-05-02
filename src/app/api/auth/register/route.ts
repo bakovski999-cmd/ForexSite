@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "Паролите не съвпадат." }, { status: 400 });
   }
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = await createSupabaseServerClient({ allowCookieWrites: true });
   if (!supabase) {
     return NextResponse.json({ message: "Supabase client is unavailable." }, { status: 500 });
   }
