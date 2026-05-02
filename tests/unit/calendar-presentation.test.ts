@@ -1,15 +1,13 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  emptyActualLabel,
   getCalendarDirectionPresentation,
   getCalendarEventDetail,
   getGoldNewsImpactScore,
   getCalendarValuePanels,
   isStrongGoldCalendarEvent,
   isStrongGoldNews,
-  pendingActualLabel,
-  sourcePendingActualLabel,
-  unavailableFreeForecastLabel,
 } from "@/lib/calendar-presentation";
 import type { EconomicCalendarEvent } from "@/lib/types";
 
@@ -38,19 +36,38 @@ describe("calendar presentation", () => {
     const panels = getCalendarValuePanels(baseEvent);
 
     expect(panels.find((panel) => panel.key === "latest")?.value).toBe("3.5%");
-    expect(panels.find((panel) => panel.key === "forecast")?.value).toBe(
-      unavailableFreeForecastLabel,
-    );
-    expect(panels.find((panel) => panel.key === "actual")?.value).toBe(pendingActualLabel);
+    expect(panels.find((panel) => panel.key === "forecast")?.value).toBe(emptyActualLabel);
+    expect(panels.find((panel) => panel.key === "actual")?.value).toBe(emptyActualLabel);
   });
 
-  test("shows source pending when release time passed but actual is still missing", () => {
+  test("keeps compact actual empty after release while detail explains source checks", () => {
+    const event = {
+      ...baseEvent,
+      actualStatus: "source_pending",
+    } satisfies EconomicCalendarEvent;
     const panels = getCalendarValuePanels({
       ...baseEvent,
       actualStatus: "source_pending",
     });
+    const detail = getCalendarEventDetail(event);
 
-    expect(panels.find((panel) => panel.key === "actual")?.value).toBe(sourcePendingActualLabel);
+    expect(panels.find((panel) => panel.key === "actual")?.value).toBe(emptyActualLabel);
+    expect(detail.releaseAnalysis).toContain("клетката остава празна");
+  });
+
+  test("does not show fake actuals for unsupported speech events", () => {
+    const event = {
+      ...baseEvent,
+      title: "President Trump Speaks",
+      eventType: "speeches",
+      actualStatus: "source_pending",
+      forecastStatus: "not_applicable",
+    } satisfies EconomicCalendarEvent;
+    const panels = getCalendarValuePanels(event);
+    const detail = getCalendarEventDetail(event);
+
+    expect(panels.find((panel) => panel.key === "actual")?.value).toBe(emptyActualLabel);
+    expect(detail.releaseAnalysis).toContain("няма надеждно публикувана стойност");
   });
 
   test("explains Fed calendar events through rates, USD and real yields", () => {

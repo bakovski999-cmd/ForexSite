@@ -3,8 +3,10 @@ import { describe, expect, test } from "vitest";
 import { normalizeNewsFeed } from "@/lib/data/fetchers/alpha-vantage";
 import { parseCotCsv } from "@/lib/data/fetchers/cftc";
 import {
+  calendarActualResolvers,
   enrichCalendarEventsWithOfficialActuals,
   mapEcbJsonDataToOfficialFacts,
+  mapEstatJsonToOfficialFacts,
   mapEurostatDatasetToOfficialFacts,
   mapForexFactoryCalendarItemsToEvents,
   mapFredReleaseDatesToCalendarEvents,
@@ -523,6 +525,121 @@ describe("market data normalization", () => {
       period: "30.04.2026",
       observationDate: "2026-04-30",
       source: "ECB Data Portal / Main refinancing rate",
+    });
+  });
+
+  test("calendar actual resolver registry includes JPY e-Stat coverage", () => {
+    expect(
+      calendarActualResolvers.some(
+        (rule) => rule.provider === "estat" && rule.pattern.test("Tokyo Core CPI y/y"),
+      ),
+    ).toBe(true);
+  });
+
+  test("e-Stat Tokyo CPI mapper returns the latest official monthly value", () => {
+    const rule = calendarActualResolvers.find(
+      (entry) => entry.provider === "estat" && entry.pattern.test("Tokyo Core CPI y/y"),
+    );
+
+    expect(rule?.provider).toBe("estat");
+
+    if (!rule || rule.provider !== "estat") {
+      throw new Error("Missing e-Stat Tokyo CPI resolver");
+    }
+
+    const facts = mapEstatJsonToOfficialFacts(rule, {
+      GET_STATS_DATA: {
+        STATISTICAL_DATA: {
+          CLASS_INF: {
+            CLASS_OBJ: [
+              {
+                "@id": "tab",
+                CLASS: [{ "@code": "2", "@name": "Change over the year" }],
+              },
+              {
+                "@id": "cat01",
+                CLASS: [{ "@code": "0001", "@name": "All items, less fresh food" }],
+              },
+              {
+                "@id": "area",
+                CLASS: [{ "@code": "13100", "@name": "Ku-area of Tokyo" }],
+              },
+            ],
+          },
+          DATA_INF: {
+            VALUE: [
+              {
+                "@tab": "2",
+                "@cat01": "0001",
+                "@area": "13100",
+                "@time": "202603",
+                "$": "1.7",
+              },
+              {
+                "@tab": "2",
+                "@cat01": "0001",
+                "@area": "13100",
+                "@time": "202604",
+                "$": "1.9",
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    expect(facts[0]).toMatchObject({
+      actual: "1.9%",
+      period: "април 2026",
+      observationDate: "2026-04-01",
+      source: "e-Stat / Statistics Bureau Japan Tokyo CPI",
+      trustTier: "official",
+    });
+  });
+
+  test("official actual priority does not overwrite trusted facts with public fallback", () => {
+    const [event] = mapForexFactoryCalendarItemsToEvents([
+      {
+        title: "ISM Manufacturing PMI",
+        country: "USD",
+        date: "2026-05-01T10:00:00-04:00",
+        impact: "Medium",
+        forecast: "53.1",
+        previous: "52.7",
+      },
+    ]);
+    const [enriched] = enrichCalendarEventsWithOfficialActuals(
+      [event],
+      new Map([
+        [
+          "^ism manufacturing pmi$",
+          [
+            {
+              actual: "51.0",
+              period: "release 01.05.2026",
+              observationDate: "2026-05-01",
+              source: "Investing.com economic calendar fallback",
+              sourceUrl: "https://www.investing.com/economic-calendar/ism-manufacturing-pmi-173",
+              trustTier: "public_fallback",
+            },
+            {
+              actual: "52.7",
+              period: "release 01.05.2026",
+              observationDate: "2026-05-01",
+              source: "ISM official report",
+              sourceUrl: "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/pmi/april/",
+              trustTier: "official",
+            },
+          ],
+        ],
+      ]),
+      new Date("2026-05-01T15:00:00.000Z"),
+    );
+
+    expect(enriched).toMatchObject({
+      actual: "52.7",
+      actualSource: "ISM official report",
+      actualTrustTier: "official",
     });
   });
 

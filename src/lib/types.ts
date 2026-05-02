@@ -24,6 +24,8 @@ export type CalendarForecastStatus = "provided" | "unavailable_free" | "not_appl
 
 export type CalendarActualStatus = "pending" | "source_pending" | "published";
 
+export type CalendarActualTrustTier = "forex_factory" | "official" | "public_fallback";
+
 export type CalendarEventType =
   | "growth"
   | "inflation"
@@ -218,6 +220,9 @@ export interface EconomicCalendarEvent {
   forecastStatus?: CalendarForecastStatus;
   actual?: string;
   actualSource?: string;
+  actualSourceUrl?: string;
+  actualResolvedAt?: string;
+  actualTrustTier?: CalendarActualTrustTier;
   actualUpdatedAt?: string;
   actualStatus?: CalendarActualStatus;
   latestActual?: string;

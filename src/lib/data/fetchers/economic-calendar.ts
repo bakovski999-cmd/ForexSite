@@ -2,6 +2,7 @@ import { env } from "@/lib/env";
 import { buildCalendarEventKey, getCalendarActualStatus } from "@/lib/calendar-history";
 import { inferCalendarEventType } from "@/lib/calendar-filters";
 import type {
+  CalendarActualTrustTier,
   CalendarImpact,
   CalendarRelevance,
   DriverTag,
@@ -90,6 +91,34 @@ type EcbJsonDataResponse = {
   };
 };
 
+type EstatClassEntry = {
+  "@code"?: string;
+  "@name"?: string;
+  "$"?: string;
+};
+
+type EstatClassObject = {
+  "@id"?: string;
+  CLASS?: EstatClassEntry | EstatClassEntry[];
+};
+
+type EstatValueEntry = Record<string, string | number | undefined> & {
+  "$"?: string | number;
+};
+
+type EstatJsonResponse = {
+  GET_STATS_DATA?: {
+    STATISTICAL_DATA?: {
+      CLASS_INF?: {
+        CLASS_OBJ?: EstatClassObject | EstatClassObject[];
+      };
+      DATA_INF?: {
+        VALUE?: EstatValueEntry | EstatValueEntry[];
+      };
+    };
+  };
+};
+
 type BlsSeriesDataPoint = {
   year: string;
   period: string;
@@ -142,6 +171,7 @@ type BaseOfficialActualRule = {
   decimals?: number;
   source: string;
   sourceUrl: string;
+  trustTier?: CalendarActualTrustTier;
 };
 
 type FredOfficialActualRule = BaseOfficialActualRule & {
@@ -170,11 +200,21 @@ type IsmOfficialActualRule = BaseOfficialActualRule & {
   metric: "indexValue";
 };
 
+type EstatOfficialActualRule = BaseOfficialActualRule & {
+  provider: "estat";
+  statsDataId: string;
+  metric: "valuePercent";
+  tabPattern: RegExp;
+  itemPattern: RegExp;
+  areaPattern: RegExp;
+};
+
 type OfficialActualRule =
   | FredOfficialActualRule
   | EurostatOfficialActualRule
   | EcbOfficialActualRule
-  | IsmOfficialActualRule;
+  | IsmOfficialActualRule
+  | EstatOfficialActualRule;
 
 type OfficialActualFact = {
   actual: string;
@@ -182,6 +222,7 @@ type OfficialActualFact = {
   observationDate: string;
   source: string;
   sourceUrl: string;
+  trustTier?: CalendarActualTrustTier;
 };
 
 const goldRelevantKeywords = [
@@ -298,7 +339,7 @@ const fredCalendarRules: ReleaseRule[] = [
   },
 ];
 
-const officialActualRules: OfficialActualRule[] = [
+export const calendarActualResolvers: OfficialActualRule[] = [
   {
     provider: "fred",
     pattern: /^federal funds rate$/i,
@@ -445,7 +486,35 @@ const officialActualRules: OfficialActualRule[] = [
     ],
     publicFallbackUrl: "https://www.investing.com/economic-calendar/ism-manufacturing-prices-174",
   },
+  {
+    provider: "estat",
+    pattern: /^tokyo core cpi y\/y$/i,
+    statsDataId: "0003427113",
+    cadence: "monthly",
+    metric: "valuePercent",
+    decimals: 1,
+    tabPattern: /change over the year|percentage change from the previous year/i,
+    itemPattern: /all items,\s*less fresh food|less fresh food/i,
+    areaPattern: /ku-area of tokyo|tokyo/i,
+    source: "e-Stat / Statistics Bureau Japan Tokyo CPI",
+    sourceUrl: "https://www.stat.go.jp/english/data/cpi/1588.html",
+  },
+  {
+    provider: "estat",
+    pattern: /^tokyo cpi y\/y$/i,
+    statsDataId: "0003427113",
+    cadence: "monthly",
+    metric: "valuePercent",
+    decimals: 1,
+    tabPattern: /change over the year|percentage change from the previous year/i,
+    itemPattern: /^all items$|all items,\s*less imputed rent/i,
+    areaPattern: /ku-area of tokyo|tokyo/i,
+    source: "e-Stat / Statistics Bureau Japan Tokyo CPI",
+    sourceUrl: "https://www.stat.go.jp/english/data/cpi/1588.html",
+  },
 ];
+
+const officialActualRules = calendarActualResolvers;
 
 const blsSeriesCatalog: Record<BlsFactKey, { seriesId: string; sourceUrl: string }> = {
   cpi: { seriesId: "CUUR0000SA0", sourceUrl: "https://www.bls.gov/cpi/" },
@@ -559,6 +628,36 @@ function eurostatTimeToObservationDate(time: string) {
 
 function formatPercent(value: number, decimals = 1) {
   return `${value.toFixed(decimals)}%`;
+}
+
+function trustRank(tier: CalendarActualTrustTier | undefined) {
+  return {
+    forex_factory: 0,
+    official: 1,
+    public_fallback: 2,
+  }[tier ?? "official"];
+}
+
+function withRuleTrustTier(
+  rule: OfficialActualRule,
+  fact: Omit<OfficialActualFact, "trustTier"> & { trustTier?: CalendarActualTrustTier },
+): OfficialActualFact {
+  return {
+    ...fact,
+    trustTier: fact.trustTier ?? rule.trustTier ?? "official",
+  };
+}
+
+function existingActualTrustTier(event: EconomicCalendarEvent): CalendarActualTrustTier {
+  if (/forexfactory/i.test(event.actualSource ?? event.source)) {
+    return "forex_factory";
+  }
+
+  if (/trading economics|investing\.com/i.test(event.actualSource ?? event.source)) {
+    return "public_fallback";
+  }
+
+  return "official";
 }
 
 function normalizeImpact(value: number | undefined): CalendarImpact {
@@ -820,6 +919,9 @@ function normalizeCalendarItem(item: TradingEconomicsCalendarItem): EconomicCale
     forecastStatus: item.Forecast || item.TEForecast ? "provided" : "not_applicable",
     actual: item.Actual || undefined,
     actualSource: item.Actual ? item.Source || "Trading Economics" : undefined,
+    actualSourceUrl: item.Actual ? sourceUrlFor(item) : undefined,
+    actualResolvedAt: item.Actual ? new Date().toISOString() : undefined,
+    actualTrustTier: item.Actual ? "public_fallback" : undefined,
     actualUpdatedAt: item.Actual ? new Date().toISOString() : undefined,
     actualStatus: getCalendarActualStatus({ actual: item.Actual || undefined, startsAt }),
     source: item.Source || "Trading Economics",
@@ -881,6 +983,9 @@ function normalizeForexFactoryItem(item: ForexFactoryCalendarItem): EconomicCale
     forecastStatus: item.forecast ? "provided" : "not_applicable",
     actual: item.actual || undefined,
     actualSource: item.actual ? "ForexFactory weekly export" : undefined,
+    actualSourceUrl: item.actual ? "https://www.forexfactory.com/calendar" : undefined,
+    actualResolvedAt: item.actual ? new Date().toISOString() : undefined,
+    actualTrustTier: item.actual ? "forex_factory" : undefined,
     actualUpdatedAt: item.actual ? new Date().toISOString() : undefined,
     actualStatus: getCalendarActualStatus({ actual: item.actual || undefined, startsAt: startsAtIso }),
     latestActual: item.previous || undefined,
@@ -905,7 +1010,17 @@ function getOfficialActualFactForEvent(
   }
 
   const ruleFacts = facts.get(rule.pattern.source) ?? [];
-  const fact = ruleFacts.find((candidate) => isOfficialFactFreshForEvent(rule, candidate, event.startsAt));
+  const fact = ruleFacts
+    .filter((candidate) => isOfficialFactFreshForEvent(rule, candidate, event.startsAt))
+    .sort((left, right) => {
+      const trustDelta = trustRank(left.trustTier) - trustRank(right.trustTier);
+
+      if (trustDelta !== 0) {
+        return trustDelta;
+      }
+
+      return right.observationDate.localeCompare(left.observationDate);
+    })[0];
 
   if (!fact) {
     return null;
@@ -943,6 +1058,9 @@ function enrichEventWithOfficialActual(
   if (event.actual) {
     return {
       ...event,
+      actualSourceUrl: event.actualSourceUrl ?? event.sourceUrl,
+      actualResolvedAt: event.actualResolvedAt ?? event.actualUpdatedAt ?? now.toISOString(),
+      actualTrustTier: event.actualTrustTier ?? existingActualTrustTier(event),
       actualStatus: "published",
     };
   }
@@ -958,6 +1076,9 @@ function enrichEventWithOfficialActual(
       ...event,
       actual: "Публикувано",
       actualSource: releaseSource.source,
+      actualSourceUrl: releaseSource.sourceUrl,
+      actualResolvedAt: now.toISOString(),
+      actualTrustTier: "official",
       actualUpdatedAt: now.toISOString(),
       actualStatus: "published",
       source: event.source || releaseSource.source,
@@ -988,6 +1109,9 @@ function enrichEventWithOfficialActual(
     ...event,
     actual: fact.actual,
     actualSource: fact.source,
+    actualSourceUrl: fact.sourceUrl,
+    actualResolvedAt: now.toISOString(),
+    actualTrustTier: fact.trustTier ?? "official",
     actualUpdatedAt: now.toISOString(),
     actualStatus: "published",
     latestActual: event.latestActual ?? event.previous,
@@ -1215,13 +1339,13 @@ export function mapEurostatDatasetToOfficialFacts(
         return null;
       }
 
-      return {
+      return withRuleTrustTier(rule, {
         actual: formatPercent(value, rule.decimals ?? 1),
         period: formatEurostatPeriod(time, rule.cadence),
         observationDate: eurostatTimeToObservationDate(time),
         source: rule.source,
         sourceUrl: rule.sourceUrl,
-      } satisfies OfficialActualFact;
+      });
     })
     .filter((fact): fact is OfficialActualFact => Boolean(fact))
     .sort((left, right) => right.observationDate.localeCompare(left.observationDate));
@@ -1250,13 +1374,120 @@ export function mapEcbJsonDataToOfficialFacts(
         return null;
       }
 
-      return {
+      return withRuleTrustTier(rule, {
         actual: formatPercent(value, rule.decimals ?? 2),
         period: formatOfficialPeriod(time, rule.cadence),
         observationDate: time,
         source: rule.source,
         sourceUrl: rule.sourceUrl,
-      } satisfies OfficialActualFact;
+      });
+    })
+    .filter((fact): fact is OfficialActualFact => Boolean(fact))
+    .sort((left, right) => right.observationDate.localeCompare(left.observationDate));
+}
+
+function asArray<T>(value: T | T[] | undefined): T[] {
+  if (!value) {
+    return [];
+  }
+
+  return Array.isArray(value) ? value : [value];
+}
+
+function buildEstatClassLabelMap(payload: EstatJsonResponse) {
+  const classObjects = asArray(payload.GET_STATS_DATA?.STATISTICAL_DATA?.CLASS_INF?.CLASS_OBJ);
+  const labelByDimension = new Map<string, Map<string, string>>();
+
+  for (const classObject of classObjects) {
+    const dimensionId = classObject["@id"];
+
+    if (!dimensionId) {
+      continue;
+    }
+
+    const labels = new Map<string, string>();
+
+    for (const entry of asArray(classObject.CLASS)) {
+      const code = entry["@code"];
+
+      if (!code) {
+        continue;
+      }
+
+      labels.set(code, entry["@name"] ?? entry["$"] ?? code);
+    }
+
+    labelByDimension.set(dimensionId, labels);
+  }
+
+  return labelByDimension;
+}
+
+function estatEntryMatches(
+  entry: EstatValueEntry,
+  labelByDimension: Map<string, Map<string, string>>,
+  dimensionId: string,
+  pattern: RegExp,
+) {
+  const rawValue = entry[`@${dimensionId}`];
+
+  if (rawValue === undefined) {
+    return false;
+  }
+
+  const code = String(rawValue);
+  const label = labelByDimension.get(dimensionId)?.get(code) ?? code;
+  return pattern.test(label) || pattern.test(code);
+}
+
+function estatTimeToObservationDate(time: string) {
+  const monthMatch = time.match(/^(\d{4})(\d{2})$/);
+
+  if (monthMatch) {
+    return `${monthMatch[1]}-${monthMatch[2]}-01`;
+  }
+
+  if (/^\d{4}-\d{2}$/.test(time)) {
+    return `${time}-01`;
+  }
+
+  return time;
+}
+
+export function mapEstatJsonToOfficialFacts(
+  rule: EstatOfficialActualRule,
+  payload: EstatJsonResponse,
+): OfficialActualFact[] {
+  const labelByDimension = buildEstatClassLabelMap(payload);
+  const values = asArray(payload.GET_STATS_DATA?.STATISTICAL_DATA?.DATA_INF?.VALUE);
+
+  return values
+    .map((entry) => {
+      const actualValue = Number(entry["$"]);
+      const time = String(entry["@time"] ?? "");
+
+      if (!Number.isFinite(actualValue) || !time) {
+        return null;
+      }
+
+      const matches =
+        estatEntryMatches(entry, labelByDimension, "tab", rule.tabPattern) &&
+        estatEntryMatches(entry, labelByDimension, "cat01", rule.itemPattern) &&
+        estatEntryMatches(entry, labelByDimension, "area", rule.areaPattern);
+
+      if (!matches) {
+        return null;
+      }
+
+      const observationDate = estatTimeToObservationDate(time);
+
+      return withRuleTrustTier(rule, {
+        actual: formatPercent(actualValue, rule.decimals ?? 1),
+        period: formatEurostatPeriod(observationDate.slice(0, 7), rule.cadence),
+        observationDate,
+        source: rule.source,
+        sourceUrl: rule.sourceUrl,
+      });
     })
     .filter((fact): fact is OfficialActualFact => Boolean(fact))
     .sort((left, right) => right.observationDate.localeCompare(left.observationDate));
@@ -1346,13 +1577,13 @@ function mapIsmHtmlToOfficialFacts(
     return [];
   }
 
-  return [{
+  return [withRuleTrustTier(rule, {
     actual,
     period: `release ${formatOfficialPeriod(parsed.observationDate, "daily")}`,
     observationDate: parsed.observationDate,
     source,
     sourceUrl,
-  } satisfies OfficialActualFact];
+  })];
 }
 
 function mapInvestingHtmlToOfficialFacts(rule: IsmOfficialActualRule, html: string) {
@@ -1362,13 +1593,14 @@ function mapInvestingHtmlToOfficialFacts(rule: IsmOfficialActualRule, html: stri
     return [];
   }
 
-  return [{
+  return [withRuleTrustTier(rule, {
     actual: parsed.actual,
     period: `release ${formatOfficialPeriod(parsed.observationDate, "daily")}`,
     observationDate: parsed.observationDate,
     source: "Investing.com economic calendar fallback",
     sourceUrl: rule.publicFallbackUrl,
-  } satisfies OfficialActualFact];
+    trustTier: "public_fallback",
+  })];
 }
 
 async function fetchText(url: string) {
@@ -1497,6 +1729,30 @@ async function fetchEcbOfficialFacts(rule: EcbOfficialActualRule) {
   return mapEcbJsonDataToOfficialFacts(rule, await response.json() as EcbJsonDataResponse);
 }
 
+async function fetchEstatOfficialFacts(rule: EstatOfficialActualRule) {
+  if (!env.ESTAT_APP_ID) {
+    return [];
+  }
+
+  const url = new URL("https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData");
+  url.searchParams.set("appId", env.ESTAT_APP_ID);
+  url.searchParams.set("statsDataId", rule.statsDataId);
+  url.searchParams.set("limit", "400");
+  url.searchParams.set("metaGetFlg", "Y");
+  url.searchParams.set("sectionHeaderFlg", "1");
+
+  const response = await fetch(url, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`e-Stat request failed for ${rule.statsDataId}: ${response.status}`);
+  }
+
+  return mapEstatJsonToOfficialFacts(rule, await response.json() as EstatJsonResponse);
+}
+
 function setOfficialFacts(
   facts: Map<string, OfficialActualFact[]>,
   rule: OfficialActualRule,
@@ -1520,6 +1776,9 @@ async function fetchOfficialActualFacts() {
   );
   const ismRules = officialActualRules.filter(
     (rule): rule is IsmOfficialActualRule => rule.provider === "ism",
+  );
+  const estatRules = officialActualRules.filter(
+    (rule): rule is EstatOfficialActualRule => rule.provider === "estat",
   );
 
   if (env.FRED_API_KEY) {
@@ -1546,13 +1805,13 @@ async function fetchOfficialActualFacts() {
           return;
         }
 
-        ruleFacts.push({
+        ruleFacts.push(withRuleTrustTier(rule, {
           actual,
           period: formatOfficialPeriod(observation.date, rule.cadence),
           observationDate: observation.date,
           source: rule.source,
           sourceUrl: rule.sourceUrl,
-        });
+        }));
       });
 
       setOfficialFacts(facts, rule, ruleFacts);
@@ -1568,8 +1827,11 @@ async function fetchOfficialActualFacts() {
   const ismResults = await Promise.allSettled(
     ismRules.map(async (rule) => [rule, await fetchIsmOfficialFacts(rule)] as const),
   );
+  const estatResults = await Promise.allSettled(
+    estatRules.map(async (rule) => [rule, await fetchEstatOfficialFacts(rule)] as const),
+  );
 
-  for (const result of [...eurostatResults, ...ecbResults, ...ismResults]) {
+  for (const result of [...eurostatResults, ...ecbResults, ...ismResults, ...estatResults]) {
     if (result.status === "fulfilled") {
       setOfficialFacts(facts, result.value[0], result.value[1]);
     }
@@ -1634,6 +1896,7 @@ function normalizeFredReleaseDate(
       ? "FRED + BLS official data"
       : "FRED release calendar"
     : undefined;
+  const sourceUrl = fact?.sourceUrl ?? rule.sourceUrl ?? `https://fred.stlouisfed.org/release?rid=${release.release_id}`;
 
   return {
     id: `fred-release-${release.release_id}-${release.date}`,
@@ -1649,12 +1912,15 @@ function normalizeFredReleaseDate(
     forecastStatus: isReleasePackage ? "not_applicable" : "unavailable_free",
     actual,
     actualSource,
+    actualSourceUrl: actual ? sourceUrl : undefined,
+    actualResolvedAt: actual ? new Date().toISOString() : undefined,
+    actualTrustTier: actual ? "official" : undefined,
     actualUpdatedAt: actual ? new Date().toISOString() : undefined,
     actualStatus: getCalendarActualStatus({ actual, startsAt }),
     latestActual: fact?.actual,
     latestActualPeriod: fact?.period,
     source: fact ? "FRED + BLS official data" : "FRED release calendar",
-    sourceUrl: fact?.sourceUrl ?? rule.sourceUrl ?? `https://fred.stlouisfed.org/release?rid=${release.release_id}`,
+    sourceUrl,
     affectedDrivers: rule.affectedDrivers,
     expectedGoldImpact: rule.expectedGoldImpact,
     scenarioBullish: scenarios.bullish,

@@ -66,6 +66,15 @@ function mergeEvent(
     actualSource: incoming.actual
       ? incoming.actualSource ?? incoming.source
       : previous?.actualSource ?? incoming.actualSource,
+    actualSourceUrl: incoming.actual
+      ? incoming.actualSourceUrl ?? incoming.sourceUrl ?? previous?.actualSourceUrl
+      : previous?.actualSourceUrl ?? incoming.actualSourceUrl,
+    actualResolvedAt: incoming.actual
+      ? incoming.actualResolvedAt ?? incoming.actualUpdatedAt ?? (actualChanged ? now.toISOString() : previous?.actualResolvedAt)
+      : previous?.actualResolvedAt ?? incoming.actualResolvedAt,
+    actualTrustTier: incoming.actual
+      ? incoming.actualTrustTier ?? previous?.actualTrustTier
+      : previous?.actualTrustTier ?? incoming.actualTrustTier,
     actualUpdatedAt: incoming.actual
       ? incoming.actualUpdatedAt ?? (actualChanged ? now.toISOString() : previous?.actualUpdatedAt)
       : previous?.actualUpdatedAt ?? incoming.actualUpdatedAt,

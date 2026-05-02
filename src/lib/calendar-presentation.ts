@@ -6,8 +6,7 @@ import type {
   SignalDirection,
 } from "@/lib/types";
 
-export const pendingActualLabel = "чака се";
-export const sourcePendingActualLabel = "чака ForexFactory/official fallback";
+export const emptyActualLabel = "";
 export const unavailableFreeForecastLabel = "Няма безплатен консенсус";
 
 type CalendarValuePanel = {
@@ -190,10 +189,8 @@ export function getCalendarDirectionPresentation(
 export function getCalendarValuePanels(event: EconomicCalendarEvent): CalendarValuePanel[] {
   const forecastValue =
     event.forecast ??
-    (event.forecastStatus === "unavailable_free" ? unavailableFreeForecastLabel : "-");
-  const actualValue =
-    event.actual ??
-    (event.actualStatus === "source_pending" ? sourcePendingActualLabel : pendingActualLabel);
+    (event.forecastStatus === "unavailable_free" ? emptyActualLabel : "-");
+  const actualValue = event.actual ?? emptyActualLabel;
   const latestValue = event.actual && event.previous
     ? event.previous
     : event.latestActual ?? event.previous ?? "-";
@@ -213,7 +210,11 @@ export function getCalendarValuePanels(event: EconomicCalendarEvent): CalendarVa
       label: "Очаквана",
       value: forecastValue,
       tone: "neutral",
-      hint: event.forecast ? "Консенсус/прогноза" : "Без надежден free forecast",
+      hint: event.forecast
+        ? "Консенсус/прогноза"
+        : event.forecastStatus === "unavailable_free"
+          ? unavailableFreeForecastLabel
+          : "Без forecast",
     },
     {
       key: "actual",
@@ -223,7 +224,7 @@ export function getCalendarValuePanels(event: EconomicCalendarEvent): CalendarVa
       hint: event.actual
         ? `Публикувана стойност${event.actualSource ? ` от ${event.actualSource}` : ""}`
         : event.actualStatus === "source_pending"
-          ? `Release часът е минал; сайтът проверява ${event.source}, докато се появи надежден actual`
+          ? "Release часът е минал; сайтът проверява наличните надеждни източници"
           : "Ще се обнови при release",
     },
   ];
@@ -391,7 +392,7 @@ function isPublishedReleasePackage(
 function getReleaseAnalysis(event: EconomicCalendarEvent) {
   if (!event.actual) {
     if (event.actualStatus === "source_pending") {
-      return `Release часът е минал, но ${event.source} още не е дал надежден actual за този ред. Сайтът ще продължи да проверява официалните fallback източници и ще попълни стойността веднага щом се появи.`;
+      return "Release часът е минал, но все още няма надеждно публикувана стойност за този ред. Сайтът продължава да проверява ForexFactory, official API/release pages и whitelist-натите public fallback източници; в основния календар клетката остава празна, за да не показва шум или измислени данни.";
     }
 
     return "Новият факт още не е публикуван. Засега анализът е сценарен: пазарът ще сравни actual стойността с forecast-а и ще реагира през USD, доходности, Fed очаквания и risk sentiment.";
@@ -443,8 +444,7 @@ function getValueContext(event: EconomicCalendarEvent) {
     event.forecast ??
     (event.forecastStatus === "unavailable_free" ? unavailableFreeForecastLabel : undefined);
   const actual =
-    event.actual ??
-    (event.actualStatus === "source_pending" ? sourcePendingActualLabel : pendingActualLabel);
+    event.actual ?? "още няма публикуван нов факт";
 
   return `В момента: последна стойност ${latest ?? "-"}, очаквана ${forecast ?? "-"}, нов факт ${actual}.`;
 }

@@ -30,6 +30,7 @@ const envSchema = z.object({
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
   ALPHA_VANTAGE_API_KEY: optionalString,
   FRED_API_KEY: optionalString,
+  ESTAT_APP_ID: optionalString,
   TRADING_ECONOMICS_API_KEY: optionalString,
   FINNHUB_API_KEY: optionalString,
   NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),

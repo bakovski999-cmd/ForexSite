@@ -119,6 +119,14 @@ function valueTextClass(tone: "bullish" | "bearish" | "neutral") {
   }[tone];
 }
 
+function actualTrustTierLabel(tier: EconomicCalendarEvent["actualTrustTier"]) {
+  return {
+    forex_factory: "ForexFactory actual",
+    official: "Официален източник",
+    public_fallback: "Публичен fallback",
+  }[tier ?? "official"];
+}
+
 function groupByDay(events: EconomicCalendarEvent[]) {
   return events.reduce<Record<string, EconomicCalendarEvent[]>>((groups, event) => {
     const key = formatSofiaDateKey(event.startsAt) || event.startsAt.slice(0, 10);
@@ -179,22 +187,27 @@ function TogglePill({
 function CompactValueCells({ event }: { event: EconomicCalendarEvent }) {
   return (
     <div className="grid grid-cols-3 gap-1.5">
-      {getCalendarValuePanels(event).map((panel) => (
-        <div
-          key={panel.key}
-          className={cn("min-w-0 rounded-xl border px-2.5 py-2", valuePanelClass(panel.tone))}
-        >
-          <p className="truncate text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
-            {panel.label}
-          </p>
-          <p
-            className={cn("mt-1 truncate text-sm font-semibold leading-5", valueTextClass(panel.tone))}
-            title={panel.value}
+      {getCalendarValuePanels(event).map((panel) => {
+        const displayValue = panel.value || "\u00a0";
+
+        return (
+          <div
+            key={panel.key}
+            className={cn("min-w-0 rounded-xl border px-2.5 py-2", valuePanelClass(panel.tone))}
+            aria-label={`${panel.label}: ${panel.value || "няма публикувана стойност"}`}
           >
-            {panel.value}
-          </p>
-        </div>
-      ))}
+            <p className="truncate text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+              {panel.label}
+            </p>
+            <p
+              className={cn("mt-1 truncate text-sm font-semibold leading-5", valueTextClass(panel.tone))}
+              title={panel.value || panel.hint}
+            >
+              {displayValue}
+            </p>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -208,7 +221,8 @@ function FullValuePanels({ event }: { event: EconomicCalendarEvent }) {
             {panel.label}
           </p>
           <p className={cn("mt-2 break-words text-lg font-semibold", valueTextClass(panel.tone))}>
-            {panel.value}
+            {panel.value ||
+              (panel.key === "forecast" ? "Няма безплатен консенсус" : "Още няма публикуван actual")}
           </p>
           {panel.hint ? <p className="mt-2 text-xs leading-5 text-slate-400">{panel.hint}</p> : null}
         </div>
@@ -226,6 +240,8 @@ function CalendarEventDetailModal({
 }) {
   const detail = getCalendarEventDetail(event);
   const direction = getCalendarDirectionPresentation(event);
+  const actualSourceUrl = event.actualSourceUrl ?? event.sourceUrl;
+  const actualResolvedAt = event.actualResolvedAt ?? event.actualUpdatedAt;
 
   return (
     <div
@@ -285,11 +301,34 @@ function CalendarEventDetailModal({
         <div className="mt-5 rounded-[22px] border border-amber-300/16 bg-amber-300/[0.055] p-4">
           <p className="text-sm font-semibold text-amber-100">Резултат спрямо очакването</p>
           <p className="mt-2 text-sm leading-7 text-slate-200">{detail.releaseAnalysis}</p>
-          {event.actualUpdatedAt ? (
-            <p className="mt-2 text-xs leading-5 text-slate-400">
-              Обновено: {event.actualUpdatedAt ? formatSofiaTime(event.actualUpdatedAt) : "-"}
-            </p>
-          ) : null}
+          <div className="mt-3 flex flex-wrap gap-2 text-xs leading-5 text-slate-400">
+            {event.actualSource ? (
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
+                Източник:{" "}
+                {actualSourceUrl ? (
+                  <a href={actualSourceUrl} target="_blank" rel="noreferrer" className="text-amber-100 hover:underline">
+                    {event.actualSource}
+                  </a>
+                ) : (
+                  event.actualSource
+                )}
+              </span>
+            ) : (
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
+                Източник: още няма надежден публикуван actual
+              </span>
+            )}
+            {event.actualTrustTier ? (
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
+                Ниво: {actualTrustTierLabel(event.actualTrustTier)}
+              </span>
+            ) : null}
+            {actualResolvedAt ? (
+              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
+                Обновено: {formatSofiaTime(actualResolvedAt)}
+              </span>
+            ) : null}
+          </div>
         </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-2">
@@ -342,9 +381,9 @@ function CalendarEventDetailModal({
             <DirectionIcon direction={direction.direction} />
             {direction.label}
           </div>
-          {event.sourceUrl ? (
+          {actualSourceUrl ? (
             <a
-              href={event.sourceUrl}
+              href={actualSourceUrl}
               target="_blank"
               rel="noreferrer"
               className="inline-flex h-10 items-center gap-2 rounded-full border border-amber-300/25 bg-amber-300/12 px-4 text-sm font-semibold text-amber-100 transition hover:bg-amber-300/18"
@@ -767,7 +806,7 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
             <p className="text-sm font-semibold text-white">{formatSofiaDay(`${selectedDate}T12:00:00.000Z`)}</p>
             <p className="mt-1 text-xs leading-5 text-slate-400">
               {selectedDateEvents.length} събития по текущите филтри
-              {pendingReleasedCount ? ` • ${pendingReleasedCount} чакат публикуван actual` : ""}
+              {pendingReleasedCount ? ` • ${pendingReleasedCount} без публикуван actual` : ""}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1017,7 +1056,7 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
           <div className="rounded-[22px] border border-white/8 bg-white/[0.03] p-5">
             <p className="text-sm font-semibold text-white">Official fallback слой</p>
             <p className="mt-3 text-sm leading-7 text-slate-300">
-              FRED, BLS, Fed, Eurostat, ECB и ISM добавят actual/status стойности.
+              FRED, BLS, Fed, Eurostat, ECB, ISM и e-Stat добавят actual/status стойности.
               При липсващ official API сайтът ползва public calendar fallback.
             </p>
           </div>
