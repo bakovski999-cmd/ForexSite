@@ -108,11 +108,10 @@ describe("leverage risk calculator", () => {
 
   test("calculates partial sale profit by leg and total", () => {
     const result = calculatePartialSales({
-      entryPrice: 15,
-      totalShares: 7,
-      sales: [
-        { shares: 3, exitPrice: 30 },
-        { shares: 4, exitPrice: 50 },
+      lots: [
+        { entryPrice: 16.43, ownedShares: 7, sharesToSell: 7, exitPrice: 30 },
+        { entryPrice: 18, ownedShares: 7, sharesToSell: 3, exitPrice: 60 },
+        { entryPrice: 23, ownedShares: 5, sharesToSell: 4, exitPrice: 50 },
       ],
     });
 
@@ -122,21 +121,18 @@ describe("leverage risk calculator", () => {
       return;
     }
 
-    expect(result.saleResults[0].profit).toBe(45);
-    expect(result.saleResults[1].profit).toBe(140);
-    expect(result.soldShares).toBe(7);
-    expect(result.remainingShares).toBe(0);
-    expect(result.totalProfit).toBe(185);
+    expect(result.saleResults[0].profit).toBeCloseTo(94.99);
+    expect(result.saleResults[1].profit).toBe(126);
+    expect(result.saleResults[2].profit).toBe(108);
+    expect(result.totalOwnedShares).toBe(19);
+    expect(result.soldShares).toBe(14);
+    expect(result.remainingShares).toBe(5);
+    expect(result.totalProfit).toBeCloseTo(328.99);
   });
 
-  test("partial sales reject selling more shares than owned", () => {
+  test("partial sales reject selling more shares than owned in one lot", () => {
     const result = calculatePartialSales({
-      entryPrice: 15,
-      totalShares: 7,
-      sales: [
-        { shares: 3, exitPrice: 30 },
-        { shares: 5, exitPrice: 50 },
-      ],
+      lots: [{ entryPrice: 15, ownedShares: 7, sharesToSell: 8, exitPrice: 30 }],
     });
 
     expect(result.ok).toBe(false);
@@ -145,7 +141,7 @@ describe("leverage risk calculator", () => {
       return;
     }
 
-    expect(result.errors.totalSold).toBeDefined();
+    expect(result.errors.lots?.[0]).toBeDefined();
   });
 
   test("calculates accumulated average price and target profit", () => {

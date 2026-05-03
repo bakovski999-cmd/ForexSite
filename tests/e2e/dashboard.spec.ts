@@ -54,6 +54,9 @@ test("demo login opens the dashboard and navigates core views", async ({ page })
   await expect(page.getByText("Ако цената падне до")).toBeVisible();
   await expect(page.getByText("печалбата ще е")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Частични продажби" })).toBeVisible();
+  await expect(page.getByText("Цена на покупка").first()).toBeVisible();
+  await expect(page.getByText("Купени акции").first()).toBeVisible();
+  await expect(page.getByText("Продавам акции").first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Натрупване / осредняване" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Колко акции мога да взема?" })).toHaveCount(0);
 });

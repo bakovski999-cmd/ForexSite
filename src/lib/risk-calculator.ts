@@ -11,21 +11,19 @@ export type LeverageRiskInput = {
 
 export type LeverageRiskErrors = Partial<Record<keyof LeverageRiskInput, string>>;
 
-export type PartialSaleLegInput = {
-  shares: number;
+export type PartialSaleLotInput = {
+  entryPrice: number;
+  ownedShares: number;
+  sharesToSell: number;
   exitPrice: number;
 };
 
 export type PartialSalesInput = {
-  entryPrice: number;
-  totalShares: number;
-  sales: PartialSaleLegInput[];
+  lots: PartialSaleLotInput[];
 };
 
-export type PartialSalesErrors = Partial<
-  Record<"entryPrice" | "totalShares" | "totalSold", string>
-> & {
-  sales?: string[];
+export type PartialSalesErrors = {
+  lots?: string[];
 };
 
 export type AccumulationLotInput = {
@@ -72,14 +70,19 @@ export type PartialSalesResult =
       ok: true;
       input: PartialSalesInput;
       saleResults: Array<
-        PartialSaleLegInput & {
+        PartialSaleLotInput & {
           index: number;
           profit: number;
+          costBasisSold: number;
+          saleValue: number;
           remainingSharesAfter: number;
         }
       >;
+      totalOwnedShares: number;
       soldShares: number;
       remainingShares: number;
+      totalCostBasisSold: number;
+      totalSaleValue: number;
       totalProfit: number;
     }
   | {
@@ -234,70 +237,83 @@ export function calculateLeverageRisk(input: LeverageRiskInput): LeverageRiskRes
 
 export function calculatePartialSales(input: PartialSalesInput): PartialSalesResult {
   const errors: PartialSalesErrors = {};
-  const saleErrors: string[] = [];
+  const lotErrors: string[] = [];
 
-  const entryPriceError = validatePositive(input.entryPrice, "Цената на вход");
-  const totalSharesError = validatePositive(input.totalShares, "Общият брой акции");
-
-  if (entryPriceError) {
-    errors.entryPrice = entryPriceError;
+  if (input.lots.length === 0) {
+    lotErrors.push("Добави поне една покупка/продажба.");
   }
 
-  if (totalSharesError) {
-    errors.totalShares = totalSharesError;
-  }
+  for (const [index, lot] of input.lots.entries()) {
+    const lotNumber = index + 1;
+    const entryPriceError = validatePositive(lot.entryPrice, `Цената на покупка ${lotNumber}`);
+    const ownedSharesError = validatePositive(lot.ownedShares, `Купените акции в ред ${lotNumber}`);
+    const sharesToSellError = validatePositive(
+      lot.sharesToSell,
+      `Продаваните акции в ред ${lotNumber}`,
+    );
 
-  if (input.sales.length === 0) {
-    saleErrors.push("Добави поне една продажба.");
-  }
-
-  for (const [index, sale] of input.sales.entries()) {
-    const saleNumber = index + 1;
-    const sharesError = validatePositive(sale.shares, `Акциите в продажба ${saleNumber}`);
-
-    if (sharesError) {
-      saleErrors[index] = sharesError;
+    if (entryPriceError) {
+      lotErrors[index] = entryPriceError;
       continue;
     }
 
-    if (!Number.isFinite(sale.exitPrice) || sale.exitPrice < 0) {
-      saleErrors[index] = `Цената в продажба ${saleNumber} трябва да е 0 или повече.`;
+    if (ownedSharesError) {
+      lotErrors[index] = ownedSharesError;
+      continue;
+    }
+
+    if (sharesToSellError) {
+      lotErrors[index] = sharesToSellError;
+      continue;
+    }
+
+    if (!Number.isFinite(lot.exitPrice) || lot.exitPrice < 0) {
+      lotErrors[index] = `Цената на продажба в ред ${lotNumber} трябва да е 0 или повече.`;
+      continue;
+    }
+
+    if (lot.sharesToSell > lot.ownedShares + Number.EPSILON) {
+      lotErrors[index] = `В ред ${lotNumber} продаваш повече акции, отколкото са купени.`;
     }
   }
 
-  const soldShares = input.sales.reduce((total, sale) => total + sale.shares, 0);
-
-  if (Number.isFinite(input.totalShares) && soldShares > input.totalShares + Number.EPSILON) {
-    errors.totalSold = "Продадените акции са повече от общо купените акции.";
-  }
-
-  if (saleErrors.length > 0) {
-    errors.sales = saleErrors;
+  if (lotErrors.length > 0) {
+    errors.lots = lotErrors;
   }
 
   if (Object.keys(errors).length > 0) {
     return { ok: false, errors };
   }
 
-  let remainingShares = input.totalShares;
-  const saleResults = input.sales.map((sale, index) => {
-    remainingShares -= sale.shares;
+  const saleResults = input.lots.map((lot, index) => {
+    const costBasisSold = lot.entryPrice * lot.sharesToSell;
+    const saleValue = lot.exitPrice * lot.sharesToSell;
 
     return {
-      ...sale,
+      ...lot,
       index,
-      profit: (sale.exitPrice - input.entryPrice) * sale.shares,
-      remainingSharesAfter: remainingShares,
+      profit: saleValue - costBasisSold,
+      costBasisSold,
+      saleValue,
+      remainingSharesAfter: lot.ownedShares - lot.sharesToSell,
     };
   });
+  const totalOwnedShares = input.lots.reduce((total, lot) => total + lot.ownedShares, 0);
+  const soldShares = saleResults.reduce((total, sale) => total + sale.sharesToSell, 0);
+  const remainingShares = saleResults.reduce((total, sale) => total + sale.remainingSharesAfter, 0);
+  const totalCostBasisSold = saleResults.reduce((total, sale) => total + sale.costBasisSold, 0);
+  const totalSaleValue = saleResults.reduce((total, sale) => total + sale.saleValue, 0);
   const totalProfit = saleResults.reduce((total, sale) => total + sale.profit, 0);
 
   return {
     ok: true,
     input,
     saleResults,
+    totalOwnedShares,
     soldShares,
     remainingShares,
+    totalCostBasisSold,
+    totalSaleValue,
     totalProfit,
   };
 }

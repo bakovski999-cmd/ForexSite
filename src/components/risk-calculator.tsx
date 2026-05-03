@@ -222,7 +222,9 @@ function DirectionNote({ side }: { side: PositionSide }) {
 
 type PartialSaleRow = {
   id: string;
-  shares: string;
+  entryPrice: string;
+  ownedShares: string;
+  sharesToSell: string;
   exitPrice: string;
 };
 
@@ -268,28 +270,27 @@ function ResultAmount({ value }: { value: number }) {
 }
 
 function PartialSalesPanel() {
-  const [entryPrice, setEntryPrice] = useState("15");
-  const [totalShares, setTotalShares] = useState("7");
   const [sales, setSales] = useState<PartialSaleRow[]>([
-    { id: "sale-1", shares: "3", exitPrice: "30" },
-    { id: "sale-2", shares: "4", exitPrice: "50" },
+    { id: "sale-1", entryPrice: "16.43", ownedShares: "7", sharesToSell: "7", exitPrice: "30" },
+    { id: "sale-2", entryPrice: "18", ownedShares: "7", sharesToSell: "3", exitPrice: "60" },
+    { id: "sale-3", entryPrice: "23", ownedShares: "5", sharesToSell: "4", exitPrice: "50" },
   ]);
 
   const result = useMemo(
     () =>
       calculatePartialSales({
-        entryPrice: parseAmount(entryPrice),
-        totalShares: parseAmount(totalShares),
-        sales: sales.map((sale) => ({
-          shares: parseAmount(sale.shares),
+        lots: sales.map((sale) => ({
+          entryPrice: parseAmount(sale.entryPrice),
+          ownedShares: parseAmount(sale.ownedShares),
+          sharesToSell: parseAmount(sale.sharesToSell),
           exitPrice: parseAmount(sale.exitPrice),
         })),
       }),
-    [entryPrice, sales, totalShares],
+    [sales],
   );
   const errors = result.ok ? {} : result.errors;
 
-  function updateSale(id: string, field: "shares" | "exitPrice", value: string) {
+  function updateSale(id: string, field: keyof Omit<PartialSaleRow, "id">, value: string) {
     setSales((current) =>
       current.map((sale) => (sale.id === id ? { ...sale, [field]: value } : sale)),
     );
@@ -298,7 +299,13 @@ function PartialSalesPanel() {
   function addSale() {
     setSales((current) => [
       ...current,
-      { id: `sale-${current.length + 1}-${Date.now()}`, shares: "1", exitPrice: "0" },
+      {
+        id: `sale-${current.length + 1}-${Date.now()}`,
+        entryPrice: "0",
+        ownedShares: "1",
+        sharesToSell: "1",
+        exitPrice: "0",
+      },
     ]);
   }
 
@@ -330,25 +337,6 @@ function PartialSalesPanel() {
         </button>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <Field
-          error={errors.entryPrice}
-          hint="Цената, на която си купил акциите."
-          label="Цена на вход"
-          onChange={setEntryPrice}
-          type="number"
-          value={entryPrice}
-        />
-        <Field
-          error={errors.totalShares}
-          hint="Общият брой акции, които имаш за тази позиция."
-          label="Общо купени акции"
-          onChange={setTotalShares}
-          type="number"
-          value={totalShares}
-        />
-      </div>
-
       <div className="mt-5 space-y-3">
         {sales.map((sale, index) => {
           const saleResult = result.ok
@@ -357,13 +345,23 @@ function PartialSalesPanel() {
 
           return (
             <div
-              className="grid gap-3 rounded-[24px] border border-white/8 bg-white/[0.035] p-4 lg:grid-cols-[1fr_1fr_auto_auto]"
+              className="grid gap-3 rounded-[24px] border border-white/8 bg-white/[0.035] p-4 xl:grid-cols-[1fr_1fr_1fr_1fr_auto_auto]"
               key={sale.id}
             >
               <RowInput
-                label={`Продажба ${index + 1}: акции`}
-                onChange={(value) => updateSale(sale.id, "shares", value)}
-                value={sale.shares}
+                label={`Ред ${index + 1}: цена на покупка`}
+                onChange={(value) => updateSale(sale.id, "entryPrice", value)}
+                value={sale.entryPrice}
+              />
+              <RowInput
+                label="Купени акции"
+                onChange={(value) => updateSale(sale.id, "ownedShares", value)}
+                value={sale.ownedShares}
+              />
+              <RowInput
+                label="Продавам акции"
+                onChange={(value) => updateSale(sale.id, "sharesToSell", value)}
+                value={sale.sharesToSell}
               />
               <RowInput
                 label="Цена на продажба"
@@ -387,25 +385,24 @@ function PartialSalesPanel() {
               >
                 <Trash2 className="size-4" />
               </button>
-              {!result.ok && errors.sales?.[index] ? (
-                <p className="text-sm text-rose-200 lg:col-span-4">{errors.sales[index]}</p>
+              {!result.ok && errors.lots?.[index] ? (
+                <p className="text-sm text-rose-200 xl:col-span-6">{errors.lots[index]}</p>
               ) : null}
             </div>
           );
         })}
       </div>
 
-      {!result.ok && errors.totalSold ? (
-        <div className="mt-4 flex gap-3 rounded-[22px] border border-rose-200/20 bg-rose-300/[0.08] p-4 text-sm leading-6 text-rose-100">
-          <AlertTriangle className="mt-0.5 size-5 shrink-0" />
-          <p>{errors.totalSold}</p>
-        </div>
-      ) : null}
-
       {result.ok ? (
-        <div className="mt-5 grid gap-4 lg:grid-cols-3">
+        <div className="mt-5 grid gap-4 lg:grid-cols-4">
           <ResultCard
-            hint={`Продадени са ${formatNumber(result.soldShares)} от ${formatNumber(result.input.totalShares)} акции.`}
+            hint="Сбор от купените акции във всички въведени редове."
+            label="Общо купени"
+            tone="slate"
+            value={formatNumber(result.totalOwnedShares)}
+          />
+          <ResultCard
+            hint={`Продадени са ${formatNumber(result.soldShares)} от ${formatNumber(result.totalOwnedShares)} акции.`}
             label="Продадени акции"
             tone="gold"
             value={formatNumber(result.soldShares)}
@@ -427,16 +424,19 @@ function PartialSalesPanel() {
 
       {result.ok ? (
         <div className="mt-5 rounded-[24px] border border-amber-200/15 bg-amber-300/[0.08] p-5 text-base leading-7 text-slate-100">
-          <p>
-            От първата продажба резултатът е{" "}
-            <ResultAmount value={result.saleResults[0]?.profit ?? 0} />.
-          </p>
-          {result.saleResults[1] ? (
-            <p>
-              От останалата въведена продажба резултатът е{" "}
-              <ResultAmount value={result.saleResults[1].profit} />.
+          {result.saleResults.slice(0, 3).map((sale) => (
+            <p key={sale.index}>
+              Ред {sale.index + 1}: купени са {formatNumber(sale.ownedShares)} акции на{" "}
+              <span className="font-semibold text-amber-100">
+                {formatCurrency(sale.entryPrice)}
+              </span>
+              , продаваш {formatNumber(sale.sharesToSell)} на{" "}
+              <span className="font-semibold text-emerald-100">
+                {formatCurrency(sale.exitPrice)}
+              </span>
+              , резултатът е <ResultAmount value={sale.profit} />.
             </p>
-          ) : null}
+          ))}
           <p>
             Общият резултат от всички въведени продажби е{" "}
             <ResultAmount value={result.totalProfit} />.
@@ -555,7 +555,7 @@ function AccumulationPanel() {
         <div className="space-y-4">
           <Field
             error={errors.targetExitPrice}
-            hint="Цената, на която искаш да видиш резултата за всички натрупани позиции."
+            hint="Сценарий: ако продадеш всички натрупани акции на тази цена."
             label="Целева продажна цена"
             onChange={setTargetExitPrice}
             type="number"
@@ -598,7 +598,8 @@ function AccumulationPanel() {
             , общият резултат е <ResultAmount value={result.totalProfit} />.
           </p>
           <p className="text-sm text-slate-300">
-            Така виждаш и отделните печалби по всяка покупна цена, и цялата картина за позицията.
+            Това е сценарий за продажба на всички натрупани акции на една целева цена. Отделните
+            редове показват каква печалба носи всяка покупна цена.
           </p>
         </div>
       ) : null}
