@@ -3,16 +3,19 @@
 import {
   AlertTriangle,
   Calculator,
-  ChevronsUpDown,
   Info,
-  Repeat2,
+  Layers3,
+  Plus,
+  ReceiptText,
   ShieldAlert,
+  Trash2,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import {
+  calculateAccumulatedPosition,
   calculateLeverageRisk,
-  calculateReverseLeverageRisk,
+  calculatePartialSales,
   parseLeverage,
   type PositionSide,
 } from "@/lib/risk-calculator";
@@ -217,41 +220,90 @@ function DirectionNote({ side }: { side: PositionSide }) {
   );
 }
 
-function ReverseCalculatorPanel() {
-  const [side, setSide] = useState<PositionSide>("short");
-  const [maxRisk, setMaxRisk] = useState("1000");
-  const [leverageInput, setLeverageInput] = useState("1:100");
-  const [entryPrice, setEntryPrice] = useState("50");
-  const [stopPrice, setStopPrice] = useState("60");
-  const [exitPrice, setExitPrice] = useState("40");
+type PartialSaleRow = {
+  id: string;
+  shares: string;
+  exitPrice: string;
+};
 
-  const leverage = useMemo(() => parseLeverage(leverageInput), [leverageInput]);
+type AccumulationRow = {
+  id: string;
+  entryPrice: string;
+  shares: string;
+};
+
+function RowInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">
+        {label}
+      </span>
+      <input
+        className="mt-2 h-11 w-full rounded-2xl border border-white/10 bg-slate-950/45 px-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-amber-300/60 focus:ring-2 focus:ring-amber-300/15"
+        inputMode="decimal"
+        min="0"
+        onChange={(event) => onChange(event.target.value)}
+        type="number"
+        value={value}
+      />
+    </label>
+  );
+}
+
+function ResultAmount({ value }: { value: number }) {
+  return (
+    <span className={cn("font-semibold", value >= 0 ? "text-emerald-100" : "text-rose-100")}>
+      {value >= 0 ? "" : "-"}
+      {formatCurrency(Math.abs(value))}
+    </span>
+  );
+}
+
+function PartialSalesPanel() {
+  const [entryPrice, setEntryPrice] = useState("15");
+  const [totalShares, setTotalShares] = useState("7");
+  const [sales, setSales] = useState<PartialSaleRow[]>([
+    { id: "sale-1", shares: "3", exitPrice: "30" },
+    { id: "sale-2", shares: "4", exitPrice: "50" },
+  ]);
+
   const result = useMemo(
     () =>
-      calculateReverseLeverageRisk({
-        side,
-        maxRisk: parseAmount(maxRisk),
-        leverage: leverage ?? Number.NaN,
+      calculatePartialSales({
         entryPrice: parseAmount(entryPrice),
-        stopPrice: parseAmount(stopPrice),
-        exitPrice: parseAmount(exitPrice),
+        totalShares: parseAmount(totalShares),
+        sales: sales.map((sale) => ({
+          shares: parseAmount(sale.shares),
+          exitPrice: parseAmount(sale.exitPrice),
+        })),
       }),
-    [entryPrice, exitPrice, leverage, maxRisk, side, stopPrice],
+    [entryPrice, sales, totalShares],
   );
-
   const errors = result.ok ? {} : result.errors;
-  const leverageError = !leverage ? "Въведи ливъридж като 1:1000 или 1000." : errors.leverage;
 
-  function changeSide(nextSide: PositionSide) {
-    setSide(nextSide);
+  function updateSale(id: string, field: "shares" | "exitPrice", value: string) {
+    setSales((current) =>
+      current.map((sale) => (sale.id === id ? { ...sale, [field]: value } : sale)),
+    );
+  }
 
-    if (nextSide === "long") {
-      setStopPrice("40");
-      setExitPrice("60");
-    } else {
-      setStopPrice("60");
-      setExitPrice("40");
-    }
+  function addSale() {
+    setSales((current) => [
+      ...current,
+      { id: `sale-${current.length + 1}-${Date.now()}`, shares: "1", exitPrice: "0" },
+    ]);
+  }
+
+  function removeSale(id: string) {
+    setSales((current) => current.filter((sale) => sale.id !== id));
   }
 
   return (
@@ -259,153 +311,297 @@ function ReverseCalculatorPanel() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-center gap-3">
           <div className="flex size-11 items-center justify-center rounded-2xl bg-amber-300/18 text-amber-100">
-            <Repeat2 className="size-5" />
+            <ReceiptText className="size-5" />
           </div>
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.14em] text-amber-200/75">
-              Обратен калкулатор
+              Продажба на части
             </p>
-            <h2 className="mt-1 text-xl font-semibold text-white">Колко акции мога да взема?</h2>
+            <h2 className="mt-1 text-xl font-semibold text-white">Частични продажби</h2>
           </div>
         </div>
-        <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-300">
-          <ChevronsUpDown className="size-4 text-amber-200" />
-          Смята максимум по риск и маржин
-        </div>
+        <button
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-amber-200/20 bg-amber-300/12 px-4 py-2 text-sm font-semibold text-amber-50 transition hover:bg-amber-300/18"
+          onClick={addSale}
+          type="button"
+        >
+          <Plus className="size-4" />
+          Добави продажба
+        </button>
       </div>
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-[0.88fr_1.12fr]">
-        <div className="space-y-4">
-          <SideControl onChange={changeSide} value={side} />
-          <Field
-            error={errors.maxRisk}
-            hint="Колко максимум допускаш да се загуби, ако цената стигне стоп/затваряне."
-            label="Максимален риск / маржин"
-            onChange={setMaxRisk}
-            type="number"
-            value={maxRisk}
+      <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <Field
+          error={errors.entryPrice}
+          hint="Цената, на която си купил акциите."
+          label="Цена на вход"
+          onChange={setEntryPrice}
+          type="number"
+          value={entryPrice}
+        />
+        <Field
+          error={errors.totalShares}
+          hint="Общият брой акции, които имаш за тази позиция."
+          label="Общо купени акции"
+          onChange={setTotalShares}
+          type="number"
+          value={totalShares}
+        />
+      </div>
+
+      <div className="mt-5 space-y-3">
+        {sales.map((sale, index) => {
+          const saleResult = result.ok
+            ? result.saleResults.find((item) => item.index === index)
+            : null;
+
+          return (
+            <div
+              className="grid gap-3 rounded-[24px] border border-white/8 bg-white/[0.035] p-4 lg:grid-cols-[1fr_1fr_auto_auto]"
+              key={sale.id}
+            >
+              <RowInput
+                label={`Продажба ${index + 1}: акции`}
+                onChange={(value) => updateSale(sale.id, "shares", value)}
+                value={sale.shares}
+              />
+              <RowInput
+                label="Цена на продажба"
+                onChange={(value) => updateSale(sale.id, "exitPrice", value)}
+                value={sale.exitPrice}
+              />
+              <div className="rounded-2xl border border-white/8 bg-slate-950/30 px-4 py-3">
+                <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                  Печалба
+                </p>
+                <p className="mt-2 text-lg">
+                  {saleResult ? <ResultAmount value={saleResult.profit} /> : "-"}
+                </p>
+              </div>
+              <button
+                aria-label={`Премахни продажба ${index + 1}`}
+                className="flex size-11 items-center justify-center self-end rounded-2xl border border-white/10 bg-white/[0.04] text-slate-300 transition hover:border-rose-200/30 hover:bg-rose-300/10 hover:text-rose-100"
+                disabled={sales.length === 1}
+                onClick={() => removeSale(sale.id)}
+                type="button"
+              >
+                <Trash2 className="size-4" />
+              </button>
+              {!result.ok && errors.sales?.[index] ? (
+                <p className="text-sm text-rose-200 lg:col-span-4">{errors.sales[index]}</p>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      {!result.ok && errors.totalSold ? (
+        <div className="mt-4 flex gap-3 rounded-[22px] border border-rose-200/20 bg-rose-300/[0.08] p-4 text-sm leading-6 text-rose-100">
+          <AlertTriangle className="mt-0.5 size-5 shrink-0" />
+          <p>{errors.totalSold}</p>
+        </div>
+      ) : null}
+
+      {result.ok ? (
+        <div className="mt-5 grid gap-4 lg:grid-cols-3">
+          <ResultCard
+            hint={`Продадени са ${formatNumber(result.soldShares)} от ${formatNumber(result.input.totalShares)} акции.`}
+            label="Продадени акции"
+            tone="gold"
+            value={formatNumber(result.soldShares)}
           />
-          <Field
-            error={leverageError}
-            hint="Приема 1:1000, 1/1000 или само 1000."
-            label="Ливъридж"
-            onChange={setLeverageInput}
-            placeholder="1:1000"
-            value={leverageInput}
+          <ResultCard
+            hint="Тези акции още не са включени в реализирана печалба."
+            label="Остават акции"
+            tone="slate"
+            value={formatNumber(result.remainingShares)}
           />
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field
-              error={errors.entryPrice}
-              label="Цена на вход"
-              onChange={setEntryPrice}
-              type="number"
-              value={entryPrice}
-            />
-            <Field
-              error={errors.stopPrice}
-              label="Стоп / авто затваряне"
-              onChange={setStopPrice}
-              type="number"
-              value={stopPrice}
-            />
-            <Field
-              error={errors.exitPrice}
-              label="План изход"
-              onChange={setExitPrice}
-              type="number"
-              value={exitPrice}
-            />
+          <ResultCard
+            hint="Сбор от всички въведени частични продажби."
+            label={result.totalProfit >= 0 ? "Обща печалба" : "Обща загуба"}
+            tone={result.totalProfit >= 0 ? "green" : "red"}
+            value={formatCurrency(Math.abs(result.totalProfit))}
+          />
+        </div>
+      ) : null}
+
+      {result.ok ? (
+        <div className="mt-5 rounded-[24px] border border-amber-200/15 bg-amber-300/[0.08] p-5 text-base leading-7 text-slate-100">
+          <p>
+            От първата продажба резултатът е{" "}
+            <ResultAmount value={result.saleResults[0]?.profit ?? 0} />.
+          </p>
+          {result.saleResults[1] ? (
+            <p>
+              От останалата въведена продажба резултатът е{" "}
+              <ResultAmount value={result.saleResults[1].profit} />.
+            </p>
+          ) : null}
+          <p>
+            Общият резултат от всички въведени продажби е{" "}
+            <ResultAmount value={result.totalProfit} />.
+          </p>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function AccumulationPanel() {
+  const [targetExitPrice, setTargetExitPrice] = useState("50");
+  const [lots, setLots] = useState<AccumulationRow[]>([
+    { id: "lot-1", entryPrice: "15", shares: "7" },
+    { id: "lot-2", entryPrice: "18", shares: "5" },
+    { id: "lot-3", entryPrice: "23", shares: "6" },
+  ]);
+
+  const result = useMemo(
+    () =>
+      calculateAccumulatedPosition({
+        targetExitPrice: parseAmount(targetExitPrice),
+        lots: lots.map((lot) => ({
+          entryPrice: parseAmount(lot.entryPrice),
+          shares: parseAmount(lot.shares),
+        })),
+      }),
+    [lots, targetExitPrice],
+  );
+  const errors = result.ok ? {} : result.errors;
+
+  function updateLot(id: string, field: "entryPrice" | "shares", value: string) {
+    setLots((current) => current.map((lot) => (lot.id === id ? { ...lot, [field]: value } : lot)));
+  }
+
+  function addLot() {
+    setLots((current) => [
+      ...current,
+      { id: `lot-${current.length + 1}-${Date.now()}`, entryPrice: "0", shares: "1" },
+    ]);
+  }
+
+  function removeLot(id: string) {
+    setLots((current) => current.filter((lot) => lot.id !== id));
+  }
+
+  return (
+    <section className="rounded-[28px] border border-white/10 bg-[#10192d]/88 p-6 shadow-[0_30px_90px_rgba(5,8,20,0.45)]">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex size-11 items-center justify-center rounded-2xl bg-amber-300/18 text-amber-100">
+            <Layers3 className="size-5" />
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-amber-200/75">
+              Осредняване
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-white">Натрупване / осредняване</h2>
           </div>
         </div>
+        <button
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-amber-200/20 bg-amber-300/12 px-4 py-2 text-sm font-semibold text-amber-50 transition hover:bg-amber-300/18"
+          onClick={addLot}
+          type="button"
+        >
+          <Plus className="size-4" />
+          Добави покупка
+        </button>
+      </div>
 
-        {result.ok ? (
-          <div className="space-y-5">
-            <div className="grid gap-4 lg:grid-cols-3">
-              <ResultCard
-                hint={`Ограничението идва от ${result.limitingFactor === "risk" ? "разстоянието до стопа" : "маржина и ливъриджа"}.`}
-                label="Макс. акции"
-                tone="gold"
-                value={formatNumber(result.recommendedShares)}
-              />
-              <ResultCard
-                hint={`Рискът на една акция е ${formatCurrency(result.riskPerShare)}.`}
-                label="Загуба при стоп"
-                tone="red"
-                value={formatCurrency(result.lossAtStop)}
-              />
-              <ResultCard
-                hint={`${result.expectedReturnPct >= 0 ? "Доходност" : "Отрицателен резултат"} спрямо риска: ${result.expectedReturnPct.toFixed(1)}%.`}
-                label={result.expectedProfit >= 0 ? "Потенциална печалба" : "Потенциална загуба"}
-                tone={result.expectedProfit >= 0 ? "green" : "red"}
-                value={formatCurrency(Math.abs(result.expectedProfit))}
-              />
-            </div>
+      <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_0.75fr]">
+        <div className="space-y-3">
+          {lots.map((lot, index) => {
+            const lotResult = result.ok ? result.lotResults.find((item) => item.index === index) : null;
 
-            <div className="rounded-[24px] border border-amber-200/15 bg-amber-300/[0.08] p-5">
-              <div className="flex items-start gap-3">
-                <ShieldAlert className="mt-1 size-5 shrink-0 text-amber-200" />
-                <div className="space-y-3 text-base leading-7 text-slate-100">
-                  <p>
-                    При този риск можеш да вземеш до{" "}
-                    <span className="font-semibold text-amber-100">
-                      {formatNumber(result.recommendedShares)} акции
-                    </span>
-                    .
+            return (
+              <div
+                className="grid gap-3 rounded-[24px] border border-white/8 bg-white/[0.035] p-4 lg:grid-cols-[1fr_1fr_auto_auto]"
+                key={lot.id}
+              >
+                <RowInput
+                  label={`Покупка ${index + 1}: цена`}
+                  onChange={(value) => updateLot(lot.id, "entryPrice", value)}
+                  value={lot.entryPrice}
+                />
+                <RowInput
+                  label="Брой акции"
+                  onChange={(value) => updateLot(lot.id, "shares", value)}
+                  value={lot.shares}
+                />
+                <div className="rounded-2xl border border-white/8 bg-slate-950/30 px-4 py-3">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">
+                    Печалба при цел
                   </p>
-                  <p>
-                    Ако цената стигне{" "}
-                    <span className="font-semibold text-rose-100">
-                      {formatCurrency(result.input.stopPrice)}
-                    </span>
-                    , очакваната загуба е приблизително{" "}
-                    <span className="font-semibold text-rose-100">
-                      {formatCurrency(result.lossAtStop)}
-                    </span>
-                    .
-                  </p>
-                  <p>
-                    Ако излезеш на{" "}
-                    <span className="font-semibold text-emerald-100">
-                      {formatCurrency(result.input.exitPrice)}
-                    </span>
-                    , очакваният резултат е{" "}
-                    <span
-                      className={cn(
-                        "font-semibold",
-                        result.expectedProfit >= 0 ? "text-emerald-100" : "text-rose-100",
-                      )}
-                    >
-                      {result.expectedProfit >= 0 ? "" : "-"}
-                      {formatCurrency(Math.abs(result.expectedProfit))}
-                    </span>
-                    .
+                  <p className="mt-2 text-lg">
+                    {lotResult ? <ResultAmount value={lotResult.profit} /> : "-"}
                   </p>
                 </div>
+                <button
+                  aria-label={`Премахни покупка ${index + 1}`}
+                  className="flex size-11 items-center justify-center self-end rounded-2xl border border-white/10 bg-white/[0.04] text-slate-300 transition hover:border-rose-200/30 hover:bg-rose-300/10 hover:text-rose-100"
+                  disabled={lots.length === 1}
+                  onClick={() => removeLot(lot.id)}
+                  type="button"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+                {!result.ok && errors.lots?.[index] ? (
+                  <p className="text-sm text-rose-200 lg:col-span-4">{errors.lots[index]}</p>
+                ) : null}
               </div>
-            </div>
+            );
+          })}
+        </div>
 
-            <div className="grid gap-3 text-sm text-slate-300 sm:grid-cols-3">
-              <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
-                <p className="text-slate-400">Акции по риск</p>
-                <p className="mt-1 font-semibold text-white">{formatNumber(result.sharesByRisk)}</p>
-              </div>
-              <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
-                <p className="text-slate-400">Акции по маржин</p>
-                <p className="mt-1 font-semibold text-white">{formatNumber(result.sharesByMargin)}</p>
-              </div>
-              <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
-                <p className="text-slate-400">Нужен маржин</p>
-                <p className="mt-1 font-semibold text-white">{formatCurrency(result.requiredMargin)}</p>
-              </div>
+        <div className="space-y-4">
+          <Field
+            error={errors.targetExitPrice}
+            hint="Цената, на която искаш да видиш резултата за всички натрупани позиции."
+            label="Целева продажна цена"
+            onChange={setTargetExitPrice}
+            type="number"
+            value={targetExitPrice}
+          />
+
+          {result.ok ? (
+            <div className="grid gap-4">
+              <ResultCard
+                hint={`Общо вложени: ${formatCurrency(result.totalCost)} за ${formatNumber(result.totalShares)} акции.`}
+                label="Средна цена"
+                tone="gold"
+                value={formatCurrency(result.averageEntryPrice)}
+              />
+              <ResultCard
+                hint={`Резултат спрямо общо вложената сума: ${result.totalReturnPct.toFixed(1)}%.`}
+                label={result.totalProfit >= 0 ? "Обща печалба" : "Обща загуба"}
+                tone={result.totalProfit >= 0 ? "green" : "red"}
+                value={formatCurrency(Math.abs(result.totalProfit))}
+              />
             </div>
-          </div>
-        ) : (
-          <div className="rounded-[24px] border border-rose-200/20 bg-rose-300/[0.08] p-5 text-sm leading-6 text-rose-100">
-            Попълни валидни стойности. При Long стопът трябва да е под входа; при Short стопът
-            трябва да е над входа.
-          </div>
-        )}
+          ) : null}
+        </div>
       </div>
+
+      {result.ok ? (
+        <div className="mt-5 rounded-[24px] border border-amber-200/15 bg-amber-300/[0.08] p-5 text-base leading-7 text-slate-100">
+          <p>
+            Средната ти цена след натрупване е{" "}
+            <span className="font-semibold text-amber-100">
+              {formatCurrency(result.averageEntryPrice)}
+            </span>
+            .
+          </p>
+          <p>
+            Ако продадеш всички на{" "}
+            <span className="font-semibold text-emerald-100">
+              {formatCurrency(result.input.targetExitPrice)}
+            </span>
+            , общият резултат е <ResultAmount value={result.totalProfit} />.
+          </p>
+          <p className="text-sm text-slate-300">
+            Така виждаш и отделните печалби по всяка покупна цена, и цялата картина за позицията.
+          </p>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -620,7 +816,8 @@ export function RiskCalculator() {
         </section>
       </div>
 
-      <ReverseCalculatorPanel />
+      <PartialSalesPanel />
+      <AccumulationPanel />
     </div>
   );
 }

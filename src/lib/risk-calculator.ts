@@ -11,16 +11,37 @@ export type LeverageRiskInput = {
 
 export type LeverageRiskErrors = Partial<Record<keyof LeverageRiskInput, string>>;
 
-export type ReverseLeverageRiskInput = {
-  side: PositionSide;
-  maxRisk: number;
-  leverage: number;
-  entryPrice: number;
-  stopPrice: number;
+export type PartialSaleLegInput = {
+  shares: number;
   exitPrice: number;
 };
 
-export type ReverseLeverageRiskErrors = Partial<Record<keyof ReverseLeverageRiskInput, string>>;
+export type PartialSalesInput = {
+  entryPrice: number;
+  totalShares: number;
+  sales: PartialSaleLegInput[];
+};
+
+export type PartialSalesErrors = Partial<
+  Record<"entryPrice" | "totalShares" | "totalSold", string>
+> & {
+  sales?: string[];
+};
+
+export type AccumulationLotInput = {
+  entryPrice: number;
+  shares: number;
+};
+
+export type AccumulatedPositionInput = {
+  lots: AccumulationLotInput[];
+  targetExitPrice: number;
+};
+
+export type AccumulatedPositionErrors = {
+  lots?: string[];
+  targetExitPrice?: string;
+};
 
 export type LeverageRiskResult =
   | {
@@ -46,24 +67,47 @@ export type LeverageRiskResult =
       errors: LeverageRiskErrors;
     };
 
-export type ReverseLeverageRiskResult =
+export type PartialSalesResult =
   | {
       ok: true;
-      input: ReverseLeverageRiskInput;
-      riskPerShare: number;
-      sharesByRisk: number;
-      sharesByMargin: number;
-      recommendedShares: number;
-      limitingFactor: "risk" | "margin";
-      notional: number;
-      requiredMargin: number;
-      lossAtStop: number;
-      expectedProfit: number;
-      expectedReturnPct: number;
+      input: PartialSalesInput;
+      saleResults: Array<
+        PartialSaleLegInput & {
+          index: number;
+          profit: number;
+          remainingSharesAfter: number;
+        }
+      >;
+      soldShares: number;
+      remainingShares: number;
+      totalProfit: number;
     }
   | {
       ok: false;
-      errors: ReverseLeverageRiskErrors;
+      errors: PartialSalesErrors;
+    };
+
+export type AccumulatedPositionResult =
+  | {
+      ok: true;
+      input: AccumulatedPositionInput;
+      lotResults: Array<
+        AccumulationLotInput & {
+          index: number;
+          cost: number;
+          profit: number;
+          returnPct: number;
+        }
+      >;
+      totalShares: number;
+      totalCost: number;
+      averageEntryPrice: number;
+      totalProfit: number;
+      totalReturnPct: number;
+    }
+  | {
+      ok: false;
+      errors: AccumulatedPositionErrors;
     };
 
 export function parseLeverage(value: string) {
@@ -188,80 +232,137 @@ export function calculateLeverageRisk(input: LeverageRiskInput): LeverageRiskRes
   };
 }
 
-export function calculateReverseLeverageRisk(
-  input: ReverseLeverageRiskInput,
-): ReverseLeverageRiskResult {
-  const errors: ReverseLeverageRiskErrors = {};
+export function calculatePartialSales(input: PartialSalesInput): PartialSalesResult {
+  const errors: PartialSalesErrors = {};
+  const saleErrors: string[] = [];
 
-  const maxRiskError = validatePositive(input.maxRisk, "Максималният риск");
-  const leverageError = validatePositive(input.leverage, "Ливъриджът");
   const entryPriceError = validatePositive(input.entryPrice, "Цената на вход");
-  const stopPriceError = validatePositive(input.stopPrice, "Цената на стоп/затваряне");
-
-  if (input.side !== "long" && input.side !== "short") {
-    errors.side = "Посоката трябва да е Long или Short.";
-  }
-
-  if (maxRiskError) {
-    errors.maxRisk = maxRiskError;
-  }
-
-  if (leverageError) {
-    errors.leverage = leverageError;
-  }
+  const totalSharesError = validatePositive(input.totalShares, "Общият брой акции");
 
   if (entryPriceError) {
     errors.entryPrice = entryPriceError;
   }
 
-  if (stopPriceError) {
-    errors.stopPrice = stopPriceError;
+  if (totalSharesError) {
+    errors.totalShares = totalSharesError;
   }
 
-  if (!Number.isFinite(input.exitPrice) || input.exitPrice < 0) {
-    errors.exitPrice = "Планираната цена на изход трябва да е 0 или повече.";
+  if (input.sales.length === 0) {
+    saleErrors.push("Добави поне една продажба.");
   }
 
-  if (!errors.entryPrice && !errors.stopPrice) {
-    if (input.side === "long" && input.stopPrice >= input.entryPrice) {
-      errors.stopPrice = "При Long стоп/затваряне трябва да е под входната цена.";
+  for (const [index, sale] of input.sales.entries()) {
+    const saleNumber = index + 1;
+    const sharesError = validatePositive(sale.shares, `Акциите в продажба ${saleNumber}`);
+
+    if (sharesError) {
+      saleErrors[index] = sharesError;
+      continue;
     }
 
-    if (input.side === "short" && input.stopPrice <= input.entryPrice) {
-      errors.stopPrice = "При Short стоп/затваряне трябва да е над входната цена.";
+    if (!Number.isFinite(sale.exitPrice) || sale.exitPrice < 0) {
+      saleErrors[index] = `Цената в продажба ${saleNumber} трябва да е 0 или повече.`;
     }
+  }
+
+  const soldShares = input.sales.reduce((total, sale) => total + sale.shares, 0);
+
+  if (Number.isFinite(input.totalShares) && soldShares > input.totalShares + Number.EPSILON) {
+    errors.totalSold = "Продадените акции са повече от общо купените акции.";
+  }
+
+  if (saleErrors.length > 0) {
+    errors.sales = saleErrors;
   }
 
   if (Object.keys(errors).length > 0) {
     return { ok: false, errors };
   }
 
-  const riskPerShare = Math.abs(input.entryPrice - input.stopPrice);
-  const sharesByRisk = input.maxRisk / riskPerShare;
-  const sharesByMargin = (input.maxRisk * input.leverage) / input.entryPrice;
-  const recommendedShares = Math.min(sharesByRisk, sharesByMargin);
-  const limitingFactor = sharesByRisk <= sharesByMargin ? "risk" : "margin";
-  const notional = recommendedShares * input.entryPrice;
-  const requiredMargin = notional / input.leverage;
-  const lossAtStop = recommendedShares * riskPerShare;
-  const expectedProfit =
-    input.side === "long"
-      ? (input.exitPrice - input.entryPrice) * recommendedShares
-      : (input.entryPrice - input.exitPrice) * recommendedShares;
-  const expectedReturnPct = (expectedProfit / input.maxRisk) * 100;
+  let remainingShares = input.totalShares;
+  const saleResults = input.sales.map((sale, index) => {
+    remainingShares -= sale.shares;
+
+    return {
+      ...sale,
+      index,
+      profit: (sale.exitPrice - input.entryPrice) * sale.shares,
+      remainingSharesAfter: remainingShares,
+    };
+  });
+  const totalProfit = saleResults.reduce((total, sale) => total + sale.profit, 0);
 
   return {
     ok: true,
     input,
-    riskPerShare,
-    sharesByRisk,
-    sharesByMargin,
-    recommendedShares,
-    limitingFactor,
-    notional,
-    requiredMargin,
-    lossAtStop,
-    expectedProfit,
-    expectedReturnPct,
+    saleResults,
+    soldShares,
+    remainingShares,
+    totalProfit,
+  };
+}
+
+export function calculateAccumulatedPosition(
+  input: AccumulatedPositionInput,
+): AccumulatedPositionResult {
+  const errors: AccumulatedPositionErrors = {};
+  const lotErrors: string[] = [];
+
+  if (input.lots.length === 0) {
+    lotErrors.push("Добави поне една покупка.");
+  }
+
+  for (const [index, lot] of input.lots.entries()) {
+    const lotNumber = index + 1;
+    const entryPriceError = validatePositive(lot.entryPrice, `Цената в покупка ${lotNumber}`);
+    const sharesError = validatePositive(lot.shares, `Акциите в покупка ${lotNumber}`);
+
+    if (entryPriceError) {
+      lotErrors[index] = entryPriceError;
+      continue;
+    }
+
+    if (sharesError) {
+      lotErrors[index] = sharesError;
+    }
+  }
+
+  if (!Number.isFinite(input.targetExitPrice) || input.targetExitPrice < 0) {
+    errors.targetExitPrice = "Целевата продажна цена трябва да е 0 или повече.";
+  }
+
+  if (lotErrors.length > 0) {
+    errors.lots = lotErrors;
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return { ok: false, errors };
+  }
+
+  const lotResults = input.lots.map((lot, index) => {
+    const cost = lot.entryPrice * lot.shares;
+    const profit = (input.targetExitPrice - lot.entryPrice) * lot.shares;
+
+    return {
+      ...lot,
+      index,
+      cost,
+      profit,
+      returnPct: (profit / cost) * 100,
+    };
+  });
+  const totalShares = lotResults.reduce((total, lot) => total + lot.shares, 0);
+  const totalCost = lotResults.reduce((total, lot) => total + lot.cost, 0);
+  const totalProfit = lotResults.reduce((total, lot) => total + lot.profit, 0);
+
+  return {
+    ok: true,
+    input,
+    lotResults,
+    totalShares,
+    totalCost,
+    averageEntryPrice: totalCost / totalShares,
+    totalProfit,
+    totalReturnPct: (totalProfit / totalCost) * 100,
   };
 }

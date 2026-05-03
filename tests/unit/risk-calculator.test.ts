@@ -1,8 +1,9 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  calculateAccumulatedPosition,
   calculateLeverageRisk,
-  calculateReverseLeverageRisk,
+  calculatePartialSales,
   parseLeverage,
 } from "@/lib/risk-calculator";
 
@@ -105,14 +106,14 @@ describe("leverage risk calculator", () => {
     expect(result.errors.exitPrice).toBeDefined();
   });
 
-  test("reverse calculator sizes shares by risk", () => {
-    const result = calculateReverseLeverageRisk({
-      side: "long",
-      maxRisk: 1000,
-      leverage: 100,
-      entryPrice: 50,
-      stopPrice: 40,
-      exitPrice: 60,
+  test("calculates partial sale profit by leg and total", () => {
+    const result = calculatePartialSales({
+      entryPrice: 15,
+      totalShares: 7,
+      sales: [
+        { shares: 3, exitPrice: 30 },
+        { shares: 4, exitPrice: 50 },
+      ],
     });
 
     expect(result.ok).toBe(true);
@@ -121,22 +122,40 @@ describe("leverage risk calculator", () => {
       return;
     }
 
-    expect(result.riskPerShare).toBe(10);
-    expect(result.sharesByRisk).toBe(100);
-    expect(result.sharesByMargin).toBe(2000);
-    expect(result.recommendedShares).toBe(100);
-    expect(result.limitingFactor).toBe("risk");
-    expect(result.expectedProfit).toBe(1000);
+    expect(result.saleResults[0].profit).toBe(45);
+    expect(result.saleResults[1].profit).toBe(140);
+    expect(result.soldShares).toBe(7);
+    expect(result.remainingShares).toBe(0);
+    expect(result.totalProfit).toBe(185);
   });
 
-  test("reverse calculator limits shares by margin", () => {
-    const result = calculateReverseLeverageRisk({
-      side: "short",
-      maxRisk: 100,
-      leverage: 2,
-      entryPrice: 50,
-      stopPrice: 100,
-      exitPrice: 40,
+  test("partial sales reject selling more shares than owned", () => {
+    const result = calculatePartialSales({
+      entryPrice: 15,
+      totalShares: 7,
+      sales: [
+        { shares: 3, exitPrice: 30 },
+        { shares: 5, exitPrice: 50 },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+      return;
+    }
+
+    expect(result.errors.totalSold).toBeDefined();
+  });
+
+  test("calculates accumulated average price and target profit", () => {
+    const result = calculateAccumulatedPosition({
+      targetExitPrice: 50,
+      lots: [
+        { entryPrice: 15, shares: 7 },
+        { entryPrice: 18, shares: 5 },
+        { entryPrice: 23, shares: 6 },
+      ],
     });
 
     expect(result.ok).toBe(true);
@@ -145,63 +164,28 @@ describe("leverage risk calculator", () => {
       return;
     }
 
-    expect(result.sharesByRisk).toBe(2);
-    expect(result.sharesByMargin).toBe(4);
-    expect(result.recommendedShares).toBe(2);
-    expect(result.limitingFactor).toBe("risk");
-    expect(result.expectedProfit).toBe(20);
+    expect(result.totalShares).toBe(18);
+    expect(result.totalCost).toBe(333);
+    expect(result.averageEntryPrice).toBe(18.5);
+    expect(result.lotResults[0].profit).toBe(245);
+    expect(result.lotResults[1].profit).toBe(160);
+    expect(result.lotResults[2].profit).toBe(162);
+    expect(result.totalProfit).toBe(567);
   });
 
-  test("reverse calculator can use margin as the limiting factor", () => {
-    const result = calculateReverseLeverageRisk({
-      side: "short",
-      maxRisk: 100,
-      leverage: 2,
-      entryPrice: 50,
-      stopPrice: 51,
-      exitPrice: 40,
+  test("accumulation validates lots and target exit price", () => {
+    const result = calculateAccumulatedPosition({
+      targetExitPrice: -1,
+      lots: [{ entryPrice: 0, shares: 5 }],
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
 
-    if (!result.ok) {
+    if (result.ok) {
       return;
     }
 
-    expect(result.sharesByRisk).toBe(100);
-    expect(result.sharesByMargin).toBe(4);
-    expect(result.recommendedShares).toBe(4);
-    expect(result.limitingFactor).toBe("margin");
-    expect(result.lossAtStop).toBe(4);
-  });
-
-  test("reverse calculator validates stop direction by side", () => {
-    const invalidLong = calculateReverseLeverageRisk({
-      side: "long",
-      maxRisk: 1000,
-      leverage: 100,
-      entryPrice: 50,
-      stopPrice: 55,
-      exitPrice: 60,
-    });
-    const invalidShort = calculateReverseLeverageRisk({
-      side: "short",
-      maxRisk: 1000,
-      leverage: 100,
-      entryPrice: 50,
-      stopPrice: 45,
-      exitPrice: 40,
-    });
-
-    expect(invalidLong.ok).toBe(false);
-    expect(invalidShort.ok).toBe(false);
-
-    if (!invalidLong.ok) {
-      expect(invalidLong.errors.stopPrice).toContain("Long");
-    }
-
-    if (!invalidShort.ok) {
-      expect(invalidShort.errors.stopPrice).toContain("Short");
-    }
+    expect(result.errors.targetExitPrice).toBeDefined();
+    expect(result.errors.lots?.[0]).toBeDefined();
   });
 });
