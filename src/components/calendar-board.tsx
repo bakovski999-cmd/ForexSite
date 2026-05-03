@@ -71,6 +71,9 @@ const relevanceLabels: Record<CalendarRelevance, string> = {
   context: "Контекст",
 };
 
+const calendarFilterPanelStorageKey = "gold-calendar-filter-panel:v1";
+type CalendarViewMode = "day" | "week";
+
 function impactClass(impact: CalendarImpact) {
   return {
     low: "border-slate-400/20 bg-slate-300/[0.08] text-slate-200",
@@ -190,6 +193,34 @@ function shiftDateKey(dateKey: string, days: number) {
 
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+function getCalendarViewRange(dateKey: string, mode: CalendarViewMode) {
+  if (mode === "week") {
+    return {
+      start: shiftDateKey(dateKey, -6),
+      end: dateKey,
+    };
+  }
+
+  return {
+    start: dateKey,
+    end: dateKey,
+  };
+}
+
+function isDateKeyInRange(dateKey: string, start: string, end: string) {
+  return dateKey >= start && dateKey <= end;
+}
+
+function formatCompactDateKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-");
+
+  if (!year || !month || !day) {
+    return dateKey;
+  }
+
+  return `${day}.${month}.${year}`;
 }
 
 function todaySofiaDateKey() {
@@ -458,6 +489,11 @@ function readJsonStorage(key: string) {
   }
 }
 
+function readBooleanStorage(key: string, fallback: boolean) {
+  const value = readJsonStorage(key);
+  return typeof value === "boolean" ? value : fallback;
+}
+
 function currencyAnalysisClass(bias: DailyCurrencyBias) {
   return {
     positive: "border-emerald-300/20 bg-emerald-300/[0.055] text-emerald-100",
@@ -573,6 +609,7 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
   const [filters, setFilters] = useState<CalendarFilterState>(() => getDefaultCalendarFilterState());
   const [alerts, setAlerts] = useState<CalendarAlertSettings[]>([]);
   const [isFilterOpen, setIsFilterOpen] = useState(true);
+  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>("day");
   const [activeAlertId, setActiveAlertId] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<EconomicCalendarEvent | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => todaySofiaDateKey());
@@ -583,6 +620,7 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
     const timeoutId = window.setTimeout(() => {
       setFilters(normalizeCalendarFilterState(readJsonStorage(calendarFilterStorageKey)));
       setAlerts(normalizeCalendarAlerts(readJsonStorage(calendarAlertStorageKey)));
+      setIsFilterOpen(readBooleanStorage(calendarFilterPanelStorageKey, true));
       setHasLoadedStorage(true);
     }, 0);
 
@@ -596,6 +634,14 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
 
     window.localStorage.setItem(calendarFilterStorageKey, JSON.stringify(filters));
   }, [filters, hasLoadedStorage]);
+
+  useEffect(() => {
+    if (!hasLoadedStorage) {
+      return;
+    }
+
+    window.localStorage.setItem(calendarFilterPanelStorageKey, JSON.stringify(isFilterOpen));
+  }, [hasLoadedStorage, isFilterOpen]);
 
   useEffect(() => {
     if (!hasLoadedStorage) {
@@ -749,10 +795,17 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
   }, []);
 
   const visibleEvents = useMemo(() => filterCalendarEvents(events, filters), [events, filters]);
+  const selectedRange = useMemo(
+    () => getCalendarViewRange(selectedDate, calendarViewMode),
+    [calendarViewMode, selectedDate],
+  );
   const selectedDateEvents = useMemo(
     () =>
-      visibleEvents.filter((event) => (formatSofiaDateKey(event.startsAt) || event.startsAt.slice(0, 10)) === selectedDate),
-    [selectedDate, visibleEvents],
+      visibleEvents.filter((event) => {
+        const dateKey = formatSofiaDateKey(event.startsAt) || event.startsAt.slice(0, 10);
+        return isDateKeyInRange(dateKey, selectedRange.start, selectedRange.end);
+      }),
+    [selectedRange, visibleEvents],
   );
   const groupedEvents = useMemo(() => groupByDay(selectedDateEvents), [selectedDateEvents]);
   const nextEvent = visibleEvents.find((event) => new Date(event.startsAt) >= new Date()) ?? visibleEvents[0];
@@ -958,19 +1011,50 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
       <SectionCard title="Календарен поток" eyebrow="История и предстоящи събития">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-white/8 bg-white/[0.03] p-3">
           <div>
-            <p className="text-sm font-semibold text-white">{formatSofiaDay(`${selectedDate}T12:00:00.000Z`)}</p>
+            <p className="text-sm font-semibold text-white">
+              {calendarViewMode === "week"
+                ? `${formatCompactDateKey(selectedRange.start)} - ${formatCompactDateKey(selectedRange.end)}`
+                : formatSofiaDay(`${selectedDate}T12:00:00.000Z`)}
+            </p>
             <p className="mt-1 text-xs leading-5 text-slate-400">
               {selectedDateEvents.length} събития по текущите филтри
+              {calendarViewMode === "week" ? " за избраните 7 дни" : ""}
               {pendingReleasedCount ? ` • ${pendingReleasedCount} без публикуван actual` : ""}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex h-10 rounded-full border border-white/10 bg-white/[0.035] p-1">
+              <button
+                type="button"
+                onClick={() => setCalendarViewMode("day")}
+                className={cn(
+                  "rounded-full px-3 text-xs font-semibold transition",
+                  calendarViewMode === "day"
+                    ? "bg-amber-300/14 text-amber-100"
+                    : "text-slate-300 hover:bg-white/[0.06]",
+                )}
+              >
+                Ден
+              </button>
+              <button
+                type="button"
+                onClick={() => setCalendarViewMode("week")}
+                className={cn(
+                  "rounded-full px-3 text-xs font-semibold transition",
+                  calendarViewMode === "week"
+                    ? "bg-amber-300/14 text-amber-100"
+                    : "text-slate-300 hover:bg-white/[0.06]",
+                )}
+              >
+                7 дни
+              </button>
+            </div>
             <button
               type="button"
-              onClick={() => setSelectedDate((current) => shiftDateKey(current, -1))}
+              onClick={() => setSelectedDate((current) => shiftDateKey(current, calendarViewMode === "week" ? -7 : -1))}
               className="inline-flex h-10 items-center rounded-full border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08]"
             >
-              Предишен ден
+              {calendarViewMode === "week" ? "Предишни 7 дни" : "Предишен ден"}
             </button>
             <button
               type="button"
@@ -981,10 +1065,10 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
             </button>
             <button
               type="button"
-              onClick={() => setSelectedDate((current) => shiftDateKey(current, 1))}
+              onClick={() => setSelectedDate((current) => shiftDateKey(current, calendarViewMode === "week" ? 7 : 1))}
               className="inline-flex h-10 items-center rounded-full border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08]"
             >
-              Следващ ден
+              {calendarViewMode === "week" ? "Следващи 7 дни" : "Следващ ден"}
             </button>
             <input
               type="date"
@@ -1016,9 +1100,11 @@ export function CalendarBoard({ events }: { events: EconomicCalendarEvent[] }) {
 
           {visibleEvents.length > 0 && !selectedDateEvents.length ? (
             <div className="rounded-[24px] border border-white/8 bg-white/[0.03] p-6">
-              <p className="text-base font-semibold text-white">Няма събития за избрания ден.</p>
+              <p className="text-base font-semibold text-white">
+                {calendarViewMode === "week" ? "Няма събития за избраните 7 дни." : "Няма събития за избрания ден."}
+              </p>
               <p className="mt-2 text-sm leading-6 text-slate-300">
-                Върни ден назад/напред или промени филтрите, за да видиш публикувани и предстоящи събития.
+                Върни назад/напред или промени филтрите, за да видиш публикувани и предстоящи събития.
               </p>
             </div>
           ) : null}
