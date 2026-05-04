@@ -74,7 +74,7 @@ export async function POST(request: Request) {
     email,
     password,
     options: {
-      emailRedirectTo: `${env.NEXT_PUBLIC_APP_URL}/login`,
+      emailRedirectTo: `${env.NEXT_PUBLIC_APP_URL}/auth/callback`,
     },
   });
 
