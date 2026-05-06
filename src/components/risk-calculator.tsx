@@ -17,22 +17,25 @@ import {
   calculateLeverageRisk,
   calculatePartialSales,
   parseLeverage,
+  type MarginMode,
   type PositionSide,
 } from "@/lib/risk-calculator";
 import { cn } from "@/lib/utils";
-
-const currencyFormatter = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 2,
-});
 
 const numberFormatter = new Intl.NumberFormat("bg-BG", {
   maximumFractionDigits: 2,
 });
 
-function formatCurrency(value: number) {
-  return currencyFormatter.format(value);
+function formatCurrency(value: number, currency = "USD") {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2,
+    }).format(value);
+  } catch {
+    return `${numberFormatter.format(value)} ${currency}`;
+  }
 }
 
 function formatNumber(value: number) {
@@ -46,8 +49,30 @@ function parseAmount(value: string) {
   return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
 
+function parseOptionalAmount(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return parseAmount(trimmed);
+}
+
 function sideLabel(side: PositionSide) {
-  return side === "long" ? "Long / Купувам" : "Short / Продавам";
+  return side === "buy" ? "BUY / Купувам" : "SELL / Продавам";
+}
+
+function marginModeLabel(mode: MarginMode) {
+  if (mode === "real_broker_margin") {
+    return "Real broker margin";
+  }
+
+  if (mode === "fixed_leverage") {
+    return "Fixed leverage";
+  }
+
+  return "Account leverage";
 }
 
 function SideControl({
@@ -59,7 +84,7 @@ function SideControl({
 }) {
   return (
     <div className="grid gap-2 rounded-[22px] border border-white/8 bg-white/[0.035] p-2 sm:grid-cols-2">
-      {(["long", "short"] as const).map((side) => (
+      {(["buy", "sell"] as const).map((side) => (
         <button
           className={cn(
             "rounded-2xl px-4 py-3 text-left transition",
@@ -73,10 +98,65 @@ function SideControl({
         >
           <span className="block text-sm font-semibold">{sideLabel(side)}</span>
           <span className="mt-1 block text-xs leading-5 text-slate-400">
-            {side === "long"
+            {side === "buy"
               ? "Печелиш при покачване, рискът е спад."
               : "Печелиш при спад, рискът е покачване."}
           </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function MarginModeControl({
+  value,
+  onChange,
+}: {
+  value: MarginMode;
+  onChange: (value: MarginMode) => void;
+}) {
+  const options: Array<{ value: MarginMode; title: string; text: string; badge?: string }> = [
+    {
+      value: "real_broker_margin",
+      title: "Real Broker Margin",
+      text: "Най-точно: използва Margin/Used Margin от PU Prime.",
+      badge: "Препоръчано",
+    },
+    {
+      value: "fixed_leverage",
+      title: "Fixed Leverage",
+      text: "За CFD акции, ETF-и, индекси и продукти с фиксиран leverage.",
+    },
+    {
+      value: "account_leverage",
+      title: "Account Leverage",
+      text: "Само за инструменти, които реално следват account leverage.",
+    },
+  ];
+
+  return (
+    <div className="grid gap-2 rounded-[22px] border border-white/8 bg-white/[0.035] p-2 lg:grid-cols-3">
+      {options.map((option) => (
+        <button
+          className={cn(
+            "rounded-2xl px-4 py-3 text-left transition",
+            value === option.value
+              ? "border border-amber-200/35 bg-amber-300/16 text-amber-50"
+              : "border border-transparent text-slate-300 hover:bg-white/[0.05]",
+          )}
+          key={option.value}
+          onClick={() => onChange(option.value)}
+          type="button"
+        >
+          <span className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+            {option.title}
+            {option.badge ? (
+              <span className="rounded-full bg-emerald-300/14 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-emerald-100">
+                {option.badge}
+              </span>
+            ) : null}
+          </span>
+          <span className="mt-1 block text-xs leading-5 text-slate-400">{option.text}</span>
         </button>
       ))}
     </div>
@@ -151,26 +231,28 @@ function ResultCard({
 
 function PriceRiskLine({
   side,
-  liquidationPrice,
+  autoClosePrice,
   entryPrice,
   exitPrice,
+  currency,
 }: {
   side: PositionSide;
-  liquidationPrice: number;
+  autoClosePrice: number;
   entryPrice: number;
   exitPrice: number;
+  currency: string;
 }) {
   const columns =
-    side === "long"
+    side === "buy"
       ? [
-          { label: "Авто затваряне", value: liquidationPrice, tone: "text-rose-200/75" },
+          { label: "Авто затваряне", value: autoClosePrice, tone: "text-rose-200/75" },
           { label: "Вход", value: entryPrice, tone: "text-amber-200/75" },
           { label: "План изход", value: exitPrice, tone: "text-emerald-200/75" },
         ]
       : [
           { label: "План изход", value: exitPrice, tone: "text-emerald-200/75" },
           { label: "Вход", value: entryPrice, tone: "text-amber-200/75" },
-          { label: "Авто затваряне", value: liquidationPrice, tone: "text-rose-200/75" },
+          { label: "Авто затваряне", value: autoClosePrice, tone: "text-rose-200/75" },
         ];
 
   return (
@@ -181,22 +263,24 @@ function PriceRiskLine({
             <p className={cn("text-xs font-medium uppercase tracking-[0.12em]", column.tone)}>
               {column.label}
             </p>
-            <p className="mt-1 text-lg font-semibold text-white">{formatCurrency(column.value)}</p>
+            <p className="mt-1 text-lg font-semibold text-white">
+              {formatCurrency(column.value, currency)}
+            </p>
           </div>
         ))}
       </div>
       <div
         className={cn(
           "mt-5 h-3 overflow-hidden rounded-full",
-          side === "long"
+          side === "buy"
             ? "bg-gradient-to-r from-rose-300/80 via-amber-200/85 to-emerald-300/80"
             : "bg-gradient-to-r from-emerald-300/80 via-amber-200/85 to-rose-300/80",
         )}
       />
       <div className="mt-2 grid grid-cols-3 text-xs text-slate-500">
-        <span>{side === "long" ? "Риск при спад" : "Цел при спад"}</span>
+        <span>{side === "buy" ? "Риск при спад" : "Цел при спад"}</span>
         <span className="text-center">Цена на вход</span>
-        <span className="text-right">{side === "long" ? "Цел при ръст" : "Риск при ръст"}</span>
+        <span className="text-right">{side === "buy" ? "Цел при ръст" : "Риск при ръст"}</span>
       </div>
     </div>
   );
@@ -205,14 +289,14 @@ function PriceRiskLine({
 function DirectionNote({ side }: { side: PositionSide }) {
   return (
     <div className="rounded-[22px] border border-white/8 bg-white/[0.035] p-4 text-sm leading-6 text-slate-300">
-      {side === "long" ? (
+      {side === "buy" ? (
         <p>
-          <span className="font-semibold text-emerald-100">Long</span> означава, че купуваш акцията
+          <span className="font-semibold text-emerald-100">BUY</span> означава, че купуваш акцията
           и печелиш, ако цената се покачи. Рискът е цената да падне и да изчерпи зададения маржин.
         </p>
       ) : (
         <p>
-          <span className="font-semibold text-rose-100">Short</span> означава, че продаваш чрез
+          <span className="font-semibold text-rose-100">SELL</span> означава, че продаваш чрез
           ливъридж и печелиш, ако цената падне. Рискът е цената да се качи срещу позицията.
         </p>
       )}
@@ -608,29 +692,101 @@ function AccumulationPanel() {
 }
 
 export function RiskCalculator() {
-  const [side, setSide] = useState<PositionSide>("long");
-  const [investedAmount, setInvestedAmount] = useState("1000");
-  const [leverageInput, setLeverageInput] = useState("1:100");
-  const [entryPrice, setEntryPrice] = useState("50");
-  const [shares, setShares] = useState("100");
-  const [exitPrice, setExitPrice] = useState("60");
+  const [marginMode, setMarginMode] = useState<MarginMode>("real_broker_margin");
+  const [side, setSide] = useState<PositionSide>("buy");
+  const [accountBalance, setAccountBalance] = useState("50");
+  const [equity, setEquity] = useState("48.36");
+  const [usedMargin, setUsedMargin] = useState("4.16");
+  const [accountCurrency, setAccountCurrency] = useState("EUR");
+  const [instrumentCurrency, setInstrumentCurrency] = useState("USD");
+  const [entryPrice, setEntryPrice] = useState("16.30");
+  const [currentPrice, setCurrentPrice] = useState("15.98");
+  const [shares, setShares] = useState("6");
+  const [exitPrice, setExitPrice] = useState("30");
+  const [accountLeverageInput, setAccountLeverageInput] = useState("1:1000");
+  const [fixedLeverageInput, setFixedLeverageInput] = useState("1:20");
+  const [stopOutLevelPercent, setStopOutLevelPercent] = useState("20");
+  const [fxRateInstrumentToAccount, setFxRateInstrumentToAccount] = useState("0.85");
 
-  const leverage = useMemo(() => parseLeverage(leverageInput), [leverageInput]);
+  const accountLeverage = useMemo(() => parseLeverage(accountLeverageInput), [accountLeverageInput]);
+  const fixedLeverage = useMemo(() => parseLeverage(fixedLeverageInput), [fixedLeverageInput]);
   const result = useMemo(
     () =>
       calculateLeverageRisk({
-        side,
-        investedAmount: parseAmount(investedAmount),
-        leverage: leverage ?? Number.NaN,
+        marginMode,
+        direction: side,
+        accountBalance: parseAmount(accountBalance),
+        accountCurrency: accountCurrency.trim().toUpperCase() || "EUR",
+        instrumentCurrency: instrumentCurrency.trim().toUpperCase() || "USD",
         entryPrice: parseAmount(entryPrice),
-        shares: parseAmount(shares),
-        exitPrice: parseAmount(exitPrice),
+        quantity: parseAmount(shares),
+        plannedExitPrice: parseAmount(exitPrice),
+        stopOutLevelPercent: parseAmount(stopOutLevelPercent),
+        fxRateInstrumentToAccount: parseAmount(fxRateInstrumentToAccount),
+        accountLeverage: accountLeverage ?? Number.NaN,
+        fixedLeverage: fixedLeverage ?? Number.NaN,
+        equity: parseAmount(equity),
+        usedMargin: parseAmount(usedMargin),
+        currentPrice: parseOptionalAmount(currentPrice),
       }),
-    [entryPrice, exitPrice, investedAmount, leverage, shares, side],
+    [
+      accountBalance,
+      accountCurrency,
+      accountLeverage,
+      currentPrice,
+      entryPrice,
+      equity,
+      exitPrice,
+      fixedLeverage,
+      fxRateInstrumentToAccount,
+      instrumentCurrency,
+      marginMode,
+      shares,
+      side,
+      stopOutLevelPercent,
+      usedMargin,
+    ],
   );
 
   const errors = result.ok ? {} : result.errors;
-  const leverageError = !leverage ? "Въведи ливъридж като 1:1000 или 1000." : errors.leverage;
+  const accountLeverageError =
+    marginMode === "account_leverage" && !accountLeverage
+      ? "Въведи account leverage като 1:1000 или 1000."
+      : errors.accountLeverage;
+  const fixedLeverageError =
+    marginMode === "fixed_leverage" && !fixedLeverage
+      ? "Въведи fixed leverage като 1:20 или 20."
+      : errors.fixedLeverage;
+  const accountCurrencyCode = result.ok
+    ? result.input.accountCurrency
+    : accountCurrency.trim().toUpperCase() || "EUR";
+  const instrumentCurrencyCode = result.ok
+    ? result.input.instrumentCurrency
+    : instrumentCurrency.trim().toUpperCase() || "USD";
+
+  function applySofiPreset(mode: "real" | "normal" | "open-close") {
+    setSide("buy");
+    setAccountBalance("50");
+    setEquity("48.36");
+    setUsedMargin("4.16");
+    setAccountCurrency("EUR");
+    setInstrumentCurrency("USD");
+    setEntryPrice("16.30");
+    setCurrentPrice("15.98");
+    setShares("6");
+    setExitPrice("30");
+    setStopOutLevelPercent("20");
+    setFxRateInstrumentToAccount("0.85");
+
+    if (mode === "real") {
+      setMarginMode("real_broker_margin");
+      setFixedLeverageInput("1:20");
+      return;
+    }
+
+    setMarginMode("fixed_leverage");
+    setFixedLeverageInput(mode === "normal" ? "1:20" : "1:5");
+  }
 
   return (
     <div className="space-y-6">
@@ -649,24 +805,107 @@ export function RiskCalculator() {
           </div>
 
           <div className="mt-6 grid gap-4">
+            <MarginModeControl onChange={setMarginMode} value={marginMode} />
+            <div className="rounded-[22px] border border-amber-200/18 bg-amber-300/[0.08] p-4 text-sm leading-6 text-amber-50">
+              Account leverage не винаги важи за конкретния инструмент. За PU Prime Share CFDs
+              използвай <span className="font-semibold">Fixed Leverage</span> или най-добре{" "}
+              <span className="font-semibold">Real Broker Margin</span> от платформата.
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <button
+                className="rounded-2xl border border-emerald-200/20 bg-emerald-300/10 px-4 py-3 text-left text-sm font-semibold text-emerald-50 transition hover:bg-emerald-300/15"
+                onClick={() => applySofiPreset("real")}
+                type="button"
+              >
+                SOFI пример: реален Margin
+              </button>
+              <button
+                className="rounded-2xl border border-amber-200/20 bg-amber-300/10 px-4 py-3 text-left text-sm font-semibold text-amber-50 transition hover:bg-amber-300/15"
+                onClick={() => applySofiPreset("normal")}
+                type="button"
+              >
+                PU Prime US Shares 1:20
+              </button>
+              <button
+                className="rounded-2xl border border-rose-200/20 bg-rose-300/10 px-4 py-3 text-left text-sm font-semibold text-rose-50 transition hover:bg-rose-300/15"
+                onClick={() => applySofiPreset("open-close")}
+                type="button"
+              >
+                Open/Close прозорец 1:5
+              </button>
+            </div>
             <SideControl onChange={setSide} value={side} />
             <DirectionNote side={side} />
             <Field
-              error={errors.investedAmount}
-              hint="Капиталът/маржинът, който приемаш, че може да се изчерпи."
-              label="Сума, която инвестираш"
-              onChange={setInvestedAmount}
+              error={errors.accountBalance}
+              hint="Balance от платформата. При примера: 50 EUR."
+              label="Account balance"
+              onChange={setAccountBalance}
               type="number"
-              value={investedAmount}
+              value={accountBalance}
             />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                hint="Например EUR."
+                label="Account currency"
+                onChange={setAccountCurrency}
+                value={accountCurrency}
+              />
+              <Field
+                hint="Например USD за US Shares CFD."
+                label="Instrument currency"
+                onChange={setInstrumentCurrency}
+                value={instrumentCurrency}
+              />
+            </div>
             <Field
-              error={leverageError}
-              hint="Приема 1:1000, 1/1000 или само 1000."
-              label="Ливъридж"
-              onChange={setLeverageInput}
-              placeholder="1:1000"
-              value={leverageInput}
+              error={errors.fxRateInstrumentToAccount}
+              hint={`Колко ${accountCurrencyCode} е 1 ${instrumentCurrencyCode}. Например USD към EUR: 0.85.`}
+              label={`FX rate ${instrumentCurrencyCode} към ${accountCurrencyCode}`}
+              onChange={setFxRateInstrumentToAccount}
+              type="number"
+              value={fxRateInstrumentToAccount}
             />
+            {marginMode === "account_leverage" ? (
+              <Field
+                error={accountLeverageError}
+                hint="Ползвай го само ако инструментът следва account leverage."
+                label="Account leverage"
+                onChange={setAccountLeverageInput}
+                placeholder="1:1000"
+                value={accountLeverageInput}
+              />
+            ) : null}
+            {marginMode === "fixed_leverage" ? (
+              <Field
+                error={fixedLeverageError}
+                hint="За PU Prime US Shares CFD често е 1:20, а около open/close може да е 1:5."
+                label="Fixed leverage"
+                onChange={setFixedLeverageInput}
+                placeholder="1:20"
+                value={fixedLeverageInput}
+              />
+            ) : null}
+            {marginMode === "real_broker_margin" ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field
+                  error={errors.equity}
+                  hint="Equity от платформата. При примера: 48.36 EUR."
+                  label="Equity"
+                  onChange={setEquity}
+                  type="number"
+                  value={equity}
+                />
+                <Field
+                  error={errors.usedMargin}
+                  hint="Margin / Used Margin от платформата. При примера: 4.16 EUR."
+                  label="Real broker margin"
+                  onChange={setUsedMargin}
+                  type="number"
+                  value={usedMargin}
+                />
+              </div>
+            ) : null}
             <div className="grid gap-4 sm:grid-cols-2">
               <Field
                 error={errors.entryPrice}
@@ -676,7 +915,7 @@ export function RiskCalculator() {
                 value={entryPrice}
               />
               <Field
-                error={errors.shares}
+                error={errors.quantity}
                 label="Брой акции"
                 onChange={setShares}
                 type="number"
@@ -684,11 +923,27 @@ export function RiskCalculator() {
               />
             </div>
             <Field
-              error={errors.exitPrice}
+              error={errors.currentPrice}
+              hint="По желание: помага да свериш текущата плаваща печалба/загуба с платформата."
+              label="Текуща цена"
+              onChange={setCurrentPrice}
+              type="number"
+              value={currentPrice}
+            />
+            <Field
+              error={errors.plannedExitPrice}
               label="Планирана цена на изход"
               onChange={setExitPrice}
               type="number"
               value={exitPrice}
+            />
+            <Field
+              error={errors.stopOutLevelPercent}
+              hint="Въведи ръчно, защото може да се различава според акаунт/entity. Пример: 20."
+              label="Stop-out level %"
+              onChange={setStopOutLevelPercent}
+              type="number"
+              value={stopOutLevelPercent}
             />
           </div>
         </section>
@@ -703,7 +958,7 @@ export function RiskCalculator() {
             </div>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-300">
               <Info className="size-4 text-amber-200" />
-              {sideLabel(side)}
+              {sideLabel(side)} · {marginModeLabel(marginMode)}
             </div>
           </div>
 
@@ -711,22 +966,22 @@ export function RiskCalculator() {
             <div className="mt-6 space-y-5">
               <div className="grid gap-4 lg:grid-cols-3">
                 <ResultCard
-                  hint={`Буферът до тази цена е ${formatCurrency(result.liquidationMove)} на акция.`}
+                  hint={`Буферът е ${formatCurrency(result.maxLossPerUnitInstrument, instrumentCurrencyCode)} на акция.`}
                   label="Авто затваряне"
                   tone="red"
-                  value={formatCurrency(result.displayLiquidationPrice)}
+                  value={formatCurrency(result.displayAutoClosePrice, instrumentCurrencyCode)}
                 />
                 <ResultCard
-                  hint={`Обем ${formatCurrency(result.notional)} при ливъридж ${formatNumber(result.input.leverage)}x.`}
+                  hint={`Ефективен ливъридж около 1:${formatNumber(result.effectiveLeverage)}.`}
                   label="Нужен маржин"
                   tone={result.positionAllowed ? "gold" : "red"}
-                  value={formatCurrency(result.requiredMargin)}
+                  value={formatCurrency(result.requiredMargin, accountCurrencyCode)}
                 />
                 <ResultCard
-                  hint={`${result.expectedReturnPct >= 0 ? "Доходност" : "Отрицателен резултат"} спрямо сумата: ${result.expectedReturnPct.toFixed(1)}%.`}
-                  label={result.expectedProfit >= 0 ? "Очаквана печалба" : "Очаквана загуба"}
-                  tone={result.expectedProfit >= 0 ? "green" : "red"}
-                  value={formatCurrency(Math.abs(result.expectedProfit))}
+                  hint={`Резултат спрямо balance: ${result.returnPercentOnBalance.toFixed(1)}%.`}
+                  label={result.grossProfitAccount >= 0 ? "Очаквана печалба" : "Очаквана загуба"}
+                  tone={result.grossProfitAccount >= 0 ? "green" : "red"}
+                  value={formatCurrency(Math.abs(result.grossProfitAccount), accountCurrencyCode)}
                 />
               </div>
 
@@ -734,17 +989,18 @@ export function RiskCalculator() {
                 <div className="flex gap-3 rounded-[22px] border border-rose-200/20 bg-rose-300/[0.08] p-4 text-sm leading-6 text-rose-100">
                   <AlertTriangle className="mt-0.5 size-5 shrink-0" />
                   <p>
-                    Този обем изисква {formatCurrency(result.requiredMargin)} маржин, а въведената
-                    сума е {formatCurrency(result.input.investedAmount)}. Намали броя акции,
-                    увеличи сумата или използвай по-висок ливъридж, ако брокерът го позволява.
+                    Този обем изисква {formatCurrency(result.requiredMargin, accountCurrencyCode)}{" "}
+                    маржин, а наличният equity/balance за сметката е по-нисък. Намали броя акции
+                    или използвай реалния margin от платформата.
                   </p>
                 </div>
               ) : null}
 
               <PriceRiskLine
                 entryPrice={result.input.entryPrice}
-                exitPrice={result.input.exitPrice}
-                liquidationPrice={result.displayLiquidationPrice}
+                exitPrice={result.input.plannedExitPrice}
+                autoClosePrice={result.displayAutoClosePrice}
+                currency={instrumentCurrencyCode}
                 side={side}
               />
 
@@ -753,23 +1009,24 @@ export function RiskCalculator() {
                   <ShieldAlert className="mt-1 size-5 shrink-0 text-amber-200" />
                   <div className="space-y-3 text-base leading-7 text-slate-100">
                     <p>
-                      Ако цената {side === "long" ? "падне" : "се качи"} до{" "}
+                      Ако цената {side === "buy" ? "падне" : "се качи"} до{" "}
                       <span className="font-semibold text-rose-100">
-                        {formatCurrency(result.displayLiquidationPrice)}
+                        {formatCurrency(result.displayAutoClosePrice, instrumentCurrencyCode)}
                       </span>
-                      , позицията ще се затвори автоматично по този опростен модел.
+                      , позицията ще се затвори автоматично по този PU Prime margin модел.
                     </p>
                     <p>
                       Ако излезеш на{" "}
                       <span className="font-semibold text-emerald-100">
-                        {formatCurrency(result.input.exitPrice)}
+                        {formatCurrency(result.input.plannedExitPrice, instrumentCurrencyCode)}
                       </span>
                       ,{" "}
-                      {result.expectedProfit >= 0 ? (
+                      {result.grossProfitAccount >= 0 ? (
                         <>
                           печалбата ще е{" "}
                           <span className="font-semibold text-emerald-100">
-                            {formatCurrency(result.expectedProfit)}
+                            {formatCurrency(result.grossProfitInstrument, instrumentCurrencyCode)} /{" "}
+                            {formatCurrency(result.grossProfitAccount, accountCurrencyCode)}
                           </span>
                           .
                         </>
@@ -777,7 +1034,8 @@ export function RiskCalculator() {
                         <>
                           загубата ще е{" "}
                           <span className="font-semibold text-rose-100">
-                            {formatCurrency(Math.abs(result.expectedProfit))}
+                            {formatCurrency(Math.abs(result.grossProfitInstrument), instrumentCurrencyCode)} /{" "}
+                            {formatCurrency(Math.abs(result.grossProfitAccount), accountCurrencyCode)}
                           </span>
                           .
                         </>
@@ -789,23 +1047,67 @@ export function RiskCalculator() {
 
               <div className="grid gap-3 text-sm text-slate-300 sm:grid-cols-3">
                 <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
-                  <p className="text-slate-400">Максимален обем</p>
-                  <p className="mt-1 font-semibold text-white">{formatCurrency(result.maxNotional)}</p>
+                  <p className="text-slate-400">Position value</p>
+                  <p className="mt-1 font-semibold text-white">
+                    {formatCurrency(result.positionValueInstrument, instrumentCurrencyCode)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {formatCurrency(result.positionValueAccount, accountCurrencyCode)}
+                  </p>
                 </div>
                 <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
-                  <p className="text-slate-400">Макс. акции при входа</p>
-                  <p className="mt-1 font-semibold text-white">{formatNumber(result.maxShares)}</p>
+                  <p className="text-slate-400">Free margin</p>
+                  <p className="mt-1 font-semibold text-white">
+                    {formatCurrency(result.freeMargin, accountCurrencyCode)}
+                  </p>
+                  <p className="text-xs text-slate-500">Margin level {result.marginLevel.toFixed(1)}%</p>
                 </div>
                 <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
-                  <p className="text-slate-400">Използван маржин</p>
-                  <p className="mt-1 font-semibold text-white">{result.marginUsagePct.toFixed(1)}%</p>
+                  <p className="text-slate-400">Stop-out equity</p>
+                  <p className="mt-1 font-semibold text-white">
+                    {formatCurrency(result.stopOutEquity, accountCurrencyCode)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Max loss {formatCurrency(result.maxLossAccount, accountCurrencyCode)}
+                  </p>
+                </div>
+                <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
+                  <p className="text-slate-400">Buffer per share</p>
+                  <p className="mt-1 font-semibold text-white">
+                    {formatCurrency(result.maxLossPerUnitInstrument, instrumentCurrencyCode)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {formatCurrency(result.maxLossPerUnitAccount, accountCurrencyCode)} на акция
+                  </p>
+                </div>
+                <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
+                  <p className="text-slate-400">Expected profit</p>
+                  <p className="mt-1 font-semibold text-white">
+                    {formatCurrency(result.grossProfitInstrument, instrumentCurrencyCode)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {formatCurrency(result.grossProfitAccount, accountCurrencyCode)}
+                  </p>
+                </div>
+                <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
+                  <p className="text-slate-400">Текущ P/L</p>
+                  <p className="mt-1 font-semibold text-white">
+                    {result.currentProfitInstrument === undefined
+                      ? "-"
+                      : formatCurrency(result.currentProfitInstrument, instrumentCurrencyCode)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {result.currentProfitAccount === undefined
+                      ? "Попълни текуща цена"
+                      : formatCurrency(result.currentProfitAccount, accountCurrencyCode)}
+                  </p>
                 </div>
               </div>
 
               <p className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4 text-sm leading-6 text-slate-400">
-                Реален брокер може да затвори позицията по-рано заради maintenance margin,
-                stop-out ниво, spread, комисиони, swap или бързо движение на пазара. Използвай това
-                като ориентир, не като гарантирана брокерска цена.
+                Най-точният режим е Real Broker Margin, защото използва реалния margin от PU Prime.
+                Все пак реалното затваряне може да се различи заради spread, slippage, комисиони,
+                overnight fee, market gap или промяна в fixed leverage около отваряне/затваряне.
               </p>
             </div>
           ) : (

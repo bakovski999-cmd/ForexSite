@@ -1,12 +1,23 @@
-export type PositionSide = "long" | "short";
+export type PositionSide = "buy" | "sell";
+
+export type MarginMode = "account_leverage" | "fixed_leverage" | "real_broker_margin";
 
 export type LeverageRiskInput = {
-  side: PositionSide;
-  investedAmount: number;
-  leverage: number;
+  marginMode: MarginMode;
+  direction: PositionSide;
+  accountBalance: number;
+  accountCurrency: string;
+  instrumentCurrency: string;
   entryPrice: number;
-  shares: number;
-  exitPrice: number;
+  quantity: number;
+  plannedExitPrice: number;
+  stopOutLevelPercent: number;
+  fxRateInstrumentToAccount: number;
+  accountLeverage?: number;
+  fixedLeverage?: number;
+  equity?: number;
+  usedMargin?: number;
+  currentPrice?: number;
 };
 
 export type LeverageRiskErrors = Partial<Record<keyof LeverageRiskInput, string>>;
@@ -45,20 +56,25 @@ export type LeverageRiskResult =
   | {
       ok: true;
       input: LeverageRiskInput;
-      notional: number;
+      positionValueInstrument: number;
+      positionValueAccount: number;
       requiredMargin: number;
-      maxNotional: number;
-      maxShares: number;
-      marginBuffer: number;
-      marginUsagePct: number;
+      freeMargin: number;
+      marginLevel: number;
+      effectiveLeverage: number;
       positionAllowed: boolean;
-      liquidationPrice: number;
-      displayLiquidationPrice: number;
-      liquidationMove: number;
-      liquidationMovePct: number;
-      liquidationBelowZero: boolean;
-      expectedProfit: number;
-      expectedReturnPct: number;
+      stopOutEquity: number;
+      maxLossAccount: number;
+      maxLossPerUnitAccount: number;
+      maxLossPerUnitInstrument: number;
+      autoClosePrice: number;
+      displayAutoClosePrice: number;
+      autoCloseBelowZero: boolean;
+      grossProfitInstrument: number;
+      grossProfitAccount: number;
+      returnPercentOnBalance: number;
+      currentProfitInstrument?: number;
+      currentProfitAccount?: number;
     }
   | {
       ok: false;
@@ -162,76 +178,169 @@ function validatePositive(value: number, label: string) {
   return null;
 }
 
+function validateNonNegative(value: number | undefined, label: string) {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (!Number.isFinite(value)) {
+    return `${label} трябва да е число.`;
+  }
+
+  if (value < 0) {
+    return `${label} трябва да е 0 или повече.`;
+  }
+
+  return null;
+}
+
 export function calculateLeverageRisk(input: LeverageRiskInput): LeverageRiskResult {
   const errors: LeverageRiskErrors = {};
 
-  const investedAmountError = validatePositive(input.investedAmount, "Сумата");
-  const leverageError = validatePositive(input.leverage, "Ливъриджът");
+  const accountBalanceError = validatePositive(input.accountBalance, "Балансът");
   const entryPriceError = validatePositive(input.entryPrice, "Цената на вход");
-  const sharesError = validatePositive(input.shares, "Броят акции");
+  const quantityError = validatePositive(input.quantity, "Броят акции");
+  const stopOutError = validatePositive(input.stopOutLevelPercent, "Stop-out процентът");
+  const fxRateError = validatePositive(input.fxRateInstrumentToAccount, "FX курсът");
+  const currentPriceError = validateNonNegative(input.currentPrice, "Текущата цена");
 
-  if (input.side !== "long" && input.side !== "short") {
-    errors.side = "Посоката трябва да е Long или Short.";
+  if (input.direction !== "buy" && input.direction !== "sell") {
+    errors.direction = "Посоката трябва да е BUY или SELL.";
   }
 
-  if (investedAmountError) {
-    errors.investedAmount = investedAmountError;
+  if (
+    input.marginMode !== "account_leverage" &&
+    input.marginMode !== "fixed_leverage" &&
+    input.marginMode !== "real_broker_margin"
+  ) {
+    errors.marginMode = "Избери валиден режим на маржин.";
   }
 
-  if (leverageError) {
-    errors.leverage = leverageError;
+  if (accountBalanceError) {
+    errors.accountBalance = accountBalanceError;
+  }
+
+  if (input.marginMode === "account_leverage") {
+    const accountLeverageError = validatePositive(
+      input.accountLeverage ?? Number.NaN,
+      "Account leverage",
+    );
+
+    if (accountLeverageError) {
+      errors.accountLeverage = accountLeverageError;
+    }
+  }
+
+  if (input.marginMode === "fixed_leverage") {
+    const fixedLeverageError = validatePositive(
+      input.fixedLeverage ?? Number.NaN,
+      "Fixed leverage",
+    );
+
+    if (fixedLeverageError) {
+      errors.fixedLeverage = fixedLeverageError;
+    }
+  }
+
+  if (input.marginMode === "real_broker_margin") {
+    const equityError = validatePositive(input.equity ?? Number.NaN, "Equity");
+    const usedMarginError = validatePositive(input.usedMargin ?? Number.NaN, "Used Margin");
+
+    if (equityError) {
+      errors.equity = equityError;
+    }
+
+    if (usedMarginError) {
+      errors.usedMargin = usedMarginError;
+    }
   }
 
   if (entryPriceError) {
     errors.entryPrice = entryPriceError;
   }
 
-  if (sharesError) {
-    errors.shares = sharesError;
+  if (quantityError) {
+    errors.quantity = quantityError;
   }
 
-  if (!Number.isFinite(input.exitPrice) || input.exitPrice < 0) {
-    errors.exitPrice = "Планираната цена на изход трябва да е 0 или повече.";
+  if (stopOutError) {
+    errors.stopOutLevelPercent = stopOutError;
+  }
+
+  if (fxRateError) {
+    errors.fxRateInstrumentToAccount = fxRateError;
+  }
+
+  if (currentPriceError) {
+    errors.currentPrice = currentPriceError;
+  }
+
+  if (!Number.isFinite(input.plannedExitPrice) || input.plannedExitPrice < 0) {
+    errors.plannedExitPrice = "Планираната цена на изход трябва да е 0 или повече.";
   }
 
   if (Object.keys(errors).length > 0) {
     return { ok: false, errors };
   }
 
-  const notional = input.entryPrice * input.shares;
-  const requiredMargin = notional / input.leverage;
-  const maxNotional = input.investedAmount * input.leverage;
-  const maxShares = maxNotional / input.entryPrice;
-  const marginBuffer = input.investedAmount - requiredMargin;
-  const marginUsagePct = (requiredMargin / input.investedAmount) * 100;
-  const liquidationMove = input.investedAmount / input.shares;
-  const liquidationPrice =
-    input.side === "long" ? input.entryPrice - liquidationMove : input.entryPrice + liquidationMove;
-  const displayLiquidationPrice = Math.max(0, liquidationPrice);
-  const liquidationMovePct = (liquidationMove / input.entryPrice) * 100;
-  const expectedProfit =
-    input.side === "long"
-      ? (input.exitPrice - input.entryPrice) * input.shares
-      : (input.entryPrice - input.exitPrice) * input.shares;
-  const expectedReturnPct = (expectedProfit / input.investedAmount) * 100;
+  const positionValueInstrument = input.entryPrice * input.quantity;
+  const positionValueAccount = positionValueInstrument * input.fxRateInstrumentToAccount;
+  const requiredMargin =
+    input.marginMode === "account_leverage"
+      ? positionValueAccount / Number(input.accountLeverage)
+      : input.marginMode === "fixed_leverage"
+        ? positionValueAccount / Number(input.fixedLeverage)
+        : Number(input.usedMargin);
+  const equityForMargin = input.marginMode === "real_broker_margin" ? Number(input.equity) : input.accountBalance;
+  const freeMargin = equityForMargin - requiredMargin;
+  const marginLevel = (equityForMargin / requiredMargin) * 100;
+  const effectiveLeverage = positionValueAccount / requiredMargin;
+  const stopOutEquity = requiredMargin * (input.stopOutLevelPercent / 100);
+  const maxLossAccount = input.accountBalance - stopOutEquity;
+  const maxLossPerUnitAccount = maxLossAccount / input.quantity;
+  const maxLossPerUnitInstrument = maxLossPerUnitAccount / input.fxRateInstrumentToAccount;
+  const autoClosePrice =
+    input.direction === "buy"
+      ? input.entryPrice - maxLossPerUnitInstrument
+      : input.entryPrice + maxLossPerUnitInstrument;
+  const grossProfitInstrument =
+    input.direction === "buy"
+      ? (input.plannedExitPrice - input.entryPrice) * input.quantity
+      : (input.entryPrice - input.plannedExitPrice) * input.quantity;
+  const grossProfitAccount = grossProfitInstrument * input.fxRateInstrumentToAccount;
+  const currentProfitInstrument =
+    input.currentPrice === undefined
+      ? undefined
+      : input.direction === "buy"
+        ? (input.currentPrice - input.entryPrice) * input.quantity
+        : (input.entryPrice - input.currentPrice) * input.quantity;
+  const currentProfitAccount =
+    currentProfitInstrument === undefined
+      ? undefined
+      : currentProfitInstrument * input.fxRateInstrumentToAccount;
 
   return {
     ok: true,
     input,
-    notional,
+    positionValueInstrument,
+    positionValueAccount,
     requiredMargin,
-    maxNotional,
-    maxShares,
-    marginBuffer,
-    marginUsagePct,
-    positionAllowed: requiredMargin <= input.investedAmount + Number.EPSILON,
-    liquidationPrice,
-    displayLiquidationPrice,
-    liquidationMove,
-    liquidationMovePct,
-    liquidationBelowZero: input.side === "long" && liquidationPrice < 0,
-    expectedProfit,
-    expectedReturnPct,
+    freeMargin,
+    marginLevel,
+    effectiveLeverage,
+    positionAllowed: requiredMargin <= equityForMargin + Number.EPSILON,
+    stopOutEquity,
+    maxLossAccount,
+    maxLossPerUnitAccount,
+    maxLossPerUnitInstrument,
+    autoClosePrice,
+    displayAutoClosePrice: Math.max(0, autoClosePrice),
+    autoCloseBelowZero: input.direction === "buy" && autoClosePrice < 0,
+    grossProfitInstrument,
+    grossProfitAccount,
+    returnPercentOnBalance: (grossProfitAccount / input.accountBalance) * 100,
+    currentProfitInstrument,
+    currentProfitAccount,
   };
 }
 

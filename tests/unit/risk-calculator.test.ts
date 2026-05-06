@@ -17,14 +17,21 @@ describe("leverage risk calculator", () => {
     expect(parseLeverage("abc")).toBeNull();
   });
 
-  test("calculates long liquidation price and expected profit", () => {
+  test("uses real broker margin for PU Prime SOFI example", () => {
     const result = calculateLeverageRisk({
-      side: "long",
-      investedAmount: 1000,
-      leverage: 100,
-      entryPrice: 50,
-      shares: 100,
-      exitPrice: 60,
+      marginMode: "real_broker_margin",
+      direction: "buy",
+      accountBalance: 50,
+      equity: 48.36,
+      usedMargin: 4.16,
+      accountCurrency: "EUR",
+      instrumentCurrency: "USD",
+      entryPrice: 16.3,
+      currentPrice: 15.98,
+      quantity: 6,
+      plannedExitPrice: 30,
+      stopOutLevelPercent: 20,
+      fxRateInstrumentToAccount: 0.85,
     });
 
     expect(result.ok).toBe(true);
@@ -33,21 +40,85 @@ describe("leverage risk calculator", () => {
       return;
     }
 
-    expect(result.notional).toBe(5000);
-    expect(result.requiredMargin).toBe(50);
-    expect(result.liquidationPrice).toBe(40);
-    expect(result.expectedProfit).toBe(1000);
+    expect(result.positionValueInstrument).toBeCloseTo(97.8);
+    expect(result.positionValueAccount).toBeCloseTo(83.13);
+    expect(result.requiredMargin).toBeCloseTo(4.16);
+    expect(result.effectiveLeverage).toBeCloseTo(19.98);
+    expect(result.marginLevel).toBeCloseTo(1162.5);
+    expect(result.stopOutEquity).toBeCloseTo(0.832);
+    expect(result.autoClosePrice).toBeCloseTo(6.6592);
+    expect(result.grossProfitInstrument).toBeCloseTo(82.2);
+    expect(result.grossProfitAccount).toBeCloseTo(69.87);
+    expect(result.currentProfitAccount).toBeCloseTo(-1.632);
     expect(result.positionAllowed).toBe(true);
   });
 
-  test("calculates short liquidation price and expected profit", () => {
+  test("fixed leverage ignores account leverage and calculates required margin from product leverage", () => {
     const result = calculateLeverageRisk({
-      side: "short",
-      investedAmount: 1000,
-      leverage: 100,
+      marginMode: "fixed_leverage",
+      direction: "buy",
+      accountBalance: 50,
+      accountCurrency: "EUR",
+      instrumentCurrency: "USD",
+      entryPrice: 16.3,
+      quantity: 6,
+      plannedExitPrice: 30,
+      stopOutLevelPercent: 20,
+      fxRateInstrumentToAccount: 0.85,
+      accountLeverage: 1000,
+      fixedLeverage: 20,
+    });
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.positionValueAccount).toBeCloseTo(83.13);
+    expect(result.requiredMargin).toBeCloseTo(4.1565);
+    expect(result.effectiveLeverage).toBeCloseTo(20);
+    expect(result.positionAllowed).toBe(true);
+  });
+
+  test("account leverage mode uses account leverage when the instrument follows it", () => {
+    const result = calculateLeverageRisk({
+      marginMode: "account_leverage",
+      direction: "buy",
+      accountBalance: 50,
+      accountCurrency: "EUR",
+      instrumentCurrency: "USD",
+      entryPrice: 16.3,
+      quantity: 6,
+      plannedExitPrice: 30,
+      stopOutLevelPercent: 20,
+      fxRateInstrumentToAccount: 0.85,
+      accountLeverage: 1000,
+    });
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.requiredMargin).toBeCloseTo(0.08313);
+    expect(result.effectiveLeverage).toBeCloseTo(1000);
+  });
+
+  test("calculates sell auto close above entry and sell profit on lower exit", () => {
+    const result = calculateLeverageRisk({
+      marginMode: "fixed_leverage",
+      direction: "sell",
+      accountBalance: 1000,
+      accountCurrency: "USD",
+      instrumentCurrency: "USD",
       entryPrice: 50,
-      shares: 100,
-      exitPrice: 40,
+      quantity: 100,
+      plannedExitPrice: 40,
+      stopOutLevelPercent: 20,
+      fxRateInstrumentToAccount: 1,
+      fixedLeverage: 100,
     });
 
     expect(result.ok).toBe(true);
@@ -57,19 +128,24 @@ describe("leverage risk calculator", () => {
     }
 
     expect(result.requiredMargin).toBe(50);
-    expect(result.liquidationPrice).toBe(60);
-    expect(result.expectedProfit).toBe(1000);
-    expect(result.positionAllowed).toBe(true);
+    expect(result.autoClosePrice).toBe(59.9);
+    expect(result.grossProfitInstrument).toBe(1000);
+    expect(result.grossProfitAccount).toBe(1000);
   });
 
-  test("detects when the selected volume needs more margin than invested", () => {
+  test("detects when the selected volume needs more margin than account balance", () => {
     const result = calculateLeverageRisk({
-      side: "long",
-      investedAmount: 100,
-      leverage: 10,
+      marginMode: "fixed_leverage",
+      direction: "buy",
+      accountBalance: 100,
+      accountCurrency: "USD",
+      instrumentCurrency: "USD",
       entryPrice: 50,
-      shares: 100,
-      exitPrice: 55,
+      quantity: 100,
+      plannedExitPrice: 55,
+      stopOutLevelPercent: 20,
+      fxRateInstrumentToAccount: 1,
+      fixedLeverage: 10,
     });
 
     expect(result.ok).toBe(true);
@@ -79,18 +155,51 @@ describe("leverage risk calculator", () => {
     }
 
     expect(result.requiredMargin).toBe(500);
-    expect(result.maxNotional).toBe(1000);
     expect(result.positionAllowed).toBe(false);
+  });
+
+  test("stop-out percent changes stop-out equity and auto close price", () => {
+    const commonInput = {
+      marginMode: "fixed_leverage" as const,
+      direction: "buy" as const,
+      accountBalance: 1000,
+      accountCurrency: "USD",
+      instrumentCurrency: "USD",
+      entryPrice: 50,
+      quantity: 100,
+      plannedExitPrice: 60,
+      fxRateInstrumentToAccount: 1,
+      fixedLeverage: 100,
+    };
+    const lowStopOut = calculateLeverageRisk({ ...commonInput, stopOutLevelPercent: 20 });
+    const highStopOut = calculateLeverageRisk({ ...commonInput, stopOutLevelPercent: 50 });
+
+    expect(lowStopOut.ok).toBe(true);
+    expect(highStopOut.ok).toBe(true);
+
+    if (!lowStopOut.ok || !highStopOut.ok) {
+      return;
+    }
+
+    expect(lowStopOut.stopOutEquity).toBe(10);
+    expect(highStopOut.stopOutEquity).toBe(25);
+    expect(highStopOut.autoClosePrice).toBeGreaterThan(lowStopOut.autoClosePrice);
   });
 
   test("returns validation errors for invalid inputs", () => {
     const result = calculateLeverageRisk({
-      side: "long",
-      investedAmount: 0,
-      leverage: Number.NaN,
+      marginMode: "real_broker_margin",
+      direction: "buy",
+      accountBalance: 0,
+      accountCurrency: "EUR",
+      instrumentCurrency: "USD",
       entryPrice: -10,
-      shares: 0,
-      exitPrice: -1,
+      quantity: 0,
+      plannedExitPrice: -1,
+      stopOutLevelPercent: 0,
+      fxRateInstrumentToAccount: 0,
+      equity: Number.NaN,
+      usedMargin: 0,
     });
 
     expect(result.ok).toBe(false);
@@ -99,11 +208,14 @@ describe("leverage risk calculator", () => {
       return;
     }
 
-    expect(result.errors.investedAmount).toBeDefined();
-    expect(result.errors.leverage).toBeDefined();
+    expect(result.errors.accountBalance).toBeDefined();
     expect(result.errors.entryPrice).toBeDefined();
-    expect(result.errors.shares).toBeDefined();
-    expect(result.errors.exitPrice).toBeDefined();
+    expect(result.errors.quantity).toBeDefined();
+    expect(result.errors.plannedExitPrice).toBeDefined();
+    expect(result.errors.stopOutLevelPercent).toBeDefined();
+    expect(result.errors.fxRateInstrumentToAccount).toBeDefined();
+    expect(result.errors.equity).toBeDefined();
+    expect(result.errors.usedMargin).toBeDefined();
   });
 
   test("calculates partial sale profit by leg and total", () => {

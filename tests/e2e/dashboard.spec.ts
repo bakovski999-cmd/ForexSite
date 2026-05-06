@@ -6,7 +6,7 @@ test("demo login opens the dashboard and navigates core views", async ({ page })
   await expect(page.getByText("Табло за анализ на злато")).toBeVisible();
   await page.getByRole("button", { name: "Влез в таблото" }).click();
 
-  await expect(page).toHaveURL(/overview/);
+  await expect(page).toHaveURL(/overview/, { timeout: 20_000 });
   await expect(page.getByText("Контекстът за златото в един кадър.")).toBeVisible();
   await expect(page.getByText("Авто след")).toBeVisible();
 
@@ -29,9 +29,10 @@ test("demo login opens the dashboard and navigates core views", async ({ page })
 
   if (calendarRowCount > 0) {
     await calendarRows.first().click();
-    await expect(page.getByTestId("calendar-event-detail")).toBeVisible();
+    const calendarDetail = page.getByTestId("calendar-event-detail");
+    await expect(calendarDetail).toBeVisible();
     await expect(page.getByText("Bullish сценарий").first()).toBeVisible();
-    await expect(page.getByText("Как влияе на златото")).toBeVisible();
+    await expect(calendarDetail.getByText("Как влияе на златото")).toBeVisible();
     await page.getByRole("button", { name: "Затвори" }).click();
   } else {
     await expect(
@@ -49,8 +50,10 @@ test("demo login opens the dashboard and navigates core views", async ({ page })
 
   await page.getByRole("link", { name: "Риск калкулатор" }).click();
   await expect(
-    page.getByText("Провери liquidation цената, частичните продажби и средната цена."),
+    page.getByText("Провери broker margin риска, частичните продажби и средната цена."),
   ).toBeVisible();
+  await expect(page.getByRole("button", { name: /Real Broker Margin/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "PU Prime US Shares 1:20" })).toBeVisible();
   await expect(page.getByText("Ако цената падне до")).toBeVisible();
   await expect(page.getByText("печалбата ще е")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Частични продажби" })).toBeVisible();
