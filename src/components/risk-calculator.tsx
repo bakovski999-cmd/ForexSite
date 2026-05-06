@@ -119,7 +119,7 @@ function MarginModeControl({
     {
       value: "real_broker_margin",
       title: "Real Broker Margin",
-      text: "Най-точно: използва Margin/Used Margin от PU Prime.",
+      text: "Най-точно: използва Margin/Used Margin директно от твоя брокер.",
       badge: "Препоръчано",
     },
     {
@@ -764,7 +764,7 @@ export function RiskCalculator() {
     ? result.input.instrumentCurrency
     : instrumentCurrency.trim().toUpperCase() || "USD";
 
-  function applySofiPreset(mode: "real" | "normal" | "open-close") {
+  function applyBrokerExample(mode: "real" | "fixed-20" | "fixed-5") {
     setSide("buy");
     setAccountBalance("50");
     setEquity("48.36");
@@ -785,7 +785,7 @@ export function RiskCalculator() {
     }
 
     setMarginMode("fixed_leverage");
-    setFixedLeverageInput(mode === "normal" ? "1:20" : "1:5");
+    setFixedLeverageInput(mode === "fixed-20" ? "1:20" : "1:5");
   }
 
   return (
@@ -807,31 +807,33 @@ export function RiskCalculator() {
           <div className="mt-6 grid gap-4">
             <MarginModeControl onChange={setMarginMode} value={marginMode} />
             <div className="rounded-[22px] border border-amber-200/18 bg-amber-300/[0.08] p-4 text-sm leading-6 text-amber-50">
-              Account leverage не винаги важи за конкретния инструмент. За PU Prime Share CFDs
-              използвай <span className="font-semibold">Fixed Leverage</span> или най-добре{" "}
-              <span className="font-semibold">Real Broker Margin</span> от платформата.
+              Account leverage не винаги важи за конкретния инструмент. Ако продуктът има
+              собствен margin percentage или fixed leverage, използвай{" "}
+              <span className="font-semibold">Fixed Leverage</span>. Ако платформата вече ти
+              показва реален Margin/Used Margin, най-точно е{" "}
+              <span className="font-semibold">Real Broker Margin</span>.
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
               <button
                 className="rounded-2xl border border-emerald-200/20 bg-emerald-300/10 px-4 py-3 text-left text-sm font-semibold text-emerald-50 transition hover:bg-emerald-300/15"
-                onClick={() => applySofiPreset("real")}
+                onClick={() => applyBrokerExample("real")}
                 type="button"
               >
-                SOFI пример: реален Margin
+                Пример: реален broker margin
               </button>
               <button
                 className="rounded-2xl border border-amber-200/20 bg-amber-300/10 px-4 py-3 text-left text-sm font-semibold text-amber-50 transition hover:bg-amber-300/15"
-                onClick={() => applySofiPreset("normal")}
+                onClick={() => applyBrokerExample("fixed-20")}
                 type="button"
               >
-                PU Prime US Shares 1:20
+                Fixed leverage 1:20
               </button>
               <button
                 className="rounded-2xl border border-rose-200/20 bg-rose-300/10 px-4 py-3 text-left text-sm font-semibold text-rose-50 transition hover:bg-rose-300/15"
-                onClick={() => applySofiPreset("open-close")}
+                onClick={() => applyBrokerExample("fixed-5")}
                 type="button"
               >
-                Open/Close прозорец 1:5
+                Fixed leverage 1:5
               </button>
             </div>
             <SideControl onChange={setSide} value={side} />
@@ -852,7 +854,7 @@ export function RiskCalculator() {
                 value={accountCurrency}
               />
               <Field
-                hint="Например USD за US Shares CFD."
+                hint="Например USD, ако акцията/CFD инструментът се котира в долари."
                 label="Instrument currency"
                 onChange={setInstrumentCurrency}
                 value={instrumentCurrency}
@@ -879,7 +881,7 @@ export function RiskCalculator() {
             {marginMode === "fixed_leverage" ? (
               <Field
                 error={fixedLeverageError}
-                hint="За PU Prime US Shares CFD често е 1:20, а около open/close може да е 1:5."
+                hint="Въведи fixed leverage от product specification на брокера. Например 1:20 или 1:5."
                 label="Fixed leverage"
                 onChange={setFixedLeverageInput}
                 placeholder="1:20"
@@ -890,7 +892,7 @@ export function RiskCalculator() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field
                   error={errors.equity}
-                  hint="Equity от платформата. При примера: 48.36 EUR."
+                  hint="Equity от платформата на брокера. При примера: 48.36 EUR."
                   label="Equity"
                   onChange={setEquity}
                   type="number"
@@ -898,7 +900,7 @@ export function RiskCalculator() {
                 />
                 <Field
                   error={errors.usedMargin}
-                  hint="Margin / Used Margin от платформата. При примера: 4.16 EUR."
+                  hint="Margin / Used Margin от платформата на брокера. При примера: 4.16 EUR."
                   label="Real broker margin"
                   onChange={setUsedMargin}
                   type="number"
@@ -1013,7 +1015,7 @@ export function RiskCalculator() {
                       <span className="font-semibold text-rose-100">
                         {formatCurrency(result.displayAutoClosePrice, instrumentCurrencyCode)}
                       </span>
-                      , позицията ще се затвори автоматично по този PU Prime margin модел.
+                      , позицията ще се затвори автоматично по този broker margin модел.
                     </p>
                     <p>
                       Ако излезеш на{" "}
@@ -1105,9 +1107,11 @@ export function RiskCalculator() {
               </div>
 
               <p className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4 text-sm leading-6 text-slate-400">
-                Най-точният режим е Real Broker Margin, защото използва реалния margin от PU Prime.
-                Все пак реалното затваряне може да се различи заради spread, slippage, комисиони,
-                overnight fee, market gap или промяна в fixed leverage около отваряне/затваряне.
+                Най-точният режим е Real Broker Margin, защото използва реалния margin, който
+                брокерът вече е изчислил за конкретния инструмент и акаунт.
+                Все пак реалното затваряне може да се различи според правилата на конкретния
+                брокер: spread, slippage, комисиони, overnight fee, market gap, stop-out политика
+                или промяна в fixed leverage около отваряне/затваряне.
               </p>
             </div>
           ) : (

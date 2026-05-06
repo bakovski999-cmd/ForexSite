@@ -17,7 +17,7 @@ describe("leverage risk calculator", () => {
     expect(parseLeverage("abc")).toBeNull();
   });
 
-  test("uses real broker margin for PU Prime SOFI example", () => {
+  test("uses real broker margin from the trading platform example", () => {
     const result = calculateLeverageRisk({
       marginMode: "real_broker_margin",
       direction: "buy",
