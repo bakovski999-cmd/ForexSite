@@ -10,8 +10,11 @@ import {
   mapEurostatDatasetToOfficialFacts,
   mapForexFactoryCalendarItemsToEvents,
   mapFredReleaseDatesToCalendarEvents,
+  parseCensusNewHomeSalesActual,
+  parseConferenceBoardConsumerConfidenceActual,
   parseInvestingCalendarActual,
   parseIsmManufacturingReportActuals,
+  parseIsmServicesReportActuals,
 } from "@/lib/data/fetchers/economic-calendar";
 import { mapFredSeries } from "@/lib/data/fetchers/fred";
 import { normalizeGdeltArticles } from "@/lib/data/fetchers/gdelt";
@@ -274,6 +277,48 @@ describe("market data normalization", () => {
     expect(actuals.prices).toBe("84.6");
   });
 
+  test("ISM services parser reads services PMI and prices values", () => {
+    const actuals = parseIsmServicesReportActuals(`
+      <h1>Services PMI<sup>&reg;</sup> at 53.6%</h1>
+      <p>The Services PMI<sup>&reg;</sup> registered 53.6 percent, a decrease
+      of 0.4 percentage point compared to March's figure of 54 percent.</p>
+      <p>The Prices Index held steady at 70.7 percent in April.</p>
+      <p>May 05, 2026</p>
+    `);
+
+    expect(actuals.pmi).toBe("53.6");
+    expect(actuals.prices).toBe("70.7");
+    expect(actuals.observationDate).toBe("2026-05-05");
+  });
+
+  test("Census parser reads new home sales annual rate", () => {
+    const actual = parseCensusNewHomeSalesActual(`
+      <h2>MONTHLY NEW RESIDENTIAL SALES, MARCH 2026</h2>
+      <p>Sales of new single-family houses in March 2026 were at a
+      seasonally-adjusted annual rate of 682,000, according to estimates
+      released jointly today by the U.S. Census Bureau and HUD.</p>
+      <p>May 05, 2026</p>
+    `);
+
+    expect(actual).toEqual({
+      actual: "682K",
+      observationDate: "2026-03-01",
+    });
+  });
+
+  test("Conference Board parser reads consumer confidence index", () => {
+    const actual = parseConferenceBoardConsumerConfidenceActual(`
+      <p>April 28, 2026</p>
+      <p>The Consumer Confidence Index<sup>&reg;</sup> edged up by 0.6 points
+      to 92.8 (1985=100) in April, from 92.2 in March.</p>
+    `);
+
+    expect(actual).toEqual({
+      actual: "92.8",
+      observationDate: "2026-04-28",
+    });
+  });
+
   test("Investing fallback parser reads latest actual and release date", () => {
     const actual = parseInvestingCalendarActual(`
       <span>Latest Release</span><span>May 01, 2026</span>
@@ -320,6 +365,99 @@ describe("market data normalization", () => {
       actualSource: "Investing.com economic calendar fallback",
       actualStatus: "published",
       expectedGoldImpact: "bullish",
+    });
+  });
+
+  test("ForexFactory JOLTS event without actual is enriched from BLS official facts", () => {
+    const [event] = mapForexFactoryCalendarItemsToEvents([
+      {
+        title: "JOLTS Job Openings",
+        country: "USD",
+        date: "2026-05-05T10:00:00-04:00",
+        impact: "Medium",
+        forecast: "6.86M",
+        previous: "6.88M",
+      },
+    ]);
+    const [enriched] = enrichCalendarEventsWithOfficialActuals(
+      [event],
+      new Map([
+        [
+          "^jolts job openings$",
+          [{
+            actual: "7.19M",
+            period: "април 2026",
+            observationDate: "2026-04-01",
+            source: "BLS JOLTS official data",
+            sourceUrl: "https://www.bls.gov/jlt/",
+          }],
+        ],
+      ]),
+      new Date("2026-05-05T16:00:00.000Z"),
+    );
+
+    expect(enriched).toMatchObject({
+      actual: "7.19M",
+      actualSource: "BLS JOLTS official data",
+      actualStatus: "published",
+    });
+  });
+
+  test("ForexFactory new home sales event is enriched from Census facts", () => {
+    const [event] = mapForexFactoryCalendarItemsToEvents([
+      {
+        title: "New Home Sales",
+        country: "USD",
+        date: "2026-05-05T10:00:00-04:00",
+        impact: "Medium",
+        forecast: "652K",
+        previous: "635K",
+      },
+    ]);
+    const [enriched] = enrichCalendarEventsWithOfficialActuals(
+      [event],
+      new Map([
+        [
+          "^new home sales$",
+          [{
+            actual: "682K",
+            period: "март 2026",
+            observationDate: "2026-03-01",
+            source: "U.S. Census Bureau / New Residential Sales",
+            sourceUrl: "https://www.census.gov/construction/nrs/current/index.html",
+          }],
+        ],
+      ]),
+      new Date("2026-05-05T16:00:00.000Z"),
+    );
+
+    expect(enriched).toMatchObject({
+      actual: "682K",
+      actualSource: "U.S. Census Bureau / New Residential Sales",
+      actualStatus: "published",
+    });
+  });
+
+  test("past speech events are marked as published status-only releases", () => {
+    const [event] = mapForexFactoryCalendarItemsToEvents([
+      {
+        title: "President Trump Speaks",
+        country: "USD",
+        date: "2026-05-01T15:00:00-04:00",
+        impact: "Medium",
+      },
+    ]);
+    const [enriched] = enrichCalendarEventsWithOfficialActuals(
+      [event],
+      new Map(),
+      new Date("2026-05-02T04:00:00.000Z"),
+    );
+
+    expect(enriched).toMatchObject({
+      actual: "Публикувано",
+      actualSource: "White House remarks",
+      actualStatus: "published",
+      expectedGoldImpact: "mixed",
     });
   });
 
@@ -534,6 +672,13 @@ describe("market data normalization", () => {
         (rule) => rule.provider === "estat" && rule.pattern.test("Tokyo Core CPI y/y"),
       ),
     ).toBe(true);
+  });
+
+  test("calendar actual resolver registry covers current USD gaps", () => {
+    expect(calendarActualResolvers.some((rule) => rule.provider === "bls" && rule.pattern.test("JOLTS Job Openings"))).toBe(true);
+    expect(calendarActualResolvers.some((rule) => rule.provider === "census" && rule.pattern.test("New Home Sales"))).toBe(true);
+    expect(calendarActualResolvers.some((rule) => rule.provider === "ism" && rule.pattern.test("ISM Services PMI"))).toBe(true);
+    expect(calendarActualResolvers.some((rule) => rule.provider === "conference_board" && rule.pattern.test("CB Consumer Confidence"))).toBe(true);
   });
 
   test("e-Stat Tokyo CPI mapper returns the latest official monthly value", () => {

@@ -1137,8 +1137,15 @@ function isToneBasedFedEvent(
   event: Pick<EconomicCalendarEvent, "actual" | "eventType" | "title">,
 ) {
   return (
-    event.eventType === "central_bank" &&
-    /(fomc statement|fomc press conference|monetary policy statement|ecb press conference)/i.test(event.title) &&
+    (
+      event.eventType === "central_bank" &&
+      /(fomc statement|fomc press conference|monetary policy statement|ecb press conference)/i.test(event.title)
+    ) ||
+    (
+      event.eventType === "speeches" &&
+      /(speaks|speech|remarks|testifies|testimony|press conference)/i.test(event.title)
+    )
+  ) && (
     Boolean(event.actual)
   );
 }
@@ -1171,7 +1178,11 @@ function getReleaseAnalysis(event: EconomicCalendarEvent) {
   }
 
   if (isToneBasedFedEvent(event)) {
-    return `Събитието е публикувано, но то няма числова actual стойност като CPI или GDP.${source} Пазарът чете тона: дали Fed звучи по-меко, по-твърдо или потвърждава очакванията. Затова посоката идва от езика в statement-а, пресконференцията, реакцията на USD и доходностите.`;
+    const speakerContext = event.eventType === "speeches"
+      ? "Пазарът чете тона на речта: дали посланието подкрепя по-силен USD, повече риск или по-спокойна среда."
+      : "Пазарът чете тона: дали централната банка звучи по-меко, по-твърдо или потвърждава очакванията.";
+
+    return `Събитието е публикувано, но то няма числова actual стойност като CPI или GDP.${source} ${speakerContext} Затова посоката идва от езика, реакцията на USD, доходностите и risk sentiment.`;
   }
 
   if (actual === null || forecast === null) {

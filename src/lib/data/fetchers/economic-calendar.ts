@@ -193,11 +193,19 @@ type EcbOfficialActualRule = BaseOfficialActualRule & {
   metric: "valuePercent";
 };
 
+type BlsOfficialActualRule = BaseOfficialActualRule & {
+  provider: "bls";
+  factKey: BlsFactKey;
+  metric: "blsFact";
+};
+
 type IsmOfficialActualRule = BaseOfficialActualRule & {
   provider: "ism";
   officialUrls: string[];
   publicFallbackUrl: string;
   metric: "indexValue";
+  report?: "manufacturing" | "services";
+  valueKey?: "pmi" | "prices";
 };
 
 type EstatOfficialActualRule = BaseOfficialActualRule & {
@@ -209,12 +217,29 @@ type EstatOfficialActualRule = BaseOfficialActualRule & {
   areaPattern: RegExp;
 };
 
+type CensusOfficialActualRule = BaseOfficialActualRule & {
+  provider: "census";
+  urls: string[];
+  publicFallbackUrl?: string;
+  metric: "newHomeSales";
+};
+
+type ConferenceBoardOfficialActualRule = BaseOfficialActualRule & {
+  provider: "conference_board";
+  urls: string[];
+  publicFallbackUrl?: string;
+  metric: "indexValue";
+};
+
 type OfficialActualRule =
   | FredOfficialActualRule
   | EurostatOfficialActualRule
   | EcbOfficialActualRule
+  | BlsOfficialActualRule
   | IsmOfficialActualRule
-  | EstatOfficialActualRule;
+  | EstatOfficialActualRule
+  | CensusOfficialActualRule
+  | ConferenceBoardOfficialActualRule;
 
 type OfficialActualFact = {
   actual: string;
@@ -400,6 +425,37 @@ export const calendarActualResolvers: OfficialActualRule[] = [
     sourceUrl: "https://fred.stlouisfed.org/series/ICSA",
   },
   {
+    provider: "bls",
+    pattern: /^jolts job openings$/i,
+    factKey: "jolts",
+    cadence: "monthly",
+    metric: "blsFact",
+    decimals: 2,
+    source: "BLS JOLTS official data",
+    sourceUrl: "https://www.bls.gov/jlt/",
+  },
+  {
+    provider: "census",
+    pattern: /^new home sales$/i,
+    cadence: "monthly",
+    metric: "newHomeSales",
+    source: "U.S. Census Bureau / New Residential Sales",
+    sourceUrl: "https://www.census.gov/construction/nrs/current/index.html",
+    urls: ["https://www.census.gov/construction/nrs/current/index.html"],
+    publicFallbackUrl: "https://www.investing.com/economic-calendar/new-home-sales-222",
+  },
+  {
+    provider: "conference_board",
+    pattern: /^cb consumer confidence$/i,
+    cadence: "monthly",
+    metric: "indexValue",
+    decimals: 1,
+    source: "The Conference Board / Consumer Confidence",
+    sourceUrl: "https://www.conference-board.org/topics/consumer-confidence",
+    urls: ["https://www.conference-board.org/topics/consumer-confidence"],
+    publicFallbackUrl: "https://www.investing.com/economic-calendar/cb-consumer-confidence-48",
+  },
+  {
     provider: "eurostat",
     pattern: /^german prelim gdp q\/q$/i,
     dataset: "namq_10_gdp",
@@ -485,6 +541,38 @@ export const calendarActualResolvers: OfficialActualRule[] = [
       "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/pmi/april/",
     ],
     publicFallbackUrl: "https://www.investing.com/economic-calendar/ism-manufacturing-prices-174",
+  },
+  {
+    provider: "ism",
+    pattern: /^ism services pmi$/i,
+    cadence: "monthly",
+    metric: "indexValue",
+    decimals: 1,
+    report: "services",
+    valueKey: "pmi",
+    source: "ISM Services official report",
+    sourceUrl: "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/services/",
+    officialUrls: [
+      "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/services/",
+      "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/services/april/",
+    ],
+    publicFallbackUrl: "https://www.investing.com/economic-calendar/ism-non-manufacturing-pmi-176",
+  },
+  {
+    provider: "ism",
+    pattern: /^ism services prices$/i,
+    cadence: "monthly",
+    metric: "indexValue",
+    decimals: 1,
+    report: "services",
+    valueKey: "prices",
+    source: "ISM Services official report",
+    sourceUrl: "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/services/",
+    officialUrls: [
+      "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/services/",
+      "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/services/april/",
+    ],
+    publicFallbackUrl: "https://www.investing.com/economic-calendar/ism-non-manufacturing-prices-1048",
   },
   {
     provider: "estat",
@@ -1036,11 +1124,32 @@ function isReleaseOnlyFedEvent(event: Pick<EconomicCalendarEvent, "title" | "eve
   );
 }
 
+function isReleaseOnlyStatusEvent(event: Pick<EconomicCalendarEvent, "title" | "eventType">) {
+  return (
+    isReleaseOnlyFedEvent(event) ||
+    (event.eventType === "speeches" && /(speaks|speech|remarks|testifies|testimony|press conference)/i.test(event.title))
+  );
+}
+
 function releaseOnlySourceFor(event: EconomicCalendarEvent) {
   if (event.currency === "EUR" || /ecb|monetary policy/i.test(event.title)) {
     return {
       source: "European Central Bank",
       sourceUrl: "https://www.ecb.europa.eu/press/pr/date/html/index.en.html",
+    };
+  }
+
+  if (/trump|president|white house/i.test(event.title)) {
+    return {
+      source: "White House remarks",
+      sourceUrl: "https://www.whitehouse.gov/remarks/",
+    };
+  }
+
+  if (event.eventType === "speeches") {
+    return {
+      source: event.source || "Official remarks source",
+      sourceUrl: event.sourceUrl ?? "https://www.whitehouse.gov/briefing-room/",
     };
   }
 
@@ -1069,7 +1178,7 @@ function enrichEventWithOfficialActual(
   const startsAtMs = new Date(event.startsAt).getTime();
   const isReleased = Number.isFinite(startsAtMs) && startsAtMs <= now.getTime();
 
-  if (!fact && isReleased && isReleaseOnlyFedEvent(event)) {
+  if (!fact && isReleased && isReleaseOnlyStatusEvent(event)) {
     const releaseSource = releaseOnlySourceFor(event);
 
     return {
@@ -1208,7 +1317,7 @@ function formatBlsValue(key: BlsFactKey, value: string) {
   }
 
   if (key === "jolts" && Number.isFinite(numericValue)) {
-    return `${(numericValue / 1000).toFixed(1)}M`;
+    return `${(numericValue / 1000).toFixed(2)}M`;
   }
 
   if (Number.isFinite(numericValue)) {
@@ -1262,6 +1371,33 @@ async function fetchBlsLatestFacts(): Promise<Map<BlsFactKey, BlsFact>> {
   }
 
   return facts;
+}
+
+function appendBlsFactsToOfficialActuals(
+  facts: Map<string, OfficialActualFact[]>,
+  blsFacts: Map<BlsFactKey, BlsFact>,
+) {
+  const blsRules = officialActualRules.filter(
+    (rule): rule is BlsOfficialActualRule => rule.provider === "bls",
+  );
+
+  for (const rule of blsRules) {
+    const fact = blsFacts.get(rule.factKey);
+
+    if (!fact?.actual || !fact.observationDate || !fact.period) {
+      continue;
+    }
+
+    setOfficialFacts(facts, rule, [
+      withRuleTrustTier(rule, {
+        actual: fact.actual,
+        period: fact.period,
+        observationDate: fact.observationDate,
+        source: rule.source,
+        sourceUrl: fact.sourceUrl || rule.sourceUrl,
+      }),
+    ]);
+  }
 }
 
 function findOfficialActualRule(title: string) {
@@ -1497,6 +1633,9 @@ function decodeHtml(value: string) {
   return value
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
+    .replace(/&reg;/g, "®")
+    .replace(/&mdash;/g, "-")
+    .replace(/&ndash;/g, "-")
     .replace(/&#x27;/g, "'")
     .replace(/&#39;/g, "'")
     .replace(/&quot;/g, '"')
@@ -1529,6 +1668,26 @@ function fallbackObservationDate(text: string) {
   return parseEnglishDate(releaseDate) ?? new Date().toISOString().slice(0, 10);
 }
 
+function observationDateFromMonthYear(text: string) {
+  const monthYear = text.match(
+    /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})\b/i,
+  );
+
+  if (!monthYear) {
+    return null;
+  }
+
+  const monthToken = monthYear[1].toLowerCase();
+  const normalizedMonthIndex = monthIndexByName[monthToken] ??
+    monthIndexByName[Object.keys(monthIndexByName).find((name) => name.startsWith(monthToken.slice(0, 3))) ?? ""];
+
+  if (normalizedMonthIndex === undefined) {
+    return null;
+  }
+
+  return `${monthYear[2]}-${String(normalizedMonthIndex + 1).padStart(2, "0")}-01`;
+}
+
 function formatIndexActual(value: string, decimals = 1) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed.toFixed(decimals) : value;
@@ -1545,6 +1704,67 @@ export function parseIsmManufacturingReportActuals(html: string) {
     pmi: pmi ? formatIndexActual(pmi) : undefined,
     prices: prices ? formatIndexActual(prices) : undefined,
     observationDate: fallbackObservationDate(text),
+  };
+}
+
+export function parseIsmServicesReportActuals(html: string) {
+  const text = htmlToText(html);
+  const pmi = text.match(/Services PMI\s*®?\s+(?:at\s+)?([+-]?\d+(?:\.\d+)?)%/i)?.[1] ??
+    text.match(/Services PMI\s*®?\s+registered\s+([+-]?\d+(?:\.\d+)?)\s+percent/i)?.[1];
+  const prices = text.match(
+    /Prices Index[^.]{0,260}?\b(?:registered|registering|held steady at|came in at)\s+([+-]?\d+(?:\.\d+)?)\s+percent/i,
+  )?.[1];
+
+  return {
+    pmi: pmi ? formatIndexActual(pmi) : undefined,
+    prices: prices ? formatIndexActual(prices) : undefined,
+    observationDate: fallbackObservationDate(text),
+  };
+}
+
+export function parseCensusNewHomeSalesActual(html: string) {
+  const text = htmlToText(html);
+  const value = text.match(
+    /new single-family houses[^.]{0,240}?seasonally[-\s]adjusted annual rate of\s+([\d,]+)\b/i,
+  )?.[1];
+
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(value.replace(/,/g, ""));
+
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  const actual = parsed >= 1000 ? `${Math.round(parsed / 1000)}K` : `${parsed}K`;
+  const periodText = text.match(/new single-family houses in\s+([A-Za-z]+\s+\d{4})/i)?.[1];
+
+  return {
+    actual,
+    observationDate: observationDateFromMonthYear(periodText ?? text) ?? fallbackObservationDate(text),
+  };
+}
+
+export function parseConferenceBoardConsumerConfidenceActual(html: string) {
+  const text = htmlToText(html);
+  const value = text.match(
+    /Consumer Confidence Index\s*®?[\s\S]{0,420}?\bto\s+([+-]?\d+(?:\.\d+)?)/i,
+  )?.[1] ?? text.match(/Consumer Confidence Index\s*®?[\s\S]{0,260}?\bat\s+([+-]?\d+(?:\.\d+)?)/i)?.[1];
+
+  if (!value) {
+    return null;
+  }
+
+  const valueIndex = text.indexOf(value);
+  const periodText = (valueIndex >= 0 ? text.slice(valueIndex, valueIndex + 240) : text).match(
+    /\bin\s+([A-Za-z]+\s+\d{4})/i,
+  )?.[1];
+
+  return {
+    actual: formatIndexActual(value),
+    observationDate: observationDateFromMonthYear(periodText ?? text) ?? fallbackObservationDate(text),
   };
 }
 
@@ -1570,8 +1790,11 @@ function mapIsmHtmlToOfficialFacts(
   source: string,
   sourceUrl: string,
 ) {
-  const parsed = parseIsmManufacturingReportActuals(html);
-  const actual = /prices/i.test(rule.pattern.source) ? parsed.prices : parsed.pmi;
+  const parsed = rule.report === "services"
+    ? parseIsmServicesReportActuals(html)
+    : parseIsmManufacturingReportActuals(html);
+  const valueKey = rule.valueKey ?? (/prices/i.test(rule.pattern.source) ? "prices" : "pmi");
+  const actual = valueKey === "prices" ? parsed.prices : parsed.pmi;
 
   if (!actual) {
     return [];
@@ -1599,6 +1822,64 @@ function mapInvestingHtmlToOfficialFacts(rule: IsmOfficialActualRule, html: stri
     observationDate: parsed.observationDate,
     source: "Investing.com economic calendar fallback",
     sourceUrl: rule.publicFallbackUrl,
+    trustTier: "public_fallback",
+  })];
+}
+
+function mapCensusHtmlToOfficialFacts(rule: CensusOfficialActualRule, html: string, sourceUrl: string) {
+  const parsed = parseCensusNewHomeSalesActual(html);
+
+  if (!parsed) {
+    return [];
+  }
+
+  return [withRuleTrustTier(rule, {
+    actual: parsed.actual,
+    period: formatOfficialPeriod(parsed.observationDate, rule.cadence),
+    observationDate: parsed.observationDate,
+    source: rule.source,
+    sourceUrl,
+  })];
+}
+
+function mapConferenceBoardHtmlToOfficialFacts(
+  rule: ConferenceBoardOfficialActualRule,
+  html: string,
+  source: string,
+  sourceUrl: string,
+) {
+  const parsed = parseConferenceBoardConsumerConfidenceActual(html);
+
+  if (!parsed) {
+    return [];
+  }
+
+  return [withRuleTrustTier(rule, {
+    actual: parsed.actual,
+    period: formatOfficialPeriod(parsed.observationDate, rule.cadence),
+    observationDate: parsed.observationDate,
+    source,
+    sourceUrl,
+  })];
+}
+
+function mapGenericInvestingHtmlToOfficialFacts(
+  rule: CensusOfficialActualRule | ConferenceBoardOfficialActualRule,
+  html: string,
+  sourceUrl: string,
+) {
+  const parsed = parseInvestingCalendarActual(html);
+
+  if (!parsed) {
+    return [];
+  }
+
+  return [withRuleTrustTier(rule, {
+    actual: parsed.actual,
+    period: formatOfficialPeriod(parsed.observationDate, rule.cadence),
+    observationDate: parsed.observationDate,
+    source: "Investing.com economic calendar fallback",
+    sourceUrl,
     trustTier: "public_fallback",
   })];
 }
@@ -1636,6 +1917,54 @@ async function fetchIsmOfficialFacts(rule: IsmOfficialActualRule) {
 
   try {
     return mapInvestingHtmlToOfficialFacts(rule, await fetchText(rule.publicFallbackUrl));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchCensusOfficialFacts(rule: CensusOfficialActualRule) {
+  for (const url of rule.urls) {
+    try {
+      const facts = mapCensusHtmlToOfficialFacts(rule, await fetchText(url), url);
+
+      if (facts.length) {
+        return facts;
+      }
+    } catch {
+      // Census pages occasionally change markup; the public fallback below is only used if parsing fails.
+    }
+  }
+
+  if (!rule.publicFallbackUrl) {
+    return [];
+  }
+
+  try {
+    return mapGenericInvestingHtmlToOfficialFacts(rule, await fetchText(rule.publicFallbackUrl), rule.publicFallbackUrl);
+  } catch {
+    return [];
+  }
+}
+
+async function fetchConferenceBoardOfficialFacts(rule: ConferenceBoardOfficialActualRule) {
+  for (const url of rule.urls) {
+    try {
+      const facts = mapConferenceBoardHtmlToOfficialFacts(rule, await fetchText(url), rule.source, url);
+
+      if (facts.length) {
+        return facts;
+      }
+    } catch {
+      // Keep the dashboard stable if the public page is temporarily blocked.
+    }
+  }
+
+  if (!rule.publicFallbackUrl) {
+    return [];
+  }
+
+  try {
+    return mapGenericInvestingHtmlToOfficialFacts(rule, await fetchText(rule.publicFallbackUrl), rule.publicFallbackUrl);
   } catch {
     return [];
   }
@@ -1774,6 +2103,12 @@ async function fetchOfficialActualFacts() {
   const ecbRules = officialActualRules.filter(
     (rule): rule is EcbOfficialActualRule => rule.provider === "ecb",
   );
+  const censusRules = officialActualRules.filter(
+    (rule): rule is CensusOfficialActualRule => rule.provider === "census",
+  );
+  const conferenceBoardRules = officialActualRules.filter(
+    (rule): rule is ConferenceBoardOfficialActualRule => rule.provider === "conference_board",
+  );
   const ismRules = officialActualRules.filter(
     (rule): rule is IsmOfficialActualRule => rule.provider === "ism",
   );
@@ -1824,6 +2159,12 @@ async function fetchOfficialActualFacts() {
   const ecbResults = await Promise.allSettled(
     ecbRules.map(async (rule) => [rule, await fetchEcbOfficialFacts(rule)] as const),
   );
+  const censusResults = await Promise.allSettled(
+    censusRules.map(async (rule) => [rule, await fetchCensusOfficialFacts(rule)] as const),
+  );
+  const conferenceBoardResults = await Promise.allSettled(
+    conferenceBoardRules.map(async (rule) => [rule, await fetchConferenceBoardOfficialFacts(rule)] as const),
+  );
   const ismResults = await Promise.allSettled(
     ismRules.map(async (rule) => [rule, await fetchIsmOfficialFacts(rule)] as const),
   );
@@ -1831,7 +2172,14 @@ async function fetchOfficialActualFacts() {
     estatRules.map(async (rule) => [rule, await fetchEstatOfficialFacts(rule)] as const),
   );
 
-  for (const result of [...eurostatResults, ...ecbResults, ...ismResults, ...estatResults]) {
+  for (const result of [
+    ...eurostatResults,
+    ...ecbResults,
+    ...censusResults,
+    ...conferenceBoardResults,
+    ...ismResults,
+    ...estatResults,
+  ]) {
     if (result.status === "fulfilled") {
       setOfficialFacts(facts, result.value[0], result.value[1]);
     }
@@ -2057,6 +2405,7 @@ export async function fetchFreeOfficialCalendarEvents(
     officialActualResult.status === "fulfilled"
       ? officialActualResult.value
       : new Map<string, OfficialActualFact[]>();
+  appendBlsFactsToOfficialActuals(officialActualFacts, blsFacts);
   const fredEvents =
     fredResult.status === "fulfilled" ? mapFredReleaseDatesToCalendarEvents(fredResult.value, blsFacts) : [];
   const fomcEvents = fomcResult.status === "fulfilled" ? fomcResult.value : [];
