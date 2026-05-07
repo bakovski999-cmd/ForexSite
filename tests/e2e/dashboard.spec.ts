@@ -52,14 +52,23 @@ test("demo login opens the dashboard and navigates core views", async ({ page })
   await expect(
     page.getByText("Провери риска по реалните данни от твоя брокер."),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: /Реален маржин от брокера/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Пример: продукт 1:20" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Входни данни \/ Резултат/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Продажба на части/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Осредняване/ })).toBeVisible();
   await expect(page.getByText("Ако цената падне до")).toBeVisible();
   await expect(page.getByText("печалбата ще е")).toBeVisible();
+
+  await page.getByRole("button", { name: /Допълнителни настройки/ }).click();
+  await expect(page.getByRole("button", { name: /Реален маржин от брокера/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Пример: продукт 1:20" })).toBeVisible();
+
+  await page.getByRole("button", { name: /Продажба на части/ }).click();
   await expect(page.getByRole("heading", { name: "Частични продажби" })).toBeVisible();
   await expect(page.getByText("Цена на покупка").first()).toBeVisible();
   await expect(page.getByText("Купени акции").first()).toBeVisible();
   await expect(page.getByText("Продавам акции").first()).toBeVisible();
+
+  await page.getByRole("button", { name: /Осредняване/ }).click();
   await expect(page.getByRole("heading", { name: "Натрупване / осредняване" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Колко акции мога да взема?" })).toHaveCount(0);
 });

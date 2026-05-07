@@ -3,11 +3,13 @@
 import {
   AlertTriangle,
   Calculator,
+  ChevronDown,
   Info,
   Layers3,
   Plus,
   ReceiptText,
   ShieldAlert,
+  SlidersHorizontal,
   Trash2,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -24,6 +26,7 @@ import {
 import { cn } from "@/lib/utils";
 
 type SuccessfulLeverageRiskResult = Extract<LeverageRiskResult, { ok: true }>;
+type CalculatorTab = "risk" | "partial-sales" | "accumulation";
 
 const numberFormatter = new Intl.NumberFormat("bg-BG", {
   maximumFractionDigits: 2,
@@ -76,6 +79,79 @@ function marginModeLabel(mode: MarginMode) {
   }
 
   return "Account leverage";
+}
+
+function CalculatorTabNav({
+  value,
+  onChange,
+}: {
+  value: CalculatorTab;
+  onChange: (value: CalculatorTab) => void;
+}) {
+  const options: Array<{
+    value: CalculatorTab;
+    title: string;
+    text: string;
+    icon: typeof Calculator;
+  }> = [
+    {
+      value: "risk",
+      title: "Входни данни / Резултат",
+      text: "Stop-out, маржин и печалба",
+      icon: Calculator,
+    },
+    {
+      value: "partial-sales",
+      title: "Продажба на части",
+      text: "Отделни покупки и продажби",
+      icon: ReceiptText,
+    },
+    {
+      value: "accumulation",
+      title: "Осредняване",
+      text: "Средна цена и целева печалба",
+      icon: Layers3,
+    },
+  ];
+
+  return (
+    <section className="rounded-[28px] border border-white/10 bg-[#10192d]/88 p-3 shadow-[0_30px_90px_rgba(5,8,20,0.35)]">
+      <div className="grid gap-2 md:grid-cols-3">
+        {options.map((option) => {
+          const Icon = option.icon;
+          const isActive = value === option.value;
+
+          return (
+            <button
+              aria-pressed={isActive}
+              className={cn(
+                "flex items-center gap-3 rounded-[22px] border px-4 py-4 text-left transition",
+                isActive
+                  ? "border-amber-200/35 bg-amber-300/16 text-amber-50 shadow-[0_16px_45px_rgba(245,189,73,0.12)]"
+                  : "border-white/8 bg-white/[0.035] text-slate-300 hover:border-white/14 hover:bg-white/[0.06]",
+              )}
+              key={option.value}
+              onClick={() => onChange(option.value)}
+              type="button"
+            >
+              <span
+                className={cn(
+                  "flex size-11 shrink-0 items-center justify-center rounded-2xl",
+                  isActive ? "bg-amber-300/20 text-amber-100" : "bg-white/[0.05] text-slate-300",
+                )}
+              >
+                <Icon className="size-5" />
+              </span>
+              <span>
+                <span className="block text-sm font-semibold">{option.title}</span>
+                <span className="mt-1 block text-xs leading-5 text-slate-400">{option.text}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 function SideControl({
@@ -791,6 +867,8 @@ function AccumulationPanel() {
 }
 
 export function RiskCalculator() {
+  const [activeCalculator, setActiveCalculator] = useState<CalculatorTab>("risk");
+  const [showAdvancedInputs, setShowAdvancedInputs] = useState(false);
   const [marginMode, setMarginMode] = useState<MarginMode>("real_broker_margin");
   const [side, setSide] = useState<PositionSide>("buy");
   const [accountBalance, setAccountBalance] = useState("50");
@@ -901,139 +979,63 @@ export function RiskCalculator() {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
-        <section className="rounded-[28px] border border-white/10 bg-[#10192d]/88 p-6 shadow-[0_30px_90px_rgba(5,8,20,0.45)]">
-          <div className="flex items-center gap-3">
-            <div className="flex size-11 items-center justify-center rounded-2xl bg-amber-300/18 text-amber-100">
-              <Calculator className="size-5" />
-            </div>
-            <div>
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-amber-200/75">
-                Входни данни
-              </p>
-              <h2 className="mt-1 text-xl font-semibold text-white">Параметри на позицията</h2>
-            </div>
-          </div>
+      <CalculatorTabNav onChange={setActiveCalculator} value={activeCalculator} />
 
-          <div className="mt-6 grid gap-4">
-            <MarginModeControl onChange={setMarginMode} value={marginMode} />
-            <div className="rounded-[22px] border border-amber-200/18 bg-amber-300/[0.08] p-4 text-sm leading-6 text-amber-50">
-              Account leverage не винаги важи за всеки инструмент. При акции, CFD акции, ETF-и,
-              индекси или други продукти с отделна спецификация брокерът може да използва друг
-              маржин. Ако виждаш реален Margin/Used Margin в платформата, използвай{" "}
-              <span className="font-semibold">Реален маржин от брокера</span>.
+      <div className={cn(activeCalculator !== "risk" && "hidden")}>
+        <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+          <section className="rounded-[28px] border border-white/10 bg-[#10192d]/88 p-6 shadow-[0_30px_90px_rgba(5,8,20,0.45)]">
+            <div className="flex items-center gap-3">
+              <div className="flex size-11 items-center justify-center rounded-2xl bg-amber-300/18 text-amber-100">
+                <Calculator className="size-5" />
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-[0.14em] text-amber-200/75">
+                  Входни данни
+                </p>
+                <h2 className="mt-1 text-xl font-semibold text-white">Параметри на позицията</h2>
+              </div>
             </div>
-            <BrokerDataChecklist />
-            <div className="grid gap-2 sm:grid-cols-3">
-              <button
-                className="rounded-2xl border border-emerald-200/20 bg-emerald-300/10 px-4 py-3 text-left text-sm font-semibold text-emerald-50 transition hover:bg-emerald-300/15"
-                onClick={() => applyGenericExample("real")}
-                type="button"
+
+            <div className="mt-6 grid gap-4">
+              <SideControl onChange={setSide} value={side} />
+              <DirectionNote side={side} />
+
+              <div
+                className={cn(
+                  "grid gap-4",
+                  marginMode === "real_broker_margin" ? "lg:grid-cols-3" : "sm:grid-cols-2",
+                )}
               >
-                Пример: реален маржин от платформа
-              </button>
-              <button
-                className="rounded-2xl border border-amber-200/20 bg-amber-300/10 px-4 py-3 text-left text-sm font-semibold text-amber-50 transition hover:bg-amber-300/15"
-                onClick={() => applyGenericExample("fixed-20")}
-                type="button"
-              >
-                Пример: продукт 1:20
-              </button>
-              <button
-                className="rounded-2xl border border-rose-200/20 bg-rose-300/10 px-4 py-3 text-left text-sm font-semibold text-rose-50 transition hover:bg-rose-300/15"
-                onClick={() => applyGenericExample("fixed-5")}
-                type="button"
-              >
-                Пример: продукт 1:5
-              </button>
-            </div>
-            <SideControl onChange={setSide} value={side} />
-            <DirectionNote side={side} />
-            <Field
-              error={errors.accountBalance}
-              hint="Balance от платформата. Това е балансът преди текущата плаваща печалба/загуба."
-              label="Баланс на акаунта"
-              onChange={setAccountBalance}
-              type="number"
-              value={accountBalance}
-            />
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field
-                hint="Например EUR."
-                label="Валута на акаунта"
-                onChange={setAccountCurrency}
-                value={accountCurrency}
-              />
-              <Field
-                hint="Например USD, ако акцията/CFD инструментът се котира в долари."
-                label="Валута на инструмента"
-                onChange={setInstrumentCurrency}
-                value={instrumentCurrency}
-              />
-            </div>
-            <Field
-              error={errors.fxRateInstrumentToAccount}
-              hint={`Колко ${accountCurrencyCode} е 1 ${instrumentCurrencyCode}. Например USD към EUR: 0.85.`}
-              label={`FX rate ${instrumentCurrencyCode} към ${accountCurrencyCode}`}
-              onChange={setFxRateInstrumentToAccount}
-              type="number"
-              value={fxRateInstrumentToAccount}
-            />
-            {marginMode === "account_leverage" ? (
-              <Field
-                error={accountLeverageError}
-                hint="Ползвай го само ако инструментът следва account leverage."
-                label="Account leverage"
-                onChange={setAccountLeverageInput}
-                placeholder="1:1000"
-                value={accountLeverageInput}
-              />
-            ) : null}
-            {marginMode === "fixed_leverage" ? (
-              <Field
-                error={fixedLeverageError}
-                hint="Въведи продуктовия leverage или го сметни от Margin %. Например 5% margin = 1:20."
-                label="Фиксиран ливъридж / продуктови leverage"
-                onChange={setFixedLeverageInput}
-                placeholder="1:20"
-                value={fixedLeverageInput}
-              />
-            ) : null}
-            {marginMode === "real_broker_margin" ? (
-              <>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field
-                    error={errors.equity}
-                    hint="Equity от платформата. Ако го оставиш празно, ще се използва balance + текущ P/L или само balance."
-                    label="Equity"
-                    onChange={setEquity}
-                    type="number"
-                    value={equity}
-                  />
-                  <Field
-                    error={errors.usedMargin}
-                    hint="Въведи реалния Margin / Used Margin, който брокерът показва за позицията."
-                    label="Margin / Used Margin от брокера"
-                    onChange={setUsedMargin}
-                    type="number"
-                    value={usedMargin}
-                  />
-                </div>
                 <Field
-                  error={temporaryLeverageError}
-                  hint="Предпазен сценарий при брокер, който временно намалява leverage-а около market open/close. Ако не знаеш точната стойност, остави 1:5."
-                  label="Временен leverage прозорец"
-                  onChange={setTemporaryLeverageInput}
-                  placeholder="1:5"
-                  value={temporaryLeverageInput}
+                  error={errors.accountBalance}
+                  hint="Balance от платформата."
+                  label="Баланс"
+                  onChange={setAccountBalance}
+                  type="number"
+                  value={accountBalance}
                 />
-                <div className="rounded-[22px] border border-amber-200/18 bg-amber-300/[0.08] p-4 text-sm leading-6 text-amber-50">
-                  Някои брокери временно намаляват leverage-а около open/close. Ако твоят брокер
-                  има такова правило, въведи временния leverage. Ако не знаеш, остави{" "}
-                  <span className="font-semibold">1:5</span> като предпазен сценарий.
-                </div>
-              </>
-            ) : null}
+                {marginMode === "real_broker_margin" ? (
+                  <>
+                    <Field
+                      error={errors.equity}
+                      hint="Ако е празно, смята от balance + текущ P/L."
+                      label="Equity"
+                      onChange={setEquity}
+                      type="number"
+                      value={equity}
+                    />
+                    <Field
+                      error={errors.usedMargin}
+                      hint="Въведи реалния Margin / Used Margin, който брокерът показва за позицията."
+                      label="Margin / Used Margin от брокера"
+                      onChange={setUsedMargin}
+                      type="number"
+                      value={usedMargin}
+                    />
+                  </>
+                ) : null}
+              </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <Field
                 error={errors.entryPrice}
@@ -1049,30 +1051,156 @@ export function RiskCalculator() {
                 type="number"
                 value={shares}
               />
+              <Field
+                error={errors.currentPrice}
+                hint="За по-точен stop-out от текущия пазар."
+                label="Текуща цена"
+                onChange={setCurrentPrice}
+                type="number"
+                value={currentPrice}
+              />
+              <Field
+                error={errors.plannedExitPrice}
+                label="Планирана цена на изход"
+                onChange={setExitPrice}
+                type="number"
+                value={exitPrice}
+              />
             </div>
-            <Field
-              error={errors.currentPrice}
-              hint="По желание: помага да свериш текущата плаваща печалба/загуба с платформата."
-              label="Текуща цена"
-              onChange={setCurrentPrice}
-              type="number"
-              value={currentPrice}
-            />
-            <Field
-              error={errors.plannedExitPrice}
-              label="Планирана цена на изход"
-              onChange={setExitPrice}
-              type="number"
-              value={exitPrice}
-            />
-            <Field
-              error={errors.stopOutLevelPercent}
-              hint="Въведи ръчно, защото може да се различава според акаунт/entity. Пример: 20."
-              label="Stop-out level %"
-              onChange={setStopOutLevelPercent}
-              type="number"
-              value={stopOutLevelPercent}
-            />
+
+            <div className="rounded-[24px] border border-white/8 bg-white/[0.035]">
+              <button
+                aria-expanded={showAdvancedInputs}
+                className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left"
+                onClick={() => setShowAdvancedInputs((current) => !current)}
+                type="button"
+              >
+                <span className="flex items-center gap-3">
+                  <span className="flex size-10 items-center justify-center rounded-2xl bg-amber-300/14 text-amber-100">
+                    <SlidersHorizontal className="size-4" />
+                  </span>
+                  <span>
+                    <span className="block text-sm font-semibold text-white">
+                      Допълнителни настройки
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-slate-400">
+                      Валути, FX курс, leverage режим, stop-out и примерни стойности.
+                    </span>
+                  </span>
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "size-5 shrink-0 text-slate-400 transition",
+                    showAdvancedInputs && "rotate-180",
+                  )}
+                />
+              </button>
+
+              {showAdvancedInputs ? (
+                <div className="grid gap-4 border-t border-white/8 p-4">
+                  <MarginModeControl onChange={setMarginMode} value={marginMode} />
+                  <div className="rounded-[22px] border border-amber-200/18 bg-amber-300/[0.08] p-4 text-sm leading-6 text-amber-50">
+                    Account leverage не винаги важи за всеки инструмент. При акции, CFD акции,
+                    ETF-и, индекси или други продукти с отделна спецификация брокерът може да
+                    използва друг маржин. Ако виждаш реален Margin/Used Margin в платформата,
+                    използвай <span className="font-semibold">Реален маржин от брокера</span>.
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field
+                      hint="Например EUR."
+                      label="Валута на акаунта"
+                      onChange={setAccountCurrency}
+                      value={accountCurrency}
+                    />
+                    <Field
+                      hint="Например USD, ако акцията/CFD инструментът се котира в долари."
+                      label="Валута на инструмента"
+                      onChange={setInstrumentCurrency}
+                      value={instrumentCurrency}
+                    />
+                  </div>
+                  <Field
+                    error={errors.fxRateInstrumentToAccount}
+                    hint={`Колко ${accountCurrencyCode} е 1 ${instrumentCurrencyCode}. Например USD към EUR: 0.85.`}
+                    label={`FX rate ${instrumentCurrencyCode} към ${accountCurrencyCode}`}
+                    onChange={setFxRateInstrumentToAccount}
+                    type="number"
+                    value={fxRateInstrumentToAccount}
+                  />
+
+                  {marginMode === "account_leverage" ? (
+                    <Field
+                      error={accountLeverageError}
+                      hint="Ползвай го само ако инструментът следва account leverage."
+                      label="Account leverage"
+                      onChange={setAccountLeverageInput}
+                      placeholder="1:1000"
+                      value={accountLeverageInput}
+                    />
+                  ) : null}
+                  {marginMode === "fixed_leverage" ? (
+                    <Field
+                      error={fixedLeverageError}
+                      hint="Въведи продуктовия leverage или го сметни от Margin %. Например 5% margin = 1:20."
+                      label="Фиксиран ливъридж / продуктови leverage"
+                      onChange={setFixedLeverageInput}
+                      placeholder="1:20"
+                      value={fixedLeverageInput}
+                    />
+                  ) : null}
+                  {marginMode === "real_broker_margin" ? (
+                    <>
+                      <Field
+                        error={temporaryLeverageError}
+                        hint="Предпазен сценарий при брокер, който временно намалява leverage-а около market open/close. Ако не знаеш точната стойност, остави 1:5."
+                        label="Временен leverage прозорец"
+                        onChange={setTemporaryLeverageInput}
+                        placeholder="1:5"
+                        value={temporaryLeverageInput}
+                      />
+                      <div className="rounded-[22px] border border-amber-200/18 bg-amber-300/[0.08] p-4 text-sm leading-6 text-amber-50">
+                        Някои брокери временно намаляват leverage-а около open/close. Ако твоят
+                        брокер има такова правило, въведи временния leverage. Ако не знаеш, остави{" "}
+                        <span className="font-semibold">1:5</span> като предпазен сценарий.
+                      </div>
+                    </>
+                  ) : null}
+                  <Field
+                    error={errors.stopOutLevelPercent}
+                    hint="Въведи ръчно, защото може да се различава според акаунт/entity. Пример: 20."
+                    label="Stop-out level %"
+                    onChange={setStopOutLevelPercent}
+                    type="number"
+                    value={stopOutLevelPercent}
+                  />
+                  <BrokerDataChecklist />
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <button
+                      className="rounded-2xl border border-emerald-200/20 bg-emerald-300/10 px-4 py-3 text-left text-sm font-semibold text-emerald-50 transition hover:bg-emerald-300/15"
+                      onClick={() => applyGenericExample("real")}
+                      type="button"
+                    >
+                      Пример: реален маржин от платформа
+                    </button>
+                    <button
+                      className="rounded-2xl border border-amber-200/20 bg-amber-300/10 px-4 py-3 text-left text-sm font-semibold text-amber-50 transition hover:bg-amber-300/15"
+                      onClick={() => applyGenericExample("fixed-20")}
+                      type="button"
+                    >
+                      Пример: продукт 1:20
+                    </button>
+                    <button
+                      className="rounded-2xl border border-rose-200/20 bg-rose-300/10 px-4 py-3 text-left text-sm font-semibold text-rose-50 transition hover:bg-rose-300/15"
+                      onClick={() => applyGenericExample("fixed-5")}
+                      type="button"
+                    >
+                      Пример: продукт 1:5
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
         </section>
 
@@ -1258,10 +1386,15 @@ export function RiskCalculator() {
             </div>
           )}
         </section>
+        </div>
       </div>
 
-      <PartialSalesPanel />
-      <AccumulationPanel />
+      <div className={cn(activeCalculator !== "partial-sales" && "hidden")}>
+        <PartialSalesPanel />
+      </div>
+      <div className={cn(activeCalculator !== "accumulation" && "hidden")}>
+        <AccumulationPanel />
+      </div>
     </div>
   );
 }
