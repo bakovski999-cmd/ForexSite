@@ -50,10 +50,10 @@ test("demo login opens the dashboard and navigates core views", async ({ page })
 
   await page.getByRole("link", { name: "Риск калкулатор" }).click();
   await expect(
-    page.getByText("Провери риска по данните от твоя брокер, частичните продажби и средната цена."),
+    page.getByText("Провери риска по реалните данни от твоя брокер."),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: /Real Broker Margin/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Fixed leverage 1:20" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Реален маржин от брокера/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Пример: продукт 1:20" })).toBeVisible();
   await expect(page.getByText("Ако цената падне до")).toBeVisible();
   await expect(page.getByText("печалбата ще е")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Частични продажби" })).toBeVisible();

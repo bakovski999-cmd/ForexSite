@@ -65,11 +65,11 @@ function sideLabel(side: PositionSide) {
 
 function marginModeLabel(mode: MarginMode) {
   if (mode === "real_broker_margin") {
-    return "Real broker margin";
+    return "Реален маржин";
   }
 
   if (mode === "fixed_leverage") {
-    return "Fixed leverage";
+    return "Фиксиран ливъридж";
   }
 
   return "Account leverage";
@@ -118,19 +118,19 @@ function MarginModeControl({
   const options: Array<{ value: MarginMode; title: string; text: string; badge?: string }> = [
     {
       value: "real_broker_margin",
-      title: "Real Broker Margin",
-      text: "Най-точно: използва Margin/Used Margin директно от твоя брокер.",
-      badge: "Препоръчано",
+      title: "Реален маржин от брокера",
+      text: "Най-точно: въведи Margin/Used Margin от платформата. Работи с всеки брокер.",
+      badge: "Най-точен",
     },
     {
       value: "fixed_leverage",
-      title: "Fixed Leverage",
-      text: "За CFD акции, ETF-и, индекси и продукти с фиксиран leverage.",
+      title: "Фиксиран ливъридж / Margin %",
+      text: "Когато инструментът има собствен ливъридж или margin percentage в спецификацията.",
     },
     {
       value: "account_leverage",
       title: "Account Leverage",
-      text: "Само за инструменти, които реално следват account leverage.",
+      text: "Само когато конкретният инструмент реално следва leverage-а на акаунта.",
     },
   ];
 
@@ -350,6 +350,30 @@ function ResultAmount({ value }: { value: number }) {
       {value >= 0 ? "" : "-"}
       {formatCurrency(Math.abs(value))}
     </span>
+  );
+}
+
+function BrokerDataChecklist() {
+  const items = [
+    "Balance и Equity",
+    "Margin / Used Margin за позицията",
+    "Stop-out level %",
+    "Валута на акаунта и валута на инструмента",
+    "FX курс между двете валути",
+    "Цена на вход, брой акции и планиран изход",
+  ];
+
+  return (
+    <div className="rounded-[22px] border border-white/8 bg-white/[0.035] p-4 text-sm leading-6 text-slate-300">
+      <p className="font-semibold text-slate-100">За най-точна сметка вземи тези данни от брокера:</p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {items.map((item) => (
+          <div className="rounded-2xl border border-white/8 bg-slate-950/25 px-3 py-2" key={item}>
+            {item}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -764,7 +788,7 @@ export function RiskCalculator() {
     ? result.input.instrumentCurrency
     : instrumentCurrency.trim().toUpperCase() || "USD";
 
-  function applyBrokerExample(mode: "real" | "fixed-20" | "fixed-5") {
+  function applyGenericExample(mode: "real" | "fixed-20" | "fixed-5") {
     setSide("buy");
     setAccountBalance("50");
     setEquity("48.36");
@@ -807,41 +831,41 @@ export function RiskCalculator() {
           <div className="mt-6 grid gap-4">
             <MarginModeControl onChange={setMarginMode} value={marginMode} />
             <div className="rounded-[22px] border border-amber-200/18 bg-amber-300/[0.08] p-4 text-sm leading-6 text-amber-50">
-              Account leverage не винаги важи за конкретния инструмент. Ако продуктът има
-              собствен margin percentage или fixed leverage, използвай{" "}
-              <span className="font-semibold">Fixed Leverage</span>. Ако платформата вече ти
-              показва реален Margin/Used Margin, най-точно е{" "}
-              <span className="font-semibold">Real Broker Margin</span>.
+              Account leverage не винаги важи за всеки инструмент. При акции, CFD акции, ETF-и,
+              индекси или други продукти с отделна спецификация брокерът може да използва друг
+              маржин. Ако виждаш реален Margin/Used Margin в платформата, използвай{" "}
+              <span className="font-semibold">Реален маржин от брокера</span>.
             </div>
+            <BrokerDataChecklist />
             <div className="grid gap-2 sm:grid-cols-3">
               <button
                 className="rounded-2xl border border-emerald-200/20 bg-emerald-300/10 px-4 py-3 text-left text-sm font-semibold text-emerald-50 transition hover:bg-emerald-300/15"
-                onClick={() => applyBrokerExample("real")}
+                onClick={() => applyGenericExample("real")}
                 type="button"
               >
-                Пример: реален broker margin
+                Пример: реален маржин от платформа
               </button>
               <button
                 className="rounded-2xl border border-amber-200/20 bg-amber-300/10 px-4 py-3 text-left text-sm font-semibold text-amber-50 transition hover:bg-amber-300/15"
-                onClick={() => applyBrokerExample("fixed-20")}
+                onClick={() => applyGenericExample("fixed-20")}
                 type="button"
               >
-                Fixed leverage 1:20
+                Пример: продукт 1:20
               </button>
               <button
                 className="rounded-2xl border border-rose-200/20 bg-rose-300/10 px-4 py-3 text-left text-sm font-semibold text-rose-50 transition hover:bg-rose-300/15"
-                onClick={() => applyBrokerExample("fixed-5")}
+                onClick={() => applyGenericExample("fixed-5")}
                 type="button"
               >
-                Fixed leverage 1:5
+                Пример: продукт 1:5
               </button>
             </div>
             <SideControl onChange={setSide} value={side} />
             <DirectionNote side={side} />
             <Field
               error={errors.accountBalance}
-              hint="Balance от платформата. При примера: 50 EUR."
-              label="Account balance"
+              hint="Balance от платформата. Това е балансът преди текущата плаваща печалба/загуба."
+              label="Баланс на акаунта"
               onChange={setAccountBalance}
               type="number"
               value={accountBalance}
@@ -849,13 +873,13 @@ export function RiskCalculator() {
             <div className="grid gap-4 sm:grid-cols-2">
               <Field
                 hint="Например EUR."
-                label="Account currency"
+                label="Валута на акаунта"
                 onChange={setAccountCurrency}
                 value={accountCurrency}
               />
               <Field
                 hint="Например USD, ако акцията/CFD инструментът се котира в долари."
-                label="Instrument currency"
+                label="Валута на инструмента"
                 onChange={setInstrumentCurrency}
                 value={instrumentCurrency}
               />
@@ -881,8 +905,8 @@ export function RiskCalculator() {
             {marginMode === "fixed_leverage" ? (
               <Field
                 error={fixedLeverageError}
-                hint="Въведи fixed leverage от product specification на брокера. Например 1:20 или 1:5."
-                label="Fixed leverage"
+                hint="Въведи продуктовия leverage или го сметни от Margin %. Например 5% margin = 1:20."
+                label="Фиксиран ливъридж / продуктови leverage"
                 onChange={setFixedLeverageInput}
                 placeholder="1:20"
                 value={fixedLeverageInput}
@@ -892,7 +916,7 @@ export function RiskCalculator() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field
                   error={errors.equity}
-                  hint="Equity от платформата на брокера. При примера: 48.36 EUR."
+                  hint="Equity от платформата. Това е текущата стойност на акаунта след плаващата печалба/загуба."
                   label="Equity"
                   onChange={setEquity}
                   type="number"
@@ -900,8 +924,8 @@ export function RiskCalculator() {
                 />
                 <Field
                   error={errors.usedMargin}
-                  hint="Margin / Used Margin от платформата на брокера. При примера: 4.16 EUR."
-                  label="Real broker margin"
+                  hint="Въведи реалния Margin / Used Margin, който брокерът показва за позицията."
+                  label="Margin / Used Margin от брокера"
                   onChange={setUsedMargin}
                   type="number"
                   value={usedMargin}
@@ -1015,7 +1039,8 @@ export function RiskCalculator() {
                       <span className="font-semibold text-rose-100">
                         {formatCurrency(result.displayAutoClosePrice, instrumentCurrencyCode)}
                       </span>
-                      , позицията ще се затвори автоматично по този broker margin модел.
+                      , позицията може да бъде затворена автоматично според въведените margin и
+                      stop-out данни.
                     </p>
                     <p>
                       Ако излезеш на{" "}
@@ -1107,11 +1132,12 @@ export function RiskCalculator() {
               </div>
 
               <p className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4 text-sm leading-6 text-slate-400">
-                Най-точният режим е Real Broker Margin, защото използва реалния margin, който
-                брокерът вече е изчислил за конкретния инструмент и акаунт.
-                Все пак реалното затваряне може да се различи според правилата на конкретния
-                брокер: spread, slippage, комисиони, overnight fee, market gap, stop-out политика
-                или промяна в fixed leverage около отваряне/затваряне.
+                Най-точният режим е Реален маржин от брокера, защото използва маржина, който
+                платформата вече е изчислила за конкретния инструмент, акаунт и валута.
+                Калкулаторът е универсален: не приема правила на конкретен брокер, а смята по
+                стойностите, които ти въведеш. Реалното затваряне може да се различи при spread,
+                slippage, комисиони, overnight fee, market gap, промяна в margin изискването или
+                различна stop-out политика.
               </p>
             </div>
           ) : (
