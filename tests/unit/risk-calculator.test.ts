@@ -32,6 +32,7 @@ describe("leverage risk calculator", () => {
       plannedExitPrice: 30,
       stopOutLevelPercent: 20,
       fxRateInstrumentToAccount: 0.85,
+      temporaryFixedLeverage: 5,
     });
 
     expect(result.ok).toBe(true);
@@ -46,11 +47,98 @@ describe("leverage risk calculator", () => {
     expect(result.effectiveLeverage).toBeCloseTo(19.98);
     expect(result.marginLevel).toBeCloseTo(1162.5);
     expect(result.stopOutEquity).toBeCloseTo(0.832);
-    expect(result.autoClosePrice).toBeCloseTo(6.6592);
+    expect(result.autoClosePrice).toBeCloseTo(6.6608);
+    expect(result.stopOutRange?.normal.displayAutoClosePrice).toBeCloseTo(6.6608);
+    expect(result.stopOutRange?.temporary.displayAutoClosePrice).toBeCloseTo(7.1496);
+    expect(result.stopOutRange?.temporary.leverage).toBe(5);
     expect(result.grossProfitInstrument).toBeCloseTo(82.2);
     expect(result.grossProfitAccount).toBeCloseTo(69.87);
     expect(result.currentProfitAccount).toBeCloseTo(-1.632);
     expect(result.positionAllowed).toBe(true);
+  });
+
+  test("real broker margin range falls back to floating P/L equity when manual equity is missing", () => {
+    const result = calculateLeverageRisk({
+      marginMode: "real_broker_margin",
+      direction: "buy",
+      accountBalance: 50,
+      usedMargin: 4.16,
+      accountCurrency: "EUR",
+      instrumentCurrency: "USD",
+      entryPrice: 16.3,
+      currentPrice: 15.98,
+      quantity: 6,
+      plannedExitPrice: 30,
+      stopOutLevelPercent: 20,
+      fxRateInstrumentToAccount: 0.85,
+      temporaryFixedLeverage: 10,
+    });
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.equitySource).toBe("floating_pnl");
+    expect(result.resolvedEquity).toBeCloseTo(48.368);
+    expect(result.autoClosePrice).toBeCloseTo(6.6592);
+    expect(result.stopOutRange?.temporary.displayAutoClosePrice).toBeCloseTo(6.8221);
+  });
+
+  test("real broker margin range falls back to account balance when no equity or current price exists", () => {
+    const result = calculateLeverageRisk({
+      marginMode: "real_broker_margin",
+      direction: "buy",
+      accountBalance: 50,
+      usedMargin: 4.16,
+      accountCurrency: "EUR",
+      instrumentCurrency: "USD",
+      entryPrice: 16.3,
+      quantity: 6,
+      plannedExitPrice: 30,
+      stopOutLevelPercent: 20,
+      fxRateInstrumentToAccount: 0.85,
+      temporaryFixedLeverage: 5,
+    });
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.equitySource).toBe("account_balance");
+    expect(result.resolvedEquity).toBe(50);
+    expect(result.stopOutPriceBasis).toBe(16.3);
+  });
+
+  test("real broker margin range flags active stop-out risk when available loss is negative", () => {
+    const result = calculateLeverageRisk({
+      marginMode: "real_broker_margin",
+      direction: "buy",
+      accountBalance: 50,
+      equity: 1,
+      usedMargin: 10,
+      accountCurrency: "EUR",
+      instrumentCurrency: "USD",
+      entryPrice: 16.3,
+      currentPrice: 15.98,
+      quantity: 6,
+      plannedExitPrice: 30,
+      stopOutLevelPercent: 20,
+      fxRateInstrumentToAccount: 0.85,
+      temporaryFixedLeverage: 5,
+    });
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.stopOutRange?.normal.isStopOutRiskActive).toBe(true);
+    expect(result.stopOutRange?.temporary.isStopOutRiskActive).toBe(true);
   });
 
   test("fixed leverage ignores account leverage and calculates required margin from product leverage", () => {
@@ -200,6 +288,7 @@ describe("leverage risk calculator", () => {
       fxRateInstrumentToAccount: 0,
       equity: Number.NaN,
       usedMargin: 0,
+      temporaryFixedLeverage: 0,
     });
 
     expect(result.ok).toBe(false);

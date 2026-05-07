@@ -18,9 +18,32 @@ export type LeverageRiskInput = {
   equity?: number;
   usedMargin?: number;
   currentPrice?: number;
+  temporaryFixedLeverage?: number;
 };
 
 export type LeverageRiskErrors = Partial<Record<keyof LeverageRiskInput, string>>;
+
+export type EquitySource = "manual_equity" | "floating_pnl" | "account_balance";
+
+export type StopOutScenario = {
+  usedMargin: number;
+  stopOutEquity: number;
+  availableLossAccount: number;
+  lossPerUnitAccount: number;
+  lossPerUnitInstrument: number;
+  autoClosePrice: number;
+  displayAutoClosePrice: number;
+  autoCloseBelowZero: boolean;
+  effectiveLeverage: number;
+  isStopOutRiskActive: boolean;
+};
+
+export type StopOutRange = {
+  normal: StopOutScenario;
+  temporary: StopOutScenario & {
+    leverage: number;
+  };
+};
 
 export type PartialSaleLotInput = {
   entryPrice: number;
@@ -63,6 +86,9 @@ export type LeverageRiskResult =
       marginLevel: number;
       effectiveLeverage: number;
       positionAllowed: boolean;
+      resolvedEquity: number;
+      equitySource: EquitySource;
+      stopOutPriceBasis: number;
       stopOutEquity: number;
       maxLossAccount: number;
       maxLossPerUnitAccount: number;
@@ -70,6 +96,7 @@ export type LeverageRiskResult =
       autoClosePrice: number;
       displayAutoClosePrice: number;
       autoCloseBelowZero: boolean;
+      stopOutRange?: StopOutRange;
       grossProfitInstrument: number;
       grossProfitAccount: number;
       returnPercentOnBalance: number;
@@ -243,15 +270,26 @@ export function calculateLeverageRisk(input: LeverageRiskInput): LeverageRiskRes
   }
 
   if (input.marginMode === "real_broker_margin") {
-    const equityError = validatePositive(input.equity ?? Number.NaN, "Equity");
     const usedMarginError = validatePositive(input.usedMargin ?? Number.NaN, "Used Margin");
+    const temporaryFixedLeverageError = validatePositive(
+      input.temporaryFixedLeverage ?? Number.NaN,
+      "Временният leverage",
+    );
 
-    if (equityError) {
-      errors.equity = equityError;
+    if (input.equity !== undefined) {
+      const equityError = validatePositive(input.equity, "Equity");
+
+      if (equityError) {
+        errors.equity = equityError;
+      }
     }
 
     if (usedMarginError) {
       errors.usedMargin = usedMarginError;
+    }
+
+    if (temporaryFixedLeverageError) {
+      errors.temporaryFixedLeverage = temporaryFixedLeverageError;
     }
   }
 
@@ -291,18 +329,6 @@ export function calculateLeverageRisk(input: LeverageRiskInput): LeverageRiskRes
       : input.marginMode === "fixed_leverage"
         ? positionValueAccount / Number(input.fixedLeverage)
         : Number(input.usedMargin);
-  const equityForMargin = input.marginMode === "real_broker_margin" ? Number(input.equity) : input.accountBalance;
-  const freeMargin = equityForMargin - requiredMargin;
-  const marginLevel = (equityForMargin / requiredMargin) * 100;
-  const effectiveLeverage = positionValueAccount / requiredMargin;
-  const stopOutEquity = requiredMargin * (input.stopOutLevelPercent / 100);
-  const maxLossAccount = input.accountBalance - stopOutEquity;
-  const maxLossPerUnitAccount = maxLossAccount / input.quantity;
-  const maxLossPerUnitInstrument = maxLossPerUnitAccount / input.fxRateInstrumentToAccount;
-  const autoClosePrice =
-    input.direction === "buy"
-      ? input.entryPrice - maxLossPerUnitInstrument
-      : input.entryPrice + maxLossPerUnitInstrument;
   const grossProfitInstrument =
     input.direction === "buy"
       ? (input.plannedExitPrice - input.entryPrice) * input.quantity
@@ -318,6 +344,56 @@ export function calculateLeverageRisk(input: LeverageRiskInput): LeverageRiskRes
     currentProfitInstrument === undefined
       ? undefined
       : currentProfitInstrument * input.fxRateInstrumentToAccount;
+  const equitySource: EquitySource =
+    input.equity !== undefined
+      ? "manual_equity"
+      : currentProfitAccount !== undefined
+        ? "floating_pnl"
+        : "account_balance";
+  const resolvedEquity =
+    input.equity ?? (currentProfitAccount !== undefined
+      ? input.accountBalance + currentProfitAccount
+      : input.accountBalance);
+  const freeMargin = resolvedEquity - requiredMargin;
+  const marginLevel = (resolvedEquity / requiredMargin) * 100;
+  const effectiveLeverage = positionValueAccount / requiredMargin;
+  const stopOutPriceBasis = input.currentPrice ?? input.entryPrice;
+
+  const buildStopOutScenario = (usedMargin: number): StopOutScenario => {
+    const stopOutEquity = usedMargin * (input.stopOutLevelPercent / 100);
+    const availableLossAccount = resolvedEquity - stopOutEquity;
+    const lossPerUnitAccount = availableLossAccount / input.quantity;
+    const lossPerUnitInstrument = lossPerUnitAccount / input.fxRateInstrumentToAccount;
+    const autoClosePrice =
+      input.direction === "buy"
+        ? stopOutPriceBasis - lossPerUnitInstrument
+        : stopOutPriceBasis + lossPerUnitInstrument;
+
+    return {
+      usedMargin,
+      stopOutEquity,
+      availableLossAccount,
+      lossPerUnitAccount,
+      lossPerUnitInstrument,
+      autoClosePrice,
+      displayAutoClosePrice: Math.max(0, autoClosePrice),
+      autoCloseBelowZero: input.direction === "buy" && autoClosePrice < 0,
+      effectiveLeverage: positionValueAccount / usedMargin,
+      isStopOutRiskActive: availableLossAccount < 0,
+    };
+  };
+
+  const normalStopOut = buildStopOutScenario(requiredMargin);
+  const stopOutRange =
+    input.marginMode === "real_broker_margin"
+      ? {
+          normal: normalStopOut,
+          temporary: {
+            ...buildStopOutScenario(positionValueAccount / Number(input.temporaryFixedLeverage)),
+            leverage: Number(input.temporaryFixedLeverage),
+          },
+        }
+      : undefined;
 
   return {
     ok: true,
@@ -328,14 +404,18 @@ export function calculateLeverageRisk(input: LeverageRiskInput): LeverageRiskRes
     freeMargin,
     marginLevel,
     effectiveLeverage,
-    positionAllowed: requiredMargin <= equityForMargin + Number.EPSILON,
-    stopOutEquity,
-    maxLossAccount,
-    maxLossPerUnitAccount,
-    maxLossPerUnitInstrument,
-    autoClosePrice,
-    displayAutoClosePrice: Math.max(0, autoClosePrice),
-    autoCloseBelowZero: input.direction === "buy" && autoClosePrice < 0,
+    positionAllowed: requiredMargin <= resolvedEquity + Number.EPSILON,
+    resolvedEquity,
+    equitySource,
+    stopOutPriceBasis,
+    stopOutEquity: normalStopOut.stopOutEquity,
+    maxLossAccount: normalStopOut.availableLossAccount,
+    maxLossPerUnitAccount: normalStopOut.lossPerUnitAccount,
+    maxLossPerUnitInstrument: normalStopOut.lossPerUnitInstrument,
+    autoClosePrice: normalStopOut.autoClosePrice,
+    displayAutoClosePrice: normalStopOut.displayAutoClosePrice,
+    autoCloseBelowZero: normalStopOut.autoCloseBelowZero,
+    stopOutRange,
     grossProfitInstrument,
     grossProfitAccount,
     returnPercentOnBalance: (grossProfitAccount / input.accountBalance) * 100,

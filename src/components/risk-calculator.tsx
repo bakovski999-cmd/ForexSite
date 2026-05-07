@@ -17,10 +17,13 @@ import {
   calculateLeverageRisk,
   calculatePartialSales,
   parseLeverage,
+  type LeverageRiskResult,
   type MarginMode,
   type PositionSide,
 } from "@/lib/risk-calculator";
 import { cn } from "@/lib/utils";
+
+type SuccessfulLeverageRiskResult = Extract<LeverageRiskResult, { ok: true }>;
 
 const numberFormatter = new Intl.NumberFormat("bg-BG", {
   maximumFractionDigits: 2,
@@ -225,6 +228,78 @@ function ResultCard({
       <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-400">{label}</p>
       <p className="mt-3 text-3xl font-semibold text-white">{value}</p>
       <p className="mt-2 text-sm leading-6 text-slate-300">{hint}</p>
+    </div>
+  );
+}
+
+function AutoCloseResultCard({
+  result,
+  currency,
+}: {
+  result: SuccessfulLeverageRiskResult;
+  currency: string;
+}) {
+  const range = result.stopOutRange;
+
+  if (!range) {
+    return (
+      <ResultCard
+        hint={`Буферът е ${formatCurrency(result.maxLossPerUnitInstrument, currency)} на акция.`}
+        label="Авто затваряне"
+        tone="red"
+        value={formatCurrency(result.displayAutoClosePrice, currency)}
+      />
+    );
+  }
+
+  const hasActiveStopOutRisk =
+    range.normal.isStopOutRiskActive || range.temporary.isStopOutRiskActive;
+
+  return (
+    <div className="relative overflow-hidden rounded-[24px] border border-rose-200/15 bg-rose-300/[0.07] p-5 ring-1 ring-rose-200/10">
+      <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-400">
+        Auto затваряне
+      </p>
+      <p className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
+        {formatCurrency(range.normal.displayAutoClosePrice, currency)}{" "}
+        <span className="text-slate-500">—</span>{" "}
+        {formatCurrency(range.temporary.displayAutoClosePrice, currency)}
+      </p>
+      <div className="mt-4 grid gap-2 text-sm leading-6 text-slate-300">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/8 bg-slate-950/25 px-3 py-2">
+          <span>Реален маржин</span>
+          <span className="font-semibold text-rose-100">
+            {formatCurrency(range.normal.displayAutoClosePrice, currency)}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/8 bg-slate-950/25 px-3 py-2">
+          <span>Временен leverage 1:{formatNumber(range.temporary.leverage)}</span>
+          <span className="font-semibold text-rose-100">
+            {formatCurrency(range.temporary.displayAutoClosePrice, currency)}
+          </span>
+        </div>
+      </div>
+      <div className="mt-4 space-y-1 text-sm leading-6 text-slate-300">
+        <p>
+          Буфер при реален маржин:{" "}
+          <span className="font-semibold text-slate-100">
+            {formatCurrency(range.normal.lossPerUnitInstrument, currency)}
+          </span>{" "}
+          на акция.
+        </p>
+        <p>
+          Буфер при временен leverage:{" "}
+          <span className="font-semibold text-slate-100">
+            {formatCurrency(range.temporary.lossPerUnitInstrument, currency)}
+          </span>{" "}
+          на акция.
+        </p>
+      </div>
+      {hasActiveStopOutRisk ? (
+        <p className="mt-3 rounded-2xl border border-rose-200/20 bg-rose-300/10 px-3 py-2 text-sm leading-6 text-rose-100">
+          Акаунтът вече е под изисквания маржин / има риск от stop-out по въведените данни.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -729,11 +804,16 @@ export function RiskCalculator() {
   const [exitPrice, setExitPrice] = useState("30");
   const [accountLeverageInput, setAccountLeverageInput] = useState("1:1000");
   const [fixedLeverageInput, setFixedLeverageInput] = useState("1:20");
+  const [temporaryLeverageInput, setTemporaryLeverageInput] = useState("1:5");
   const [stopOutLevelPercent, setStopOutLevelPercent] = useState("20");
   const [fxRateInstrumentToAccount, setFxRateInstrumentToAccount] = useState("0.85");
 
   const accountLeverage = useMemo(() => parseLeverage(accountLeverageInput), [accountLeverageInput]);
   const fixedLeverage = useMemo(() => parseLeverage(fixedLeverageInput), [fixedLeverageInput]);
+  const temporaryLeverage = useMemo(
+    () => parseLeverage(temporaryLeverageInput),
+    [temporaryLeverageInput],
+  );
   const result = useMemo(
     () =>
       calculateLeverageRisk({
@@ -749,9 +829,10 @@ export function RiskCalculator() {
         fxRateInstrumentToAccount: parseAmount(fxRateInstrumentToAccount),
         accountLeverage: accountLeverage ?? Number.NaN,
         fixedLeverage: fixedLeverage ?? Number.NaN,
-        equity: parseAmount(equity),
+        equity: parseOptionalAmount(equity),
         usedMargin: parseAmount(usedMargin),
         currentPrice: parseOptionalAmount(currentPrice),
+        temporaryFixedLeverage: temporaryLeverage ?? Number.NaN,
       }),
     [
       accountBalance,
@@ -768,6 +849,7 @@ export function RiskCalculator() {
       shares,
       side,
       stopOutLevelPercent,
+      temporaryLeverage,
       usedMargin,
     ],
   );
@@ -781,6 +863,10 @@ export function RiskCalculator() {
     marginMode === "fixed_leverage" && !fixedLeverage
       ? "Въведи fixed leverage като 1:20 или 20."
       : errors.fixedLeverage;
+  const temporaryLeverageError =
+    marginMode === "real_broker_margin" && !temporaryLeverage
+      ? "Въведи временен leverage като 1:5 или 5."
+      : errors.temporaryFixedLeverage;
   const accountCurrencyCode = result.ok
     ? result.input.accountCurrency
     : accountCurrency.trim().toUpperCase() || "EUR";
@@ -799,6 +885,7 @@ export function RiskCalculator() {
     setCurrentPrice("15.98");
     setShares("6");
     setExitPrice("30");
+    setTemporaryLeverageInput("1:5");
     setStopOutLevelPercent("20");
     setFxRateInstrumentToAccount("0.85");
 
@@ -913,24 +1000,39 @@ export function RiskCalculator() {
               />
             ) : null}
             {marginMode === "real_broker_margin" ? (
-              <div className="grid gap-4 sm:grid-cols-2">
+              <>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field
+                    error={errors.equity}
+                    hint="Equity от платформата. Ако го оставиш празно, ще се използва balance + текущ P/L или само balance."
+                    label="Equity"
+                    onChange={setEquity}
+                    type="number"
+                    value={equity}
+                  />
+                  <Field
+                    error={errors.usedMargin}
+                    hint="Въведи реалния Margin / Used Margin, който брокерът показва за позицията."
+                    label="Margin / Used Margin от брокера"
+                    onChange={setUsedMargin}
+                    type="number"
+                    value={usedMargin}
+                  />
+                </div>
                 <Field
-                  error={errors.equity}
-                  hint="Equity от платформата. Това е текущата стойност на акаунта след плаващата печалба/загуба."
-                  label="Equity"
-                  onChange={setEquity}
-                  type="number"
-                  value={equity}
+                  error={temporaryLeverageError}
+                  hint="Предпазен сценарий при брокер, който временно намалява leverage-а около market open/close. Ако не знаеш точната стойност, остави 1:5."
+                  label="Временен leverage прозорец"
+                  onChange={setTemporaryLeverageInput}
+                  placeholder="1:5"
+                  value={temporaryLeverageInput}
                 />
-                <Field
-                  error={errors.usedMargin}
-                  hint="Въведи реалния Margin / Used Margin, който брокерът показва за позицията."
-                  label="Margin / Used Margin от брокера"
-                  onChange={setUsedMargin}
-                  type="number"
-                  value={usedMargin}
-                />
-              </div>
+                <div className="rounded-[22px] border border-amber-200/18 bg-amber-300/[0.08] p-4 text-sm leading-6 text-amber-50">
+                  Някои брокери временно намаляват leverage-а около open/close. Ако твоят брокер
+                  има такова правило, въведи временния leverage. Ако не знаеш, остави{" "}
+                  <span className="font-semibold">1:5</span> като предпазен сценарий.
+                </div>
+              </>
             ) : null}
             <div className="grid gap-4 sm:grid-cols-2">
               <Field
@@ -991,12 +1093,7 @@ export function RiskCalculator() {
           {result.ok ? (
             <div className="mt-6 space-y-5">
               <div className="grid gap-4 lg:grid-cols-3">
-                <ResultCard
-                  hint={`Буферът е ${formatCurrency(result.maxLossPerUnitInstrument, instrumentCurrencyCode)} на акция.`}
-                  label="Авто затваряне"
-                  tone="red"
-                  value={formatCurrency(result.displayAutoClosePrice, instrumentCurrencyCode)}
-                />
+                <AutoCloseResultCard result={result} currency={instrumentCurrencyCode} />
                 <ResultCard
                   hint={`Ефективен ливъридж около 1:${formatNumber(result.effectiveLeverage)}.`}
                   label="Нужен маржин"
@@ -1037,11 +1134,25 @@ export function RiskCalculator() {
                     <p>
                       Ако цената {side === "buy" ? "падне" : "се качи"} до{" "}
                       <span className="font-semibold text-rose-100">
-                        {formatCurrency(result.displayAutoClosePrice, instrumentCurrencyCode)}
+                        {result.stopOutRange
+                          ? `${formatCurrency(
+                              result.stopOutRange.normal.displayAutoClosePrice,
+                              instrumentCurrencyCode,
+                            )} — ${formatCurrency(
+                              result.stopOutRange.temporary.displayAutoClosePrice,
+                              instrumentCurrencyCode,
+                            )}`
+                          : formatCurrency(result.displayAutoClosePrice, instrumentCurrencyCode)}
                       </span>
                       , позицията може да бъде затворена автоматично според въведените margin и
                       stop-out данни.
                     </p>
+                    {result.stopOutRange ? (
+                      <p>
+                        Диапазонът показва къде може да бъде stop-out цената при реалния маржин от
+                        платформата и при временен намален leverage около open/close на пазара.
+                      </p>
+                    ) : null}
                     <p>
                       Ако излезеш на{" "}
                       <span className="font-semibold text-emerald-100">
