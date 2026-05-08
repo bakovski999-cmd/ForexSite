@@ -67,6 +67,81 @@ type ApiPortfolioResponse = {
   positions?: SavedPortfolioPosition[];
 };
 
+type HelpTopic =
+  | "equity"
+  | "freeMargin"
+  | "exposure"
+  | "riskMarginLevel"
+  | "unrealizedPnl"
+  | "stopOutBuffer"
+  | "margin"
+  | "autoClose"
+  | "risk";
+
+type HelpContent = {
+  title: string;
+  what: string;
+  read: string;
+  example: string;
+};
+
+const HELP_CONTENT: Record<HelpTopic, HelpContent> = {
+  equity: {
+    title: "Equity",
+    what: "Текущата стойност на акаунта след плаващата печалба или загуба и add funds simulation.",
+    read: "Това е базата, срещу която се смята margin натоварването. Ако equity пада, акаунтът става по-натоварен.",
+    example: "При €2,000 equity брокерът гледа margin level спрямо тези €2,000, не само спрямо първоначалния депозит.",
+  },
+  freeMargin: {
+    title: "Free Margin",
+    what: "Свободният буфер след използвания margin при risk-window leverage.",
+    read: "Колкото по-високо е числото, толкова повече място има преди акаунтът да стане напрегнат. Това не е чиста печалба.",
+    example: "€1,457 free margin означава, че има свободно място, но то може бързо да намалее при спад в позициите.",
+  },
+  exposure: {
+    title: "Exposure",
+    what: "Общата стойност на всички отворени позиции, превърната във валутата на акаунта.",
+    read: "Това показва колко пазарен риск държиш. Не означава, че цялата сума е заключена като margin.",
+    example: "€2,710 exposure означава, че портфолиото реагира като позиции за €2,710, дори margin-ът да е много по-малък.",
+  },
+  riskMarginLevel: {
+    title: "Risk Margin Level",
+    what: "Брокерският margin level при risk-window leverage: equity разделено на използвания margin.",
+    read: "По-високо е по-спокойно. 500%+ е леко натоварване, около 300-500% е умерено, под 200% вече е опасно.",
+    example: "368% означава, че акаунтът е умерено натоварен. Не е критично, но има смисъл да следиш буфера.",
+  },
+  unrealizedPnl: {
+    title: "Unrealized P/L",
+    what: "Текущата плаваща печалба или загуба от позициите.",
+    read: "Положително число вдига equity, отрицателно го намалява. Докато позициите са отворени, сумата още не е реализирана.",
+    example: "-€120 Unrealized P/L означава, че equity вече е с €120 по-ниско, ако затвориш на текущите цени.",
+  },
+  stopOutBuffer: {
+    title: "Stop-out Buffer",
+    what: "Приблизителната загуба, която акаунтът може да понесе преди stop-out зоната.",
+    read: "Това е най-практичният буфер: колко още загуба има място да поеме акаунтът преди принудително затваряне.",
+    example: "€1,891 buffer означава, че при още около €1,891 загуба акаунтът може да стигне stop-out условията.",
+  },
+  margin: {
+    title: "Margin",
+    what: "Колко от акаунта се заключва за позицията.",
+    read: "Горното число е normal leverage. Долното/risk число е при временно намален leverage и е по-важно при stress сценарий.",
+    example: "€131 / €525 означава, че нормално позицията заключва €131, но при risk leverage може да заключи €525.",
+  },
+  autoClose: {
+    title: "Auto-close",
+    what: "Ориентировъчна цена, при която акаунтът може да стигне stop-out, ако рискът се развие срещу позицията.",
+    read: "Горното число е при normal leverage. Долното/risk число е при намален leverage и обикновено е по-консервативното.",
+    example: "$154 / $173 при BUY означава, че risk-window сценарият може да доведе до stop-out по-рано.",
+  },
+  risk: {
+    title: "Risk",
+    what: "Кратка оценка по buffer и margin pressure за конкретната позиция или портфолио.",
+    read: "Safe е спокойно, Moderate е наблюдавай, High risk е натоварено, Critical означава, че буферът е опасно малък.",
+    example: "Safe не значи без риск. Значи, че спрямо текущите настройки позицията не притиска акаунта силно.",
+  },
+};
+
 const numberFormatter = new Intl.NumberFormat("bg-BG", {
   maximumFractionDigits: 2,
 });
@@ -254,6 +329,53 @@ function clampPercent(value: number) {
   return Math.min(100, Math.max(0, value));
 }
 
+function getAccountLoadPercent(result: Extract<PortfolioRiskResult, { ok: true }>) {
+  const equity = result.summary.equity;
+  const riskUsedMargin = result.summary.temporary.usedMargin;
+
+  if (!Number.isFinite(riskUsedMargin) || riskUsedMargin <= 0) {
+    return 0;
+  }
+
+  if (!Number.isFinite(equity) || equity <= 0) {
+    return 100;
+  }
+
+  return (riskUsedMargin / equity) * 100;
+}
+
+function getAccountLoadTone(loadPercent: number) {
+  if (loadPercent >= 100) {
+    return "rose";
+  }
+
+  if (loadPercent >= 50) {
+    return "orange";
+  }
+
+  if (loadPercent >= 20) {
+    return "amber";
+  }
+
+  return "emerald";
+}
+
+function getAccountLoadLabel(loadPercent: number) {
+  if (loadPercent >= 100) {
+    return "критично";
+  }
+
+  if (loadPercent >= 50) {
+    return "тежко натоварване";
+  }
+
+  if (loadPercent >= 20) {
+    return "умерено";
+  }
+
+  return "спокойно";
+}
+
 function Field({
   label,
   value,
@@ -325,20 +447,130 @@ function InfoHint({ text }: { text: string }) {
   );
 }
 
+function HelpTrigger({
+  topic,
+  label,
+  openHelp,
+  onToggleHelp,
+  className,
+}: {
+  topic: HelpTopic;
+  label: string;
+  openHelp: HelpTopic | null;
+  onToggleHelp: (topic: HelpTopic) => void;
+  className?: string;
+}) {
+  const active = openHelp === topic;
+
+  return (
+    <button
+      aria-expanded={active}
+      aria-label={`Обяснение за ${label}`}
+      className={cn(
+        "inline-flex size-4 shrink-0 items-center justify-center rounded-full border text-[10px] font-bold leading-none transition",
+        active
+          ? "border-amber-200/45 bg-amber-200/15 text-amber-100"
+          : "border-white/15 bg-white/[0.03] text-slate-400 hover:border-white/25 hover:text-slate-100",
+        className,
+      )}
+      onClick={() => onToggleHelp(topic)}
+      type="button"
+    >
+      !
+    </button>
+  );
+}
+
+function HelpPanel({ content, className }: { content: HelpContent; className?: string }) {
+  return (
+    <div
+      className={cn(
+        "rounded-md border border-white/10 bg-slate-950/75 p-3 text-xs leading-5 text-slate-300 shadow-xl shadow-black/20",
+        className,
+      )}
+    >
+      <p className="font-semibold text-white">{content.title}</p>
+      <div className="mt-2 space-y-2">
+        <div>
+          <p className="text-[10px] font-medium uppercase text-slate-500">Какво показва</p>
+          <p>{content.what}</p>
+        </div>
+        <div>
+          <p className="text-[10px] font-medium uppercase text-slate-500">Как да го четеш</p>
+          <p>{content.read}</p>
+        </div>
+        <div>
+          <p className="text-[10px] font-medium uppercase text-slate-500">Пример</p>
+          <p>{content.example}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HelpLabel({
+  label,
+  topic,
+  openHelp,
+  onToggleHelp,
+  align = "left",
+}: {
+  label: string;
+  topic: HelpTopic;
+  openHelp: HelpTopic | null;
+  onToggleHelp: (topic: HelpTopic) => void;
+  align?: "left" | "right";
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1",
+        align === "right" && "justify-end",
+      )}
+    >
+      {label}
+      <HelpTrigger
+        label={label}
+        onToggleHelp={onToggleHelp}
+        openHelp={openHelp}
+        topic={topic}
+      />
+    </span>
+  );
+}
+
 function SummaryCell({
   label,
   value,
   hint,
   tone = "slate",
+  helpTopic,
+  openHelp,
+  onToggleHelp,
 }: {
   label: string;
   value: string;
   hint?: string;
   tone?: "green" | "red" | "amber" | "slate";
+  helpTopic?: HelpTopic;
+  openHelp?: HelpTopic | null;
+  onToggleHelp?: (topic: HelpTopic) => void;
 }) {
+  const helpContent = helpTopic && openHelp === helpTopic ? HELP_CONTENT[helpTopic] : null;
+
   return (
     <div className="min-w-0 px-3 py-3">
-      <p className="truncate text-[10px] font-medium uppercase text-slate-500">{label}</p>
+      <div className="flex min-w-0 items-center gap-1">
+        <p className="truncate text-[10px] font-medium uppercase text-slate-500">{label}</p>
+        {helpTopic && openHelp !== undefined && onToggleHelp ? (
+          <HelpTrigger
+            label={label}
+            onToggleHelp={onToggleHelp}
+            openHelp={openHelp}
+            topic={helpTopic}
+          />
+        ) : null}
+      </div>
       <p
         className={cn(
           "mt-1 truncate text-lg font-semibold text-white",
@@ -350,6 +582,7 @@ function SummaryCell({
         {value}
       </p>
       {hint ? <p className="mt-0.5 truncate text-xs text-slate-500">{hint}</p> : null}
+      {helpContent ? <HelpPanel className="mt-3" content={helpContent} /> : null}
     </div>
   );
 }
@@ -515,13 +748,20 @@ function PositionsTable({
   onEdit,
   onDelete,
   deletingId,
+  openHelp,
+  onToggleHelp,
 }: {
   positions: PortfolioPositionAnalysis[];
   accountCurrency: string;
   onEdit: (position: SavedPortfolioPosition) => void;
   onDelete: (position: SavedPortfolioPosition) => void;
   deletingId: string | null;
+  openHelp: HelpTopic | null;
+  onToggleHelp: (topic: HelpTopic) => void;
 }) {
+  const tableHelpTopic =
+    openHelp === "margin" || openHelp === "autoClose" || openHelp === "risk" ? openHelp : null;
+
   return (
     <section className="rounded-lg border border-white/10 bg-[#0b1322]/80">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 px-4 py-3">
@@ -531,10 +771,71 @@ function PositionsTable({
             Ръчни цени, margin и stop-out по всяка позиция.
           </p>
         </div>
-        <span className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-400">
-          {positions.length} позиции
-        </span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex flex-wrap items-center gap-1 lg:hidden">
+            <button
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-white/10 bg-white/[0.03] px-2 text-[11px] font-medium text-slate-300"
+              onClick={() => onToggleHelp("margin")}
+              type="button"
+            >
+              Margin
+              <span
+                className={cn(
+                  "inline-flex size-4 items-center justify-center rounded-full border text-[10px] font-bold leading-none",
+                  openHelp === "margin"
+                    ? "border-amber-200/45 bg-amber-200/15 text-amber-100"
+                    : "border-white/15 bg-white/[0.03] text-slate-400",
+                )}
+              >
+                !
+              </span>
+            </button>
+            <button
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-white/10 bg-white/[0.03] px-2 text-[11px] font-medium text-slate-300"
+              onClick={() => onToggleHelp("autoClose")}
+              type="button"
+            >
+              Auto-close
+              <span
+                className={cn(
+                  "inline-flex size-4 items-center justify-center rounded-full border text-[10px] font-bold leading-none",
+                  openHelp === "autoClose"
+                    ? "border-amber-200/45 bg-amber-200/15 text-amber-100"
+                    : "border-white/15 bg-white/[0.03] text-slate-400",
+                )}
+              >
+                !
+              </span>
+            </button>
+            <button
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-white/10 bg-white/[0.03] px-2 text-[11px] font-medium text-slate-300"
+              onClick={() => onToggleHelp("risk")}
+              type="button"
+            >
+              Risk
+              <span
+                className={cn(
+                  "inline-flex size-4 items-center justify-center rounded-full border text-[10px] font-bold leading-none",
+                  openHelp === "risk"
+                    ? "border-amber-200/45 bg-amber-200/15 text-amber-100"
+                    : "border-white/15 bg-white/[0.03] text-slate-400",
+                )}
+              >
+                !
+              </span>
+            </button>
+          </div>
+          <span className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-400">
+            {positions.length} позиции
+          </span>
+        </div>
       </div>
+
+      {tableHelpTopic ? (
+        <div className="border-b border-white/8 px-4 py-3">
+          <HelpPanel content={HELP_CONTENT[tableHelpTopic]} />
+        </div>
+      ) : null}
 
       {positions.length === 0 ? (
         <div className="px-4 py-8 text-sm leading-6 text-slate-400">
@@ -551,9 +852,32 @@ function PositionsTable({
                   <th className="px-3 py-2 text-right font-medium">Qty</th>
                   <th className="px-3 py-2 text-right font-medium">Entry / Current</th>
                   <th className="px-3 py-2 text-right font-medium">Value</th>
-                  <th className="px-3 py-2 text-right font-medium">Margin</th>
-                  <th className="px-3 py-2 text-right font-medium">Auto-close</th>
-                  <th className="px-3 py-2 font-medium">Risk</th>
+                  <th className="px-3 py-2 text-right font-medium">
+                    <HelpLabel
+                      align="right"
+                      label="Margin"
+                      onToggleHelp={onToggleHelp}
+                      openHelp={openHelp}
+                      topic="margin"
+                    />
+                  </th>
+                  <th className="px-3 py-2 text-right font-medium">
+                    <HelpLabel
+                      align="right"
+                      label="Auto-close"
+                      onToggleHelp={onToggleHelp}
+                      openHelp={openHelp}
+                      topic="autoClose"
+                    />
+                  </th>
+                  <th className="px-3 py-2 font-medium">
+                    <HelpLabel
+                      label="Risk"
+                      onToggleHelp={onToggleHelp}
+                      openHelp={openHelp}
+                      topic="risk"
+                    />
+                  </th>
                   <th className="px-4 py-2 text-right font-medium">Actions</th>
                 </tr>
               </thead>
@@ -742,6 +1066,7 @@ export function PortfolioRiskManager() {
   const [crashPrices, setCrashPrices] = useState<Record<string, string>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [stressOpen, setStressOpen] = useState(false);
+  const [openHelp, setOpenHelp] = useState<HelpTopic | null>(null);
 
   const profile = useMemo(() => formToProfile(profileForm), [profileForm]);
   const portfolio = useMemo(() => calculatePortfolioRisk(profile, positions), [profile, positions]);
@@ -921,13 +1246,16 @@ export function PortfolioRiskManager() {
     setPreviewRequested(true);
   }
 
+  function toggleHelp(topic: HelpTopic) {
+    setOpenHelp((current) => (current === topic ? null : topic));
+  }
+
   const savedPortfolio = portfolio.ok ? portfolio : null;
   const accountCurrency = savedPortfolio?.summary.accountCurrency ?? profile.accountCurrency;
-  const healthMarginLevel = savedPortfolio
-    ? Math.min(savedPortfolio.summary.normal.marginLevel, savedPortfolio.summary.temporary.marginLevel)
-    : Number.POSITIVE_INFINITY;
-  const healthPct = clampPercent(Number.isFinite(healthMarginLevel) ? healthMarginLevel / 8 : 100);
-  const healthTone = savedPortfolio ? riskTone(savedPortfolio.summary.riskStatus) : "emerald";
+  const accountLoadPercent = savedPortfolio ? getAccountLoadPercent(savedPortfolio) : 0;
+  const accountLoadMarkerPct = clampPercent(accountLoadPercent);
+  const accountLoadLabelPct = Math.min(92, Math.max(8, accountLoadMarkerPct));
+  const accountLoadTone = getAccountLoadTone(accountLoadPercent);
 
   return (
     <div className="space-y-4">
@@ -942,17 +1270,50 @@ export function PortfolioRiskManager() {
               Данните са по логнат потребител в Supabase. Цени, FX курс и broker настройки се
               въвеждат ръчно; няма live връзка с брокер.
             </p>
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-950/55">
-              <div
-                className={cn(
-                  "h-full rounded-full",
-                  healthTone === "emerald" && "bg-emerald-300/80",
-                  healthTone === "amber" && "bg-amber-300/85",
-                  healthTone === "orange" && "bg-orange-300/85",
-                  healthTone === "rose" && "bg-rose-300/85",
-                )}
-                style={{ width: `${healthPct}%` }}
-              />
+            <div className="mt-3 space-y-2">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-slate-500">Account load:</span>
+                <span
+                  className={cn(
+                    "font-semibold",
+                    accountLoadTone === "emerald" && "text-emerald-100",
+                    accountLoadTone === "amber" && "text-amber-100",
+                    accountLoadTone === "orange" && "text-orange-100",
+                    accountLoadTone === "rose" && "text-rose-100",
+                  )}
+                >
+                  {formatPercent(accountLoadPercent)}
+                </span>
+                <span className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[11px] text-slate-400">
+                  {getAccountLoadLabel(accountLoadPercent)}
+                </span>
+              </div>
+              <div className="relative pt-6">
+                <span
+                  className="absolute top-0 -translate-x-1/2 rounded-md border border-white/10 bg-slate-950/80 px-2 py-0.5 text-[10px] font-medium text-slate-200"
+                  style={{ left: `${accountLoadLabelPct}%` }}
+                >
+                  Ти си тук
+                </span>
+                <div className="relative h-2 overflow-hidden rounded-full bg-slate-950/55">
+                  <div className="flex h-full">
+                    <span className="h-full basis-[20%] bg-emerald-300/80" />
+                    <span className="h-full basis-[30%] bg-amber-300/85" />
+                    <span className="h-full flex-1 bg-orange-300/85" />
+                  </div>
+                  <span className="absolute right-0 top-0 h-full w-1 bg-rose-300/90" />
+                  <span
+                    className="absolute top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.55)]"
+                    style={{ left: `${accountLoadMarkerPct}%` }}
+                  />
+                </div>
+                <div className="relative mt-1 h-4 text-[10px] text-slate-500">
+                  <span className="absolute left-0">0%</span>
+                  <span className="absolute left-[20%] -translate-x-1/2">20%</span>
+                  <span className="absolute left-1/2 -translate-x-1/2">50%</span>
+                  <span className="absolute right-0">100%</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -980,28 +1341,43 @@ export function PortfolioRiskManager() {
           <>
             <div className="grid divide-y divide-white/8 sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-6">
               <SummaryCell
+                helpTopic="equity"
                 label="Equity"
+                onToggleHelp={toggleHelp}
+                openHelp={openHelp}
                 value={formatCurrency(savedPortfolio.summary.equity, accountCurrency)}
               />
               <SummaryCell
+                helpTopic="freeMargin"
                 label="Free margin"
+                onToggleHelp={toggleHelp}
+                openHelp={openHelp}
                 tone={savedPortfolio.summary.temporary.freeMargin >= 0 ? "green" : "red"}
                 value={formatCurrency(savedPortfolio.summary.temporary.freeMargin, accountCurrency)}
               />
               <SummaryCell
+                helpTopic="exposure"
                 label="Exposure"
+                onToggleHelp={toggleHelp}
+                openHelp={openHelp}
                 value={formatCurrency(
                   savedPortfolio.summary.totalPositionValueAccount,
                   accountCurrency,
                 )}
               />
               <SummaryCell
+                helpTopic="riskMarginLevel"
                 label="Risk margin level"
+                onToggleHelp={toggleHelp}
+                openHelp={openHelp}
                 tone={savedPortfolio.summary.temporary.marginLevel >= 200 ? "green" : "amber"}
                 value={formatPercent(savedPortfolio.summary.temporary.marginLevel)}
               />
               <SummaryCell
+                helpTopic="unrealizedPnl"
                 label="Unrealized P/L"
+                onToggleHelp={toggleHelp}
+                openHelp={openHelp}
                 tone={savedPortfolio.summary.totalUnrealizedPnLAccount >= 0 ? "green" : "red"}
                 value={formatCurrency(
                   savedPortfolio.summary.totalUnrealizedPnLAccount,
@@ -1009,7 +1385,10 @@ export function PortfolioRiskManager() {
                 )}
               />
               <SummaryCell
+                helpTopic="stopOutBuffer"
                 label="Stop-out buffer"
+                onToggleHelp={toggleHelp}
+                openHelp={openHelp}
                 tone={savedPortfolio.summary.temporary.maxLossBeforeStopOut >= 0 ? "green" : "red"}
                 value={formatCurrency(
                   savedPortfolio.summary.temporary.maxLossBeforeStopOut,
@@ -1061,6 +1440,8 @@ export function PortfolioRiskManager() {
             deletingId={deletingId}
             onDelete={(position) => void deletePosition(position)}
             onEdit={startEdit}
+            onToggleHelp={toggleHelp}
+            openHelp={openHelp}
             positions={savedPortfolio?.positions ?? []}
           />
 
