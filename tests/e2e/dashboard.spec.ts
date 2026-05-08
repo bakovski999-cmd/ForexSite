@@ -55,6 +55,7 @@ test("demo login opens the dashboard and navigates core views", async ({ page })
   await expect(page.getByRole("button", { name: /Входни данни \/ Резултат/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Продажба на части/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Осредняване/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Портфолио риск/ })).toBeVisible();
   await expect(page.getByText("Ако цената падне до")).toBeVisible();
   await expect(page.getByText("печалбата ще е")).toBeVisible();
 
@@ -71,4 +72,10 @@ test("demo login opens the dashboard and navigates core views", async ({ page })
   await page.getByRole("button", { name: /Осредняване/ }).click();
   await expect(page.getByRole("heading", { name: "Натрупване / осредняване" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Колко акции мога да взема?" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Портфолио риск/ }).click();
+  await expect(page.getByRole("heading", { name: "Настройки на акаунта" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Добави позиция" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Обобщение на акаунта" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Стрес тест" })).toBeVisible();
 });

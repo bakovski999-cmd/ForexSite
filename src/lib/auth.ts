@@ -31,6 +31,7 @@ export async function getCurrentSession(): Promise<UserSession | null> {
 
         if (decoded.email) {
           return {
+            id: decoded.uid,
             email: decoded.email,
             mode: "firebase",
           };
@@ -59,6 +60,7 @@ export async function getCurrentSession(): Promise<UserSession | null> {
   }
 
   return {
+    id: session.user.id,
     email: session.user.email,
     mode: "supabase",
   };

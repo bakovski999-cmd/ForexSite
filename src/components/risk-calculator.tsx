@@ -2,6 +2,7 @@
 
 import {
   AlertTriangle,
+  BriefcaseBusiness,
   Calculator,
   ChevronDown,
   Info,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { PortfolioRiskManager } from "@/components/portfolio-risk-manager";
 import {
   calculateAccumulatedPosition,
   calculateLeverageRisk,
@@ -26,7 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 
 type SuccessfulLeverageRiskResult = Extract<LeverageRiskResult, { ok: true }>;
-type CalculatorTab = "risk" | "partial-sales" | "accumulation";
+type CalculatorTab = "risk" | "partial-sales" | "accumulation" | "portfolio";
 
 const numberFormatter = new Intl.NumberFormat("bg-BG", {
   maximumFractionDigits: 2,
@@ -112,11 +114,17 @@ function CalculatorTabNav({
       text: "Средна цена и целева печалба",
       icon: Layers3,
     },
+    {
+      value: "portfolio",
+      title: "Портфолио риск",
+      text: "Акаунт, позиции и стрес тест",
+      icon: BriefcaseBusiness,
+    },
   ];
 
   return (
     <section className="rounded-[28px] border border-white/10 bg-[#10192d]/88 p-3 shadow-[0_30px_90px_rgba(5,8,20,0.35)]">
-      <div className="grid gap-2 md:grid-cols-3">
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         {options.map((option) => {
           const Icon = option.icon;
           const isActive = value === option.value;
@@ -1394,6 +1402,9 @@ export function RiskCalculator() {
       </div>
       <div className={cn(activeCalculator !== "accumulation" && "hidden")}>
         <AccumulationPanel />
+      </div>
+      <div className={cn(activeCalculator !== "portfolio" && "hidden")}>
+        <PortfolioRiskManager />
       </div>
     </div>
   );

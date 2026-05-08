@@ -39,6 +39,7 @@ export type CalendarEventType =
   | "misc";
 
 export interface UserSession {
+  id?: string;
   email: string;
   mode: "demo" | "firebase" | "supabase";
 }
