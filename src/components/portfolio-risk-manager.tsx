@@ -773,6 +773,116 @@ function ToolPanel({
   );
 }
 
+function getAllocationColor(index: number) {
+  const colors = [
+    "bg-cyan-300/85",
+    "bg-emerald-300/85",
+    "bg-amber-300/85",
+    "bg-rose-300/80",
+    "bg-indigo-300/80",
+    "bg-slate-300/70",
+  ];
+
+  return colors[index % colors.length];
+}
+
+function PortfolioAllocationChart({
+  positions,
+  accountCurrency,
+}: {
+  positions: PortfolioPositionAnalysis[];
+  accountCurrency: string;
+}) {
+  const sortedPositions = [...positions].sort((first, second) => {
+    if (second.allocationPercent !== first.allocationPercent) {
+      return second.allocationPercent - first.allocationPercent;
+    }
+
+    return second.positionValueAccount - first.positionValueAccount;
+  });
+
+  return (
+    <section className="rounded-lg border border-white/10 bg-[#0b1322]/80">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-cyan-100/80">
+            <BarChart3 className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-white">Разпределение по позиции</h2>
+            <p className="truncate text-xs text-slate-500">
+              Текуща стойност като процент от portfolio exposure.
+            </p>
+          </div>
+        </div>
+        <span className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-400">
+          {positions.length} позиции
+        </span>
+      </div>
+
+      {sortedPositions.length === 0 ? (
+        <div className="px-4 py-6 text-sm leading-6 text-slate-400">
+          Добави позиции, за да видиш разпределението.
+        </div>
+      ) : (
+        <div className="max-h-80 space-y-3 overflow-y-auto px-4 py-3">
+          {sortedPositions.map((analysis, index) => {
+            const position = analysis.position;
+            const allocation = clampPercent(analysis.allocationPercent);
+            const isLargest = index === 0;
+
+            return (
+              <div
+                className={cn(
+                  "rounded-md border px-3 py-2.5",
+                  isLargest
+                    ? "border-cyan-200/20 bg-cyan-300/[0.045]"
+                    : "border-white/8 bg-white/[0.018]",
+                )}
+                key={position.id}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-white">{position.symbol}</p>
+                      {isLargest ? (
+                        <span className="rounded-md border border-cyan-200/20 bg-cyan-300/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-cyan-100">
+                          най-голяма
+                        </span>
+                      ) : null}
+                    </div>
+                    {position.assetName ? (
+                      <p className="mt-0.5 max-w-full truncate text-xs text-slate-500">
+                        {position.assetName}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="text-left text-xs text-slate-400 sm:text-right">
+                    <p className="font-semibold text-slate-100">
+                      {formatPercent(analysis.allocationPercent)}
+                    </p>
+                    <p>
+                      {formatNumber(position.quantity, 2)} акции ·{" "}
+                      {formatCurrency(analysis.positionValueAccount, accountCurrency)}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-950/65">
+                  <div
+                    aria-label={`${position.symbol} ${formatPercent(analysis.allocationPercent)} от портфолиото`}
+                    className={cn("h-full rounded-full", getAllocationColor(index))}
+                    style={{ width: `${allocation}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function PositionsTable({
   positions,
   accountCurrency,
@@ -1469,8 +1579,13 @@ export function PortfolioRiskManager() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-4">
+      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="min-w-0 space-y-4">
+          <PortfolioAllocationChart
+            accountCurrency={accountCurrency}
+            positions={savedPortfolio?.positions ?? []}
+          />
+
           <PositionsTable
             accountCurrency={accountCurrency}
             deletingId={deletingId}
@@ -1619,7 +1734,7 @@ export function PortfolioRiskManager() {
           </ToolPanel>
         </div>
 
-        <aside className="self-start rounded-lg border border-white/10 bg-[#0b1322]/90 p-4 xl:sticky xl:top-6">
+        <aside className="min-w-0 self-start rounded-lg border border-white/10 bg-[#0b1322]/90 p-4 xl:sticky xl:top-6">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
