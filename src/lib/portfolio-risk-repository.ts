@@ -79,6 +79,9 @@ type SavedPositionLotPayload = Omit<
   id?: string;
 };
 
+const missingLotsTableMessage =
+  "Лотовете още не са активирани в Supabase. Старите позиции се показват нормално. За да използваш лотове, стартирай SQL миграцията от supabase/schema.sql.";
+
 function getServiceClient() {
   if (!isSupabaseConfigured) {
     throw new Error("Supabase не е конфигуриран.");
@@ -201,6 +204,35 @@ function lotToRow(userId: string, savedPositionId: string, lot: SavedPositionLot
   };
 }
 
+function getDatabaseErrorText(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "object" && error !== null) {
+    const record = error as Record<string, unknown>;
+
+    return [record.message, record.details, record.hint, record.code]
+      .filter((item): item is string => typeof item === "string" && item.length > 0)
+      .join(" ");
+  }
+
+  return String(error);
+}
+
+function isMissingLotsTableError(error: unknown) {
+  const text = getDatabaseErrorText(error).toLowerCase();
+
+  return (
+    text.includes("saved_position_lots") &&
+    (text.includes("does not exist") ||
+      text.includes("schema cache") ||
+      text.includes("relation") ||
+      text.includes("42p01") ||
+      text.includes("pgrst205"))
+  );
+}
+
 export async function loadPortfolioRiskData(userId: string): Promise<PortfolioRiskData> {
   const client = getServiceClient();
   const { data: profileRow, error: profileError } = await client
@@ -258,6 +290,15 @@ export async function loadPortfolioRiskData(userId: string): Promise<PortfolioRi
     .order("created_at", { ascending: true });
 
   if (lotError) {
+    if (isMissingLotsTableError(lotError)) {
+      return {
+        profile,
+        positions: positions.map((position) => ({ ...position, lots: [] })),
+        databaseReady: false,
+        message: missingLotsTableMessage,
+      };
+    }
+
     throw lotError;
   }
 

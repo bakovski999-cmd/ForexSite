@@ -200,14 +200,37 @@ async function readJsonBody(request: Request) {
   }
 }
 
+function getErrorText(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "object" && error !== null) {
+    const record = error as Record<string, unknown>;
+    const parts = [record.message, record.details, record.hint, record.code].filter(
+      (item): item is string => typeof item === "string" && item.length > 0,
+    );
+
+    if (parts.length > 0) {
+      return parts.join(" ");
+    }
+  }
+
+  return String(error);
+}
+
 function normalizeDatabaseError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = getErrorText(error);
+  const normalizedMessage = message.toLowerCase();
 
   if (
-    message.includes("account_risk_profiles") ||
-    message.includes("saved_positions") ||
-    message.includes("saved_position_lots") ||
-    message.includes("relation")
+    normalizedMessage.includes("account_risk_profiles") ||
+    normalizedMessage.includes("saved_positions") ||
+    normalizedMessage.includes("saved_position_lots") ||
+    normalizedMessage.includes("relation") ||
+    normalizedMessage.includes("schema cache") ||
+    normalizedMessage.includes("pgrst205") ||
+    normalizedMessage.includes("42p01")
   ) {
     return "Supabase таблиците за Portfolio Risk Manager още не са приложени. Стартирай SQL миграцията от supabase/schema.sql.";
   }

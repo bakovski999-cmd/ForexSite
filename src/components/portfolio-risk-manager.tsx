@@ -74,6 +74,7 @@ type LotForm = {
 type ApiPortfolioResponse = {
   ok: boolean;
   message?: string;
+  databaseReady?: boolean;
   profile?: AccountRiskProfile;
   positions?: SavedPortfolioPosition[];
   lot?: SavedPortfolioLot;
@@ -1566,6 +1567,7 @@ export function PortfolioRiskManager() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [previewRequested, setPreviewRequested] = useState(false);
   const [uniformDrop, setUniformDrop] = useState("20");
@@ -1610,6 +1612,7 @@ export function PortfolioRiskManager() {
     async function loadData() {
       setLoading(true);
       setError(null);
+      setWarning(null);
 
       try {
         const response = await fetch("/api/portfolio-risk", { cache: "no-store" });
@@ -1628,6 +1631,7 @@ export function PortfolioRiskManager() {
         }
 
         setPositions(data.positions ?? []);
+        applyApiNotice(data);
       } catch (loadError) {
         if (isMounted) {
           setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -1698,9 +1702,14 @@ export function PortfolioRiskManager() {
     }));
   }
 
+  function applyApiNotice(data: ApiPortfolioResponse) {
+    setWarning(data.databaseReady === false && data.message ? data.message : null);
+  }
+
   async function saveProfile() {
     setSaving(true);
     setError(null);
+    setWarning(null);
     setMessage(null);
 
     try {
@@ -1717,6 +1726,7 @@ export function PortfolioRiskManager() {
 
       setProfileForm(profileToForm(data.profile));
       setPositions(data.positions ?? positions);
+      applyApiNotice(data);
       setMessage("Настройките на акаунта са запазени.");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : String(saveError));
@@ -1728,6 +1738,7 @@ export function PortfolioRiskManager() {
   async function savePosition() {
     setSaving(true);
     setError(null);
+    setWarning(null);
     setMessage(null);
 
     try {
@@ -1745,6 +1756,7 @@ export function PortfolioRiskManager() {
 
       setProfileForm(profileToForm(data.profile));
       setPositions(data.positions ?? []);
+      applyApiNotice(data);
       setPositionForm(emptyPositionForm());
       setEditingId(null);
       setPreviewRequested(false);
@@ -1764,6 +1776,7 @@ export function PortfolioRiskManager() {
 
     setDeletingId(position.id);
     setError(null);
+    setWarning(null);
     setMessage(null);
 
     try {
@@ -1779,6 +1792,7 @@ export function PortfolioRiskManager() {
 
       setProfileForm(profileToForm(data.profile));
       setPositions(data.positions ?? []);
+      applyApiNotice(data);
       setMessage("Позицията е изтрита.");
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
@@ -1797,6 +1811,7 @@ export function PortfolioRiskManager() {
 
     setSavingLotId(requestId);
     setError(null);
+    setWarning(null);
     setMessage(null);
 
     try {
@@ -1817,6 +1832,7 @@ export function PortfolioRiskManager() {
 
       setProfileForm(profileToForm(data.profile));
       setPositions(data.positions ?? []);
+      applyApiNotice(data);
       setLotForms((current) => {
         const next = { ...current };
 
@@ -1845,6 +1861,7 @@ export function PortfolioRiskManager() {
   async function deleteLot(position: SavedPortfolioPosition, lot: SavedPortfolioLot) {
     setDeletingLotId(lot.id);
     setError(null);
+    setWarning(null);
     setMessage(null);
 
     try {
@@ -1864,6 +1881,7 @@ export function PortfolioRiskManager() {
 
       setProfileForm(profileToForm(data.profile));
       setPositions(data.positions ?? []);
+      applyApiNotice(data);
       setLotForms((current) => {
         const next = { ...current };
         delete next[getLotFormKey(position.id, lot.id)];
@@ -2058,6 +2076,15 @@ export function PortfolioRiskManager() {
           <div className="flex gap-3">
             <AlertTriangle className="mt-0.5 size-5 shrink-0" />
             <p>{error}</p>
+          </div>
+        </div>
+      ) : null}
+
+      {warning ? (
+        <div className="rounded-lg border border-amber-200/20 bg-amber-300/[0.08] p-4 text-sm leading-6 text-amber-100">
+          <div className="flex gap-3">
+            <AlertTriangle className="mt-0.5 size-5 shrink-0" />
+            <p>{warning}</p>
           </div>
         </div>
       ) : null}

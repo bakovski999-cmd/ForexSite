@@ -10,7 +10,7 @@ import {
   updateSavedPositionLot,
   updateSavedPosition,
 } from "@/lib/portfolio-risk-repository";
-import { DELETE, PATCH, POST } from "@/app/api/portfolio-risk/route";
+import { DELETE, GET, PATCH, POST } from "@/app/api/portfolio-risk/route";
 
 vi.mock("@/lib/auth", () => ({
   getCurrentSession: vi.fn(),
@@ -94,6 +94,82 @@ describe("portfolio risk route validation", () => {
     expect(body.message).toContain("не може да са повече");
     expect(createSavedPositionLot).not.toHaveBeenCalled();
     expect(loadPortfolioRiskData).not.toHaveBeenCalled();
+  });
+
+  test("GET returns saved positions with a lots migration warning", async () => {
+    vi.mocked(loadPortfolioRiskData).mockResolvedValue({
+      databaseReady: false,
+      message: "Лотовете още не са активирани в Supabase. Старите позиции се показват нормално.",
+      profile: {
+        id: "profile-1",
+        accountName: "Test",
+        brokerName: "Broker",
+        accountCurrency: "EUR",
+        balance: 2000,
+        addedFundsSimulation: 0,
+        stopOutLevelPercent: 20,
+        marginCallLevelPercent: 50,
+        normalFixedLeverage: 20,
+        temporaryFixedLeverage: 5,
+        fxRateInstrumentToAccount: 0.85,
+      },
+      positions: [
+        {
+          id: "position-1",
+          symbol: "SOFI",
+          direction: "buy",
+          entryPrice: 16.3,
+          currentPrice: null,
+          quantity: 6,
+          instrumentCurrency: "USD",
+          lots: [],
+        },
+      ],
+    });
+
+    const response = await GET();
+    const body = (await response.json()) as {
+      ok: boolean;
+      databaseReady: boolean;
+      message: string;
+      positions: unknown[];
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.databaseReady).toBe(false);
+    expect(body.message).toContain("Лотовете още не са активирани");
+    expect(body.positions).toHaveLength(1);
+  });
+
+  test("lot action database errors render clean messages instead of object strings", async () => {
+    vi.mocked(createSavedPositionLot).mockRejectedValue({
+      code: "PGRST205",
+      message: "Could not find the table 'public.saved_position_lots' in the schema cache",
+      details: null,
+      hint: null,
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/portfolio-risk", {
+        body: JSON.stringify({
+          action: "create-lot",
+          lot: {
+            savedPositionId: "position-1",
+            entryPrice: 16,
+            quantity: 2,
+          },
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      }),
+    );
+    const body = (await response.json()) as { ok: boolean; message: string };
+
+    expect(response.status).toBe(500);
+    expect(body.ok).toBe(false);
+    expect(body.message).not.toBe("[object Object]");
+    expect(body.message).toContain("Supabase таблиците");
   });
 
   test("lot actions return refreshed portfolio data", async () => {
