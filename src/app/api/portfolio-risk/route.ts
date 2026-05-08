@@ -46,7 +46,7 @@ function toOptionalNumber(value: unknown) {
   }
 
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
 
 function toDirection(value: unknown): PortfolioDirection {
@@ -76,7 +76,7 @@ function readPosition(payload: unknown) {
 
   return {
     id: typeof position.id === "string" ? position.id : undefined,
-    symbol: String(position.symbol ?? "").toUpperCase(),
+    symbol: String(position.symbol ?? "").trim().toUpperCase(),
     assetName: position.assetName ? String(position.assetName) : null,
     direction: toDirection(position.direction),
     entryPrice: toNumber(position.entryPrice),
@@ -87,6 +87,42 @@ function readPosition(payload: unknown) {
     temporaryFixedLeverage: toOptionalNumber(position.temporaryFixedLeverage),
     notes: position.notes ? String(position.notes) : null,
   };
+}
+
+function validatePosition(position: ReturnType<typeof readPosition>) {
+  const errors: string[] = [];
+
+  if (!position.symbol.trim()) {
+    errors.push("Попълни символ.");
+  }
+
+  if (!Number.isFinite(position.entryPrice) || position.entryPrice <= 0) {
+    errors.push("Цената на вход трябва да е положително число.");
+  }
+
+  if (position.currentPrice !== null && (!Number.isFinite(position.currentPrice) || position.currentPrice <= 0)) {
+    errors.push("Текущата цена трябва да е положително число или празна.");
+  }
+
+  if (!Number.isFinite(position.quantity) || position.quantity <= 0) {
+    errors.push("Броят акции трябва да е положително число.");
+  }
+
+  if (
+    position.normalFixedLeverage !== null &&
+    (!Number.isFinite(position.normalFixedLeverage) || position.normalFixedLeverage <= 0)
+  ) {
+    errors.push("Нормалният leverage трябва да е положително число или празен.");
+  }
+
+  if (
+    position.temporaryFixedLeverage !== null &&
+    (!Number.isFinite(position.temporaryFixedLeverage) || position.temporaryFixedLeverage <= 0)
+  ) {
+    errors.push("Временният leverage трябва да е положително число или празен.");
+  }
+
+  return errors;
 }
 
 async function readJsonBody(request: Request) {
@@ -153,13 +189,14 @@ export async function POST(request: Request) {
 
   try {
     const body = await readJsonBody(request);
-    const profile = await saveAccountRiskProfile(userId, readProfile(body.profile));
     const position = readPosition(body.position);
+    const positionErrors = validatePosition(position);
 
-    if (!position.symbol || !Number.isFinite(position.entryPrice) || !Number.isFinite(position.quantity)) {
-      return jsonError("Попълни символ, цена на вход и брой акции.");
+    if (positionErrors.length > 0) {
+      return jsonError(positionErrors.join(" "));
     }
 
+    const profile = await saveAccountRiskProfile(userId, readProfile(body.profile));
     const savedPosition = await createSavedPosition(userId, profile.id!, position);
     const data = await loadPortfolioRiskData(userId);
 
@@ -183,13 +220,19 @@ export async function PATCH(request: Request) {
 
   try {
     const body = await readJsonBody(request);
-    const profile = await saveAccountRiskProfile(userId, readProfile(body.profile));
     const position = readPosition(body.position);
 
     if (!position.id) {
       return jsonError("Липсва id на позицията.");
     }
 
+    const positionErrors = validatePosition(position);
+
+    if (positionErrors.length > 0) {
+      return jsonError(positionErrors.join(" "));
+    }
+
+    const profile = await saveAccountRiskProfile(userId, readProfile(body.profile));
     const updatedPosition = await updateSavedPosition(userId, profile.id!, {
       ...position,
       id: position.id,

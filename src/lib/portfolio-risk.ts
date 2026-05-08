@@ -109,6 +109,8 @@ export type StressPositionResult = {
   crashPrice: number;
   pnlInstrument: number;
   pnlAccount: number;
+  incrementalPnlInstrument: number;
+  incrementalPnlAccount: number;
 };
 
 export type PortfolioStressResult =
@@ -500,6 +502,7 @@ function calculateStressScenario(
   const positions = stressed.positions.map((analysis, index) => {
     const original = originalPositions[index];
     const crashPrice = analysis.basePrice;
+    const originalBasePrice = original.currentPrice ?? original.entryPrice;
     const pnlInstrument = calculatePositionPnl(
       original.direction,
       original.entryPrice,
@@ -507,6 +510,13 @@ function calculateStressScenario(
       original.quantity,
     );
     const pnlAccount = pnlInstrument * profile.fxRateInstrumentToAccount;
+    const incrementalPnlInstrument = calculatePositionPnl(
+      original.direction,
+      originalBasePrice,
+      crashPrice,
+      original.quantity,
+    );
+    const incrementalPnlAccount = incrementalPnlInstrument * profile.fxRateInstrumentToAccount;
 
     return {
       positionId: getPositionKey(original),
@@ -514,14 +524,19 @@ function calculateStressScenario(
       crashPrice,
       pnlInstrument,
       pnlAccount,
+      incrementalPnlInstrument,
+      incrementalPnlAccount,
     };
   });
-  const totalPnlAccount = positions.reduce((sum, position) => sum + position.pnlAccount, 0);
+  const totalIncrementalPnlAccount = positions.reduce(
+    (sum, position) => sum + position.incrementalPnlAccount,
+    0,
+  );
 
   return {
     ok: true,
     equityAfter: stressed.summary.equity,
-    totalLossAccount: Math.max(0, -totalPnlAccount),
+    totalLossAccount: Math.max(0, -totalIncrementalPnlAccount),
     normalMarginLevel: stressed.summary.normal.marginLevel,
     temporaryMarginLevel: stressed.summary.temporary.marginLevel,
     survivesNormal: stressed.summary.equity > stressed.summary.normal.stopOutEquity,
