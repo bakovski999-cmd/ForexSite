@@ -481,15 +481,35 @@ function HelpTrigger({
   );
 }
 
-function HelpPanel({ content, className }: { content: HelpContent; className?: string }) {
+function HelpPanel({
+  content,
+  className,
+  onClose,
+}: {
+  content: HelpContent;
+  className?: string;
+  onClose?: () => void;
+}) {
   return (
     <div
       className={cn(
-        "rounded-md border border-white/10 bg-slate-950/75 p-3 text-xs leading-5 text-slate-300 shadow-xl shadow-black/20",
+        "max-h-[min(70vh,26rem)] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-md border border-white/10 bg-slate-950/95 p-3 text-xs leading-5 text-slate-300 shadow-2xl shadow-black/45 backdrop-blur",
         className,
       )}
     >
-      <p className="font-semibold text-white">{content.title}</p>
+      <div className="flex items-start justify-between gap-3">
+        <p className="font-semibold text-white">{content.title}</p>
+        {onClose ? (
+          <button
+            aria-label="Затвори обяснението"
+            className="inline-flex size-5 shrink-0 items-center justify-center rounded border border-white/10 text-slate-500 transition hover:bg-white/[0.05] hover:text-slate-100"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="size-3" />
+          </button>
+        ) : null}
+      </div>
       <div className="mt-2 space-y-2">
         <div>
           <p className="text-[10px] font-medium uppercase text-slate-500">Какво показва</p>
@@ -547,6 +567,7 @@ function SummaryCell({
   helpTopic,
   openHelp,
   onToggleHelp,
+  helpAlign = "left",
 }: {
   label: string;
   value: string;
@@ -555,11 +576,12 @@ function SummaryCell({
   helpTopic?: HelpTopic;
   openHelp?: HelpTopic | null;
   onToggleHelp?: (topic: HelpTopic) => void;
+  helpAlign?: "left" | "right";
 }) {
   const helpContent = helpTopic && openHelp === helpTopic ? HELP_CONTENT[helpTopic] : null;
 
   return (
-    <div className="min-w-0 px-3 py-3">
+    <div className={cn("relative min-w-0 px-3 py-3", helpContent && "z-50")}>
       <div className="flex min-w-0 items-center gap-1">
         <p className="truncate text-[10px] font-medium uppercase text-slate-500">{label}</p>
         {helpTopic && openHelp !== undefined && onToggleHelp ? (
@@ -582,7 +604,16 @@ function SummaryCell({
         {value}
       </p>
       {hint ? <p className="mt-0.5 truncate text-xs text-slate-500">{hint}</p> : null}
-      {helpContent ? <HelpPanel className="mt-3" content={helpContent} /> : null}
+      {helpContent && helpTopic && onToggleHelp ? (
+        <HelpPanel
+          className={cn(
+            "absolute top-full mt-1",
+            helpAlign === "right" ? "right-3" : "left-3",
+          )}
+          content={helpContent}
+          onClose={() => onToggleHelp(helpTopic)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -763,7 +794,7 @@ function PositionsTable({
     openHelp === "margin" || openHelp === "autoClose" || openHelp === "risk" ? openHelp : null;
 
   return (
-    <section className="rounded-lg border border-white/10 bg-[#0b1322]/80">
+    <section className="relative rounded-lg border border-white/10 bg-[#0b1322]/80">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 px-4 py-3">
         <div>
           <h2 className="text-base font-semibold text-white">Позиции</h2>
@@ -832,9 +863,11 @@ function PositionsTable({
       </div>
 
       {tableHelpTopic ? (
-        <div className="border-b border-white/8 px-4 py-3">
-          <HelpPanel content={HELP_CONTENT[tableHelpTopic]} />
-        </div>
+        <HelpPanel
+          className="absolute right-4 top-16 z-50"
+          content={HELP_CONTENT[tableHelpTopic]}
+          onClose={() => onToggleHelp(tableHelpTopic)}
+        />
       ) : null}
 
       {positions.length === 0 ? (
@@ -1368,6 +1401,7 @@ export function PortfolioRiskManager() {
               <SummaryCell
                 helpTopic="riskMarginLevel"
                 label="Risk margin level"
+                helpAlign="right"
                 onToggleHelp={toggleHelp}
                 openHelp={openHelp}
                 tone={savedPortfolio.summary.temporary.marginLevel >= 200 ? "green" : "amber"}
@@ -1376,6 +1410,7 @@ export function PortfolioRiskManager() {
               <SummaryCell
                 helpTopic="unrealizedPnl"
                 label="Unrealized P/L"
+                helpAlign="right"
                 onToggleHelp={toggleHelp}
                 openHelp={openHelp}
                 tone={savedPortfolio.summary.totalUnrealizedPnLAccount >= 0 ? "green" : "red"}
@@ -1387,6 +1422,7 @@ export function PortfolioRiskManager() {
               <SummaryCell
                 helpTopic="stopOutBuffer"
                 label="Stop-out buffer"
+                helpAlign="right"
                 onToggleHelp={toggleHelp}
                 openHelp={openHelp}
                 tone={savedPortfolio.summary.temporary.maxLossBeforeStopOut >= 0 ? "green" : "red"}
