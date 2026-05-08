@@ -14,7 +14,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import {
@@ -28,6 +28,7 @@ import {
   type PortfolioPositionAnalysis,
   type PortfolioRiskResult,
   type PortfolioStressResult,
+  type SavedPortfolioLot,
   type SavedPortfolioPosition,
 } from "@/lib/portfolio-risk";
 import { cn } from "@/lib/utils";
@@ -60,11 +61,22 @@ type PositionForm = {
   notes: string;
 };
 
+type LotForm = {
+  id?: string;
+  entryPrice: string;
+  quantity: string;
+  plannedExitPrice: string;
+  sharesToSell: string;
+  notes: string;
+  displayOrder: string;
+};
+
 type ApiPortfolioResponse = {
   ok: boolean;
   message?: string;
   profile?: AccountRiskProfile;
   positions?: SavedPortfolioPosition[];
+  lot?: SavedPortfolioLot;
 };
 
 type HelpTopic =
@@ -283,6 +295,50 @@ function positionToForm(position: SavedPortfolioPosition): PositionForm {
       position.temporaryFixedLeverage == null ? "" : String(position.temporaryFixedLeverage),
     notes: position.notes ?? "",
   };
+}
+
+function emptyLotForm(displayOrder = 0, position?: SavedPortfolioPosition): LotForm {
+  return {
+    entryPrice: position ? String(position.entryPrice) : "",
+    quantity: "",
+    plannedExitPrice: "",
+    sharesToSell: "",
+    notes: "",
+    displayOrder: String(displayOrder),
+  };
+}
+
+function lotToForm(lot: SavedPortfolioLot): LotForm {
+  return {
+    id: lot.id,
+    entryPrice: String(lot.entryPrice),
+    quantity: String(lot.quantity),
+    plannedExitPrice: lot.plannedExitPrice == null ? "" : String(lot.plannedExitPrice),
+    sharesToSell: lot.sharesToSell == null ? "" : String(lot.sharesToSell),
+    notes: lot.notes ?? "",
+    displayOrder: String(lot.displayOrder ?? 0),
+  };
+}
+
+function lotFormToPayload(form: LotForm, savedPositionId: string) {
+  return {
+    id: form.id,
+    savedPositionId,
+    entryPrice: parseAmount(form.entryPrice),
+    quantity: parseAmount(form.quantity),
+    plannedExitPrice: parseOptionalAmount(form.plannedExitPrice),
+    sharesToSell: parseOptionalAmount(form.sharesToSell),
+    notes: form.notes.trim() || null,
+    displayOrder: parseAmount(form.displayOrder, 0),
+  };
+}
+
+function getNewLotFormKey(positionId: string) {
+  return `new:${positionId}`;
+}
+
+function getLotFormKey(positionId: string, lotId: string) {
+  return `${positionId}:${lotId}`;
 }
 
 function riskTone(status: "safe" | "moderate" | "high" | "critical") {
@@ -865,6 +921,11 @@ function PortfolioAllocationChart({
                       {formatNumber(position.quantity, 2)} акции ·{" "}
                       {formatCurrency(analysis.positionValueAccount, accountCurrency)}
                     </p>
+                    {position.instrumentCurrency !== accountCurrency ? (
+                      <p className="text-slate-500">
+                        {formatCurrency(analysis.positionValueInstrument, position.instrumentCurrency)}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-950/65">
@@ -883,12 +944,244 @@ function PortfolioAllocationChart({
   );
 }
 
+function PositionLotsPanel({
+  analysis,
+  accountCurrency,
+  lotForms,
+  savingLotId,
+  deletingLotId,
+  onLotFormChange,
+  onSaveLot,
+  onDeleteLot,
+}: {
+  analysis: PortfolioPositionAnalysis;
+  accountCurrency: string;
+  lotForms: Record<string, LotForm>;
+  savingLotId: string | null;
+  deletingLotId: string | null;
+  onLotFormChange: (key: string, field: keyof LotForm, value: string) => void;
+  onSaveLot: (position: SavedPortfolioPosition, formKey: string, lot?: SavedPortfolioLot) => void;
+  onDeleteLot: (position: SavedPortfolioPosition, lot: SavedPortfolioLot) => void;
+}) {
+  const position = analysis.position;
+  const instrumentCurrency = position.instrumentCurrency;
+  const lots = position.lots ?? [];
+  const newFormKey = getNewLotFormKey(position.id);
+  const newForm =
+    lotForms[newFormKey] ??
+    emptyLotForm(lots.length, {
+      ...position,
+      entryPrice: analysis.basePrice,
+    });
+  const plannedSummary = analysis.plannedExitSummary;
+
+  return (
+    <div className="space-y-4 rounded-md border border-white/8 bg-slate-950/25 p-3">
+      <div className="grid gap-3 text-xs sm:grid-cols-4">
+        <div>
+          <p className="text-slate-500">Total shares</p>
+          <p className="mt-0.5 font-semibold text-slate-100">
+            {formatNumber(position.quantity, 2)}
+          </p>
+        </div>
+        <div>
+          <p className="text-slate-500">Avg entry</p>
+          <p className="mt-0.5 font-semibold text-slate-100">
+            {formatCurrency(position.entryPrice, instrumentCurrency)}
+          </p>
+        </div>
+        <div>
+          <p className="text-slate-500">Planned sale</p>
+          <p className="mt-0.5 font-semibold text-slate-100">
+            {plannedSummary
+              ? formatCurrency(plannedSummary.totalPlannedSaleValueInstrument, instrumentCurrency)
+              : "няма цел"}
+          </p>
+        </div>
+        <div>
+          <p className="text-slate-500">Planned profit</p>
+          <p
+            className={cn(
+              "mt-0.5 font-semibold",
+              plannedSummary && plannedSummary.totalPlannedProfitAccount < 0
+                ? "text-rose-100"
+                : "text-emerald-100",
+            )}
+          >
+            {plannedSummary
+              ? `${formatCurrency(
+                  plannedSummary.totalPlannedProfitAccount,
+                  accountCurrency,
+                )} · ${formatCurrency(
+                  plannedSummary.totalPlannedProfitInstrument,
+                  instrumentCurrency,
+                )}`
+              : "добави sell price"}
+          </p>
+        </div>
+      </div>
+
+      {lots.length === 0 ? (
+        <p className="rounded-md border border-white/8 bg-white/[0.02] px-3 py-2 text-xs leading-5 text-slate-400">
+          Тази позиция още няма лотове. Докато няма лотове, risk сметката използва основните
+          полета Entry price и Quantity от позицията.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {lots.map((lot, index) => {
+            const formKey = getLotFormKey(position.id, lot.id);
+            const form = lotForms[formKey] ?? lotToForm(lot);
+            const lotAnalysis = analysis.lotAnalyses.find((item) => item.lot.id === lot.id);
+            const plannedProfit = lotAnalysis?.plannedProfitAccount;
+
+            return (
+              <div
+                className="grid gap-2 rounded-md border border-white/8 bg-white/[0.018] p-2 md:grid-cols-[1fr_1fr_1fr_1fr_minmax(8rem,1.2fr)_auto]"
+                key={lot.id}
+              >
+                <Field
+                  label={`Lot ${index + 1} entry`}
+                  onChange={(value) => onLotFormChange(formKey, "entryPrice", value)}
+                  type="number"
+                  value={form.entryPrice}
+                />
+                <Field
+                  label="Qty"
+                  onChange={(value) => onLotFormChange(formKey, "quantity", value)}
+                  type="number"
+                  value={form.quantity}
+                />
+                <Field
+                  label="Sell price"
+                  onChange={(value) => onLotFormChange(formKey, "plannedExitPrice", value)}
+                  type="number"
+                  value={form.plannedExitPrice}
+                />
+                <Field
+                  hint="Празно = целия lot."
+                  label="Sell qty"
+                  onChange={(value) => onLotFormChange(formKey, "sharesToSell", value)}
+                  type="number"
+                  value={form.sharesToSell}
+                />
+                <Field
+                  label="Notes"
+                  onChange={(value) => onLotFormChange(formKey, "notes", value)}
+                  value={form.notes}
+                />
+                <div className="flex items-end justify-between gap-2 md:justify-end">
+                  <div className="pb-1 text-xs">
+                    <p className="text-slate-500">Profit</p>
+                    <p
+                      className={cn(
+                        "font-semibold",
+                        plannedProfit == null
+                          ? "text-slate-400"
+                          : plannedProfit < 0
+                            ? "text-rose-100"
+                            : "text-emerald-100",
+                      )}
+                    >
+                      {plannedProfit == null
+                        ? "няма цел"
+                        : formatCurrency(plannedProfit, accountCurrency)}
+                    </p>
+                  </div>
+                  <IconButton
+                    disabled={savingLotId === lot.id}
+                    label={`Запази lot ${index + 1}`}
+                    onClick={() => onSaveLot(position, formKey, lot)}
+                  >
+                    {savingLotId === lot.id ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Save className="size-4" />
+                    )}
+                  </IconButton>
+                  <IconButton
+                    disabled={deletingLotId === lot.id}
+                    label={`Изтрий lot ${index + 1}`}
+                    onClick={() => onDeleteLot(position, lot)}
+                    tone="red"
+                  >
+                    {deletingLotId === lot.id ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="size-4" />
+                    )}
+                  </IconButton>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="grid gap-2 border-t border-white/8 pt-3 md:grid-cols-[1fr_1fr_1fr_1fr_minmax(8rem,1.2fr)_auto]">
+        <Field
+          label="New lot entry"
+          onChange={(value) => onLotFormChange(newFormKey, "entryPrice", value)}
+          type="number"
+          value={newForm.entryPrice}
+        />
+        <Field
+          label="Qty"
+          onChange={(value) => onLotFormChange(newFormKey, "quantity", value)}
+          type="number"
+          value={newForm.quantity}
+        />
+        <Field
+          label="Sell price"
+          onChange={(value) => onLotFormChange(newFormKey, "plannedExitPrice", value)}
+          type="number"
+          value={newForm.plannedExitPrice}
+        />
+        <Field
+          hint="Празно = целия lot."
+          label="Sell qty"
+          onChange={(value) => onLotFormChange(newFormKey, "sharesToSell", value)}
+          type="number"
+          value={newForm.sharesToSell}
+        />
+        <Field
+          label="Notes"
+          onChange={(value) => onLotFormChange(newFormKey, "notes", value)}
+          value={newForm.notes}
+        />
+        <div className="flex items-end">
+          <button
+            className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-emerald-200/20 bg-emerald-300/10 px-3 text-sm font-semibold text-emerald-50 transition hover:bg-emerald-300/15 disabled:cursor-not-allowed disabled:opacity-50 md:w-auto"
+            disabled={savingLotId === newFormKey}
+            onClick={() => onSaveLot(position, newFormKey)}
+            type="button"
+          >
+            {savingLotId === newFormKey ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Plus className="size-4" />
+            )}
+            Add lot
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PositionsTable({
   positions,
   accountCurrency,
   onEdit,
   onDelete,
   deletingId,
+  expandedPositionId,
+  lotForms,
+  savingLotId,
+  deletingLotId,
+  onTogglePosition,
+  onLotFormChange,
+  onSaveLot,
+  onDeleteLot,
   openHelp,
   onToggleHelp,
 }: {
@@ -897,6 +1190,14 @@ function PositionsTable({
   onEdit: (position: SavedPortfolioPosition) => void;
   onDelete: (position: SavedPortfolioPosition) => void;
   deletingId: string | null;
+  expandedPositionId: string | null;
+  lotForms: Record<string, LotForm>;
+  savingLotId: string | null;
+  deletingLotId: string | null;
+  onTogglePosition: (position: SavedPortfolioPosition) => void;
+  onLotFormChange: (key: string, field: keyof LotForm, value: string) => void;
+  onSaveLot: (position: SavedPortfolioPosition, formKey: string, lot?: SavedPortfolioLot) => void;
+  onDeleteLot: (position: SavedPortfolioPosition, lot: SavedPortfolioLot) => void;
   openHelp: HelpTopic | null;
   onToggleHelp: (topic: HelpTopic) => void;
 }) {
@@ -1028,77 +1329,112 @@ function PositionsTable({
                 {positions.map((analysis) => {
                   const position = analysis.position;
                   const instrumentCurrency = position.instrumentCurrency;
+                  const isExpanded = expandedPositionId === position.id;
 
                   return (
-                    <tr className="align-top text-slate-300" key={position.id}>
-                      <td className="px-4 py-3">
-                        <p className="font-semibold text-white">{position.symbol}</p>
-                        {position.assetName ? (
-                          <p className="mt-0.5 max-w-36 truncate text-xs text-slate-500">
-                            {position.assetName}
+                    <Fragment key={position.id}>
+                      <tr className="align-top text-slate-300">
+                        <td className="px-4 py-3">
+                          <p className="font-semibold text-white">{position.symbol}</p>
+                          {position.assetName ? (
+                            <p className="mt-0.5 max-w-36 truncate text-xs text-slate-500">
+                              {position.assetName}
+                            </p>
+                          ) : null}
+                          {position.lots && position.lots.length > 0 ? (
+                            <p className="mt-1 text-[11px] text-cyan-100/75">
+                              {position.lots.length} lots · avg entry
+                            </p>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-3">
+                          <span className="rounded-md border border-white/10 px-2 py-1 text-xs">
+                            {directionLabel(position.direction)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          {formatNumber(position.quantity, 2)}
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <p>{formatCurrency(position.entryPrice, instrumentCurrency)}</p>
+                          <p className="text-xs text-slate-500">
+                            {position.currentPrice == null
+                              ? "current = entry"
+                              : formatCurrency(analysis.basePrice, instrumentCurrency)}
                           </p>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-3">
-                        <span className="rounded-md border border-white/10 px-2 py-1 text-xs">
-                          {directionLabel(position.direction)}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-right">{formatNumber(position.quantity, 2)}</td>
-                      <td className="px-3 py-3 text-right">
-                        <p>{formatCurrency(position.entryPrice, instrumentCurrency)}</p>
-                        <p className="text-xs text-slate-500">
-                          {position.currentPrice == null
-                            ? "current = entry"
-                            : formatCurrency(analysis.basePrice, instrumentCurrency)}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        <p>{formatCurrency(analysis.positionValueAccount, accountCurrency)}</p>
-                        <p className="text-xs text-slate-500">
-                          {formatPercent(analysis.allocationPercent)}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        <p>{formatCurrency(analysis.normalUsedMargin, accountCurrency)}</p>
-                        <p className="text-xs text-amber-100/80">
-                          {formatCurrency(analysis.temporaryUsedMargin, accountCurrency)}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        <p>{formatCurrency(analysis.normalAutoClose.displayAutoClosePrice, instrumentCurrency)}</p>
-                        <p className="text-xs text-amber-100/80">
-                          {formatCurrency(analysis.temporaryAutoClose.displayAutoClosePrice, instrumentCurrency)}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3">
-                        <StatusBadge status={analysis.riskBadge} />
-                        {analysis.warnings.length > 0 ? (
-                          <p className="mt-1 max-w-36 text-xs leading-5 text-rose-200">
-                            {analysis.warnings.join(" ")}
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <p>{formatCurrency(analysis.positionValueAccount, accountCurrency)}</p>
+                          <p className="text-xs text-slate-500">
+                            {formatCurrency(analysis.positionValueInstrument, instrumentCurrency)} ·{" "}
+                            {formatPercent(analysis.allocationPercent)}
                           </p>
-                        ) : null}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex justify-end gap-2">
-                          <IconButton label={`Редактирай ${position.symbol}`} onClick={() => onEdit(position)}>
-                            <Edit3 className="size-4" />
-                          </IconButton>
-                          <IconButton
-                            disabled={deletingId === position.id}
-                            label={`Изтрий ${position.symbol}`}
-                            onClick={() => onDelete(position)}
-                            tone="red"
-                          >
-                            {deletingId === position.id ? (
-                              <Loader2 className="size-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="size-4" />
-                            )}
-                          </IconButton>
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <p>{formatCurrency(analysis.normalUsedMargin, accountCurrency)}</p>
+                          <p className="text-xs text-amber-100/80">
+                            {formatCurrency(analysis.temporaryUsedMargin, accountCurrency)}
+                          </p>
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <p>{formatCurrency(analysis.normalAutoClose.displayAutoClosePrice, instrumentCurrency)}</p>
+                          <p className="text-xs text-amber-100/80">
+                            {formatCurrency(analysis.temporaryAutoClose.displayAutoClosePrice, instrumentCurrency)}
+                          </p>
+                        </td>
+                        <td className="px-3 py-3">
+                          <StatusBadge status={analysis.riskBadge} />
+                          {analysis.warnings.length > 0 ? (
+                            <p className="mt-1 max-w-36 text-xs leading-5 text-rose-200">
+                              {analysis.warnings.join(" ")}
+                            </p>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-2">
+                            <IconButton
+                              label={`${isExpanded ? "Скрий" : "Покажи"} лотове за ${position.symbol}`}
+                              onClick={() => onTogglePosition(position)}
+                            >
+                              <ChevronDown
+                                className={cn("size-4 transition", isExpanded && "rotate-180")}
+                              />
+                            </IconButton>
+                            <IconButton label={`Редактирай ${position.symbol}`} onClick={() => onEdit(position)}>
+                              <Edit3 className="size-4" />
+                            </IconButton>
+                            <IconButton
+                              disabled={deletingId === position.id}
+                              label={`Изтрий ${position.symbol}`}
+                              onClick={() => onDelete(position)}
+                              tone="red"
+                            >
+                              {deletingId === position.id ? (
+                                <Loader2 className="size-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="size-4" />
+                              )}
+                            </IconButton>
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded ? (
+                        <tr>
+                          <td className="px-4 pb-4" colSpan={9}>
+                            <PositionLotsPanel
+                              accountCurrency={accountCurrency}
+                              analysis={analysis}
+                              deletingLotId={deletingLotId}
+                              lotForms={lotForms}
+                              onDeleteLot={onDeleteLot}
+                              onLotFormChange={onLotFormChange}
+                              onSaveLot={onSaveLot}
+                              savingLotId={savingLotId}
+                            />
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -1109,6 +1445,7 @@ function PositionsTable({
             {positions.map((analysis) => {
               const position = analysis.position;
               const instrumentCurrency = position.instrumentCurrency;
+              const isExpanded = expandedPositionId === position.id;
 
               return (
                 <article
@@ -1130,6 +1467,14 @@ function PositionsTable({
                       </p>
                     </div>
                     <div className="flex gap-2">
+                      <IconButton
+                        label={`${isExpanded ? "Скрий" : "Покажи"} лотове за ${position.symbol}`}
+                        onClick={() => onTogglePosition(position)}
+                      >
+                        <ChevronDown
+                          className={cn("size-4 transition", isExpanded && "rotate-180")}
+                        />
+                      </IconButton>
                       <IconButton label={`Редактирай ${position.symbol}`} onClick={() => onEdit(position)}>
                         <Edit3 className="size-4" />
                       </IconButton>
@@ -1152,6 +1497,10 @@ function PositionsTable({
                       <p className="text-slate-500">Value</p>
                       <p className="mt-0.5 text-slate-200">
                         {formatCurrency(analysis.positionValueAccount, accountCurrency)}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        {formatCurrency(analysis.positionValueInstrument, instrumentCurrency)} ·{" "}
+                        {formatPercent(analysis.allocationPercent)}
                       </p>
                     </div>
                     <div>
@@ -1182,6 +1531,20 @@ function PositionsTable({
                       {analysis.warnings.join(" ")}
                     </p>
                   ) : null}
+                  {isExpanded ? (
+                    <div className="mt-3">
+                      <PositionLotsPanel
+                        accountCurrency={accountCurrency}
+                        analysis={analysis}
+                        deletingLotId={deletingLotId}
+                        lotForms={lotForms}
+                        onDeleteLot={onDeleteLot}
+                        onLotFormChange={onLotFormChange}
+                        onSaveLot={onSaveLot}
+                        savingLotId={savingLotId}
+                      />
+                    </div>
+                  ) : null}
                 </article>
               );
             })}
@@ -1210,6 +1573,10 @@ export function PortfolioRiskManager() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [stressOpen, setStressOpen] = useState(false);
   const [openHelp, setOpenHelp] = useState<HelpTopic | null>(null);
+  const [expandedPositionId, setExpandedPositionId] = useState<string | null>(null);
+  const [lotForms, setLotForms] = useState<Record<string, LotForm>>({});
+  const [savingLotId, setSavingLotId] = useState<string | null>(null);
+  const [deletingLotId, setDeletingLotId] = useState<string | null>(null);
 
   const profile = useMemo(() => formToProfile(profileForm), [profileForm]);
   const portfolio = useMemo(() => calculatePortfolioRisk(profile, positions), [profile, positions]);
@@ -1292,6 +1659,43 @@ export function PortfolioRiskManager() {
       return { ...current, [field]: value };
     });
     setPreviewRequested(false);
+  }
+
+  function togglePositionDetails(position: SavedPortfolioPosition) {
+    setExpandedPositionId((current) => (current === position.id ? null : position.id));
+    setLotForms((current) => {
+      const next = { ...current };
+      const lots = position.lots ?? [];
+
+      lots.forEach((lot) => {
+        const key = getLotFormKey(position.id, lot.id);
+
+        if (!next[key]) {
+          next[key] = lotToForm(lot);
+        }
+      });
+
+      const newKey = getNewLotFormKey(position.id);
+
+      if (!next[newKey]) {
+        next[newKey] = emptyLotForm(lots.length, {
+          ...position,
+          entryPrice: position.currentPrice ?? position.entryPrice,
+        });
+      }
+
+      return next;
+    });
+  }
+
+  function updateLotForm(key: string, field: keyof LotForm, value: string) {
+    setLotForms((current) => ({
+      ...current,
+      [key]: {
+        ...(current[key] ?? emptyLotForm()),
+        [field]: value,
+      },
+    }));
   }
 
   async function saveProfile() {
@@ -1380,6 +1784,97 @@ export function PortfolioRiskManager() {
       setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function saveLot(
+    position: SavedPortfolioPosition,
+    formKey: string,
+    lot?: SavedPortfolioLot,
+  ) {
+    const form = lotForms[formKey] ?? (lot ? lotToForm(lot) : emptyLotForm());
+    const requestId = lot?.id ?? formKey;
+
+    setSavingLotId(requestId);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const payload = lotFormToPayload({ ...form, id: lot?.id }, position.id);
+      const response = await fetch("/api/portfolio-risk", {
+        body: JSON.stringify({
+          action: lot ? "update-lot" : "create-lot",
+          lot: payload,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: lot ? "PATCH" : "POST",
+      });
+      const data = (await response.json()) as ApiPortfolioResponse;
+
+      if (!response.ok || !data.ok || !data.profile) {
+        throw new Error(data.message ?? "Lot failed to save.");
+      }
+
+      setProfileForm(profileToForm(data.profile));
+      setPositions(data.positions ?? []);
+      setLotForms((current) => {
+        const next = { ...current };
+
+        if (data.lot) {
+          next[getLotFormKey(position.id, data.lot.id)] = lotToForm(data.lot);
+        }
+
+        if (!lot) {
+          next[formKey] = emptyLotForm((position.lots ?? []).length + 1, {
+            ...position,
+            entryPrice: position.currentPrice ?? position.entryPrice,
+          });
+        }
+
+        return next;
+      });
+      setExpandedPositionId(position.id);
+      setMessage(lot ? "Лотът е обновен." : "Лотът е добавен.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setSavingLotId(null);
+    }
+  }
+
+  async function deleteLot(position: SavedPortfolioPosition, lot: SavedPortfolioLot) {
+    setDeletingLotId(lot.id);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const params = new URLSearchParams({
+        action: "delete-lot",
+        positionId: position.id,
+        lotId: lot.id,
+      });
+      const response = await fetch(`/api/portfolio-risk?${params.toString()}`, {
+        method: "DELETE",
+      });
+      const data = (await response.json()) as ApiPortfolioResponse;
+
+      if (!response.ok || !data.ok || !data.profile) {
+        throw new Error(data.message ?? "Lot failed to delete.");
+      }
+
+      setProfileForm(profileToForm(data.profile));
+      setPositions(data.positions ?? []);
+      setLotForms((current) => {
+        const next = { ...current };
+        delete next[getLotFormKey(position.id, lot.id)];
+        return next;
+      });
+      setExpandedPositionId(position.id);
+      setMessage("Лотът е изтрит.");
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
+    } finally {
+      setDeletingLotId(null);
     }
   }
 
@@ -1588,12 +2083,20 @@ export function PortfolioRiskManager() {
 
           <PositionsTable
             accountCurrency={accountCurrency}
+            deletingLotId={deletingLotId}
             deletingId={deletingId}
+            expandedPositionId={expandedPositionId}
+            lotForms={lotForms}
+            onDeleteLot={(position, lot) => void deleteLot(position, lot)}
             onDelete={(position) => void deletePosition(position)}
             onEdit={startEdit}
+            onLotFormChange={updateLotForm}
+            onSaveLot={(position, formKey, lot) => void saveLot(position, formKey, lot)}
             onToggleHelp={toggleHelp}
+            onTogglePosition={togglePositionDetails}
             openHelp={openHelp}
             positions={savedPortfolio?.positions ?? []}
+            savingLotId={savingLotId}
           />
 
           <ToolPanel

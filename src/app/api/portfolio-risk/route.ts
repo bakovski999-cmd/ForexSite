@@ -2,19 +2,31 @@ import { NextResponse } from "next/server";
 
 import { getCurrentSession } from "@/lib/auth";
 import {
+  createSavedPositionLot,
   createSavedPosition,
+  deleteSavedPositionLot,
   deleteSavedPosition,
   loadPortfolioRiskData,
   saveAccountRiskProfile,
+  updateSavedPositionLot,
   updateSavedPosition,
 } from "@/lib/portfolio-risk-repository";
-import type { AccountRiskProfile, PortfolioDirection, SavedPortfolioPosition } from "@/lib/portfolio-risk";
+import type {
+  AccountRiskProfile,
+  PortfolioDirection,
+  SavedPortfolioLot,
+  SavedPortfolioPosition,
+} from "@/lib/portfolio-risk";
 
 export const runtime = "nodejs";
 
 type ProfilePayload = Partial<AccountRiskProfile>;
 type PositionPayload = Partial<SavedPortfolioPosition> & {
   plannedExitPrice?: number;
+};
+type LotPayload = Partial<SavedPortfolioLot> & {
+  positionId?: string;
+  savedPositionId?: string;
 };
 
 function jsonError(message: string, status = 400) {
@@ -89,6 +101,26 @@ function readPosition(payload: unknown) {
   };
 }
 
+function readLot(payload: unknown) {
+  const lot = (payload ?? {}) as LotPayload;
+
+  return {
+    id: typeof lot.id === "string" ? lot.id : undefined,
+    savedPositionId:
+      typeof lot.savedPositionId === "string"
+        ? lot.savedPositionId
+        : typeof lot.positionId === "string"
+          ? lot.positionId
+          : "",
+    entryPrice: toNumber(lot.entryPrice),
+    quantity: toNumber(lot.quantity),
+    plannedExitPrice: toOptionalNumber(lot.plannedExitPrice),
+    sharesToSell: toOptionalNumber(lot.sharesToSell),
+    notes: lot.notes ? String(lot.notes) : null,
+    displayOrder: toNumber(lot.displayOrder, 0),
+  };
+}
+
 function validatePosition(position: ReturnType<typeof readPosition>) {
   const errors: string[] = [];
 
@@ -125,6 +157,41 @@ function validatePosition(position: ReturnType<typeof readPosition>) {
   return errors;
 }
 
+function validateLot(lot: ReturnType<typeof readLot>) {
+  const errors: string[] = [];
+
+  if (!lot.savedPositionId) {
+    errors.push("Липсва позиция за лота.");
+  }
+
+  if (!Number.isFinite(lot.entryPrice) || lot.entryPrice <= 0) {
+    errors.push("Цената на покупка трябва да е положително число.");
+  }
+
+  if (!Number.isFinite(lot.quantity) || lot.quantity <= 0) {
+    errors.push("Броят акции в лота трябва да е положително число.");
+  }
+
+  if (
+    lot.plannedExitPrice !== null &&
+    (!Number.isFinite(lot.plannedExitPrice) || lot.plannedExitPrice < 0)
+  ) {
+    errors.push("Планираната цена за продажба трябва да е 0 или повече.");
+  }
+
+  if (lot.sharesToSell !== null) {
+    if (!Number.isFinite(lot.sharesToSell) || lot.sharesToSell <= 0) {
+      errors.push("Акциите за продажба трябва да са положително число или празно.");
+    }
+
+    if (Number.isFinite(lot.quantity) && lot.sharesToSell > lot.quantity) {
+      errors.push("Акциите за продажба не може да са повече от акциите в лота.");
+    }
+  }
+
+  return errors;
+}
+
 async function readJsonBody(request: Request) {
   try {
     return (await request.json()) as Record<string, unknown>;
@@ -139,6 +206,7 @@ function normalizeDatabaseError(error: unknown) {
   if (
     message.includes("account_risk_profiles") ||
     message.includes("saved_positions") ||
+    message.includes("saved_position_lots") ||
     message.includes("relation")
   ) {
     return "Supabase таблиците за Portfolio Risk Manager още не са приложени. Стартирай SQL миграцията от supabase/schema.sql.";
@@ -189,6 +257,27 @@ export async function POST(request: Request) {
 
   try {
     const body = await readJsonBody(request);
+    const action = typeof body.action === "string" ? body.action : "";
+
+    if (action === "create-lot") {
+      const lot = readLot(body.lot);
+      const lotErrors = validateLot(lot);
+
+      if (lotErrors.length > 0) {
+        return jsonError(lotErrors.join(" "));
+      }
+
+      const savedLot = await createSavedPositionLot(userId, lot.savedPositionId, lot);
+      const data = await loadPortfolioRiskData(userId);
+
+      return NextResponse.json({
+        ok: true,
+        lot: savedLot,
+        profile: data.profile,
+        positions: data.positions,
+      });
+    }
+
     const position = readPosition(body.position);
     const positionErrors = validatePosition(position);
 
@@ -220,6 +309,35 @@ export async function PATCH(request: Request) {
 
   try {
     const body = await readJsonBody(request);
+    const action = typeof body.action === "string" ? body.action : "";
+
+    if (action === "update-lot") {
+      const lot = readLot(body.lot);
+
+      if (!lot.id) {
+        return jsonError("Липсва id на лота.");
+      }
+
+      const lotErrors = validateLot(lot);
+
+      if (lotErrors.length > 0) {
+        return jsonError(lotErrors.join(" "));
+      }
+
+      const updatedLot = await updateSavedPositionLot(userId, lot.savedPositionId, {
+        ...lot,
+        id: lot.id,
+      });
+      const data = await loadPortfolioRiskData(userId);
+
+      return NextResponse.json({
+        ok: true,
+        lot: updatedLot,
+        profile: data.profile,
+        positions: data.positions,
+      });
+    }
+
     const position = readPosition(body.position);
 
     if (!position.id) {
@@ -259,6 +377,22 @@ export async function DELETE(request: Request) {
 
   try {
     const url = new URL(request.url);
+    const action = url.searchParams.get("action");
+
+    if (action === "delete-lot") {
+      const positionId = url.searchParams.get("positionId");
+      const lotId = url.searchParams.get("lotId");
+
+      if (!positionId || !lotId) {
+        return jsonError("Липсва позиция или лот.");
+      }
+
+      await deleteSavedPositionLot(userId, positionId, lotId);
+      const data = await loadPortfolioRiskData(userId);
+
+      return NextResponse.json({ ok: true, positions: data.positions, profile: data.profile });
+    }
+
     const positionId = url.searchParams.get("id");
     const profileId = url.searchParams.get("profileId");
 

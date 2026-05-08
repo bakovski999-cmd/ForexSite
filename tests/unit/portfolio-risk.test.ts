@@ -50,6 +50,100 @@ describe("portfolio risk manager calculations", () => {
     expect(result.summary.temporary.usedMargin).toBeCloseTo(16.626);
   });
 
+  test("aggregates lots into quantity, weighted entry, exposure and planned profit", () => {
+    const result = calculatePortfolioRisk(profile, [
+      {
+        ...sofiPosition,
+        currentPrice: 20,
+        quantity: 1,
+        entryPrice: 1,
+        lots: [
+          {
+            id: "lot-1",
+            entryPrice: 15,
+            quantity: 10,
+            plannedExitPrice: 30,
+          },
+          {
+            id: "lot-2",
+            entryPrice: 21,
+            quantity: 5,
+            plannedExitPrice: 25,
+            sharesToSell: 2,
+          },
+        ],
+      },
+    ]);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    const analysis = result.positions[0];
+
+    expect(analysis.position.quantity).toBeCloseTo(15);
+    expect(analysis.position.entryPrice).toBeCloseTo(17);
+    expect(analysis.positionValueInstrument).toBeCloseTo(300);
+    expect(analysis.positionValueAccount).toBeCloseTo(255);
+    expect(analysis.unrealizedPnLInstrument).toBeCloseTo(45);
+    expect(analysis.plannedExitSummary?.plannedSharesToSell).toBeCloseTo(12);
+    expect(analysis.plannedExitSummary?.totalPlannedProfitInstrument).toBeCloseTo(158);
+    expect(analysis.plannedExitSummary?.totalPlannedProfitAccount).toBeCloseTo(134.3);
+  });
+
+  test("planned profit respects SELL direction and blank shares-to-sell means whole lot", () => {
+    const result = calculatePortfolioRisk(profile, [
+      {
+        ...sofiPosition,
+        direction: "sell",
+        lots: [
+          {
+            id: "short-lot",
+            entryPrice: 30,
+            quantity: 4,
+            plannedExitPrice: 20,
+          },
+        ],
+      },
+    ]);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.positions[0].lotAnalyses[0].effectiveSharesToSell).toBe(4);
+    expect(result.positions[0].plannedExitSummary?.totalPlannedProfitInstrument).toBeCloseTo(40);
+    expect(result.positions[0].plannedExitSummary?.totalPlannedProfitAccount).toBeCloseTo(34);
+  });
+
+  test("rejects lots where planned shares to sell exceed lot quantity", () => {
+    const result = calculatePortfolioRisk(profile, [
+      {
+        ...sofiPosition,
+        lots: [
+          {
+            id: "bad-lot",
+            entryPrice: 16,
+            quantity: 2,
+            sharesToSell: 3,
+          },
+        ],
+      },
+    ]);
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) {
+      return;
+    }
+
+    expect(result.errors.join(" ")).toContain("не може да са повече");
+  });
+
   test("uses current price when available and handles BUY and SELL PnL direction", () => {
     const buy = calculatePortfolioRisk(profile, [
       { ...sofiPosition, currentPrice: 15, quantity: 10 },

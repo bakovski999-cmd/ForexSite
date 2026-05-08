@@ -70,6 +70,31 @@ create index if not exists saved_positions_profile_id_idx
 comment on table public.saved_positions is
   'Stores per-user saved Share/Stock CFD positions for portfolio margin and stress calculations.';
 
+create table if not exists public.saved_position_lots (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  saved_position_id uuid not null references public.saved_positions(id) on delete cascade,
+  entry_price numeric not null check (entry_price > 0),
+  quantity numeric not null check (quantity > 0),
+  planned_exit_price numeric check (planned_exit_price >= 0),
+  shares_to_sell numeric check (shares_to_sell > 0),
+  notes text,
+  display_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint saved_position_lots_sell_quantity_check
+    check (shares_to_sell is null or shares_to_sell <= quantity)
+);
+
+create index if not exists saved_position_lots_user_id_idx
+  on public.saved_position_lots (user_id);
+
+create index if not exists saved_position_lots_position_id_idx
+  on public.saved_position_lots (saved_position_id);
+
+comment on table public.saved_position_lots is
+  'Stores per-user purchase lots and planned exits for saved Portfolio Risk positions.';
+
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -96,8 +121,17 @@ before update on public.saved_positions
 for each row
 execute function public.set_updated_at();
 
+drop trigger if exists saved_position_lots_set_updated_at
+  on public.saved_position_lots;
+
+create trigger saved_position_lots_set_updated_at
+before update on public.saved_position_lots
+for each row
+execute function public.set_updated_at();
+
 alter table public.account_risk_profiles enable row level security;
 alter table public.saved_positions enable row level security;
+alter table public.saved_position_lots enable row level security;
 
 drop policy if exists "Users can read own account risk profiles"
   on public.account_risk_profiles;
@@ -154,5 +188,34 @@ drop policy if exists "Users can delete own saved positions"
   on public.saved_positions;
 create policy "Users can delete own saved positions"
 on public.saved_positions
+for delete
+using (auth.uid() = user_id);
+
+drop policy if exists "Users can read own saved position lots"
+  on public.saved_position_lots;
+create policy "Users can read own saved position lots"
+on public.saved_position_lots
+for select
+using (auth.uid() = user_id);
+
+drop policy if exists "Users can insert own saved position lots"
+  on public.saved_position_lots;
+create policy "Users can insert own saved position lots"
+on public.saved_position_lots
+for insert
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can update own saved position lots"
+  on public.saved_position_lots;
+create policy "Users can update own saved position lots"
+on public.saved_position_lots
+for update
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can delete own saved position lots"
+  on public.saved_position_lots;
+create policy "Users can delete own saved position lots"
+on public.saved_position_lots
 for delete
 using (auth.uid() = user_id);

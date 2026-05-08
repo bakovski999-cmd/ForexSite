@@ -5,6 +5,7 @@ import {
   getDefaultAccountRiskProfile,
   type AccountRiskProfile,
   type PortfolioRiskData,
+  type SavedPortfolioLot,
   type SavedPortfolioPosition,
 } from "@/lib/portfolio-risk";
 
@@ -43,6 +44,20 @@ type SavedPositionRow = {
   updated_at: string;
 };
 
+type SavedPositionLotRow = {
+  id: string;
+  user_id: string;
+  saved_position_id: string;
+  entry_price: number;
+  quantity: number;
+  planned_exit_price: number | null;
+  shares_to_sell: number | null;
+  notes: string | null;
+  display_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
 type AccountRiskProfilePayload = Omit<
   AccountRiskProfile,
   "id" | "userId" | "createdAt" | "updatedAt"
@@ -52,7 +67,14 @@ type AccountRiskProfilePayload = Omit<
 
 type SavedPositionPayload = Omit<
   SavedPortfolioPosition,
-  "id" | "userId" | "accountRiskProfileId" | "createdAt" | "updatedAt"
+  "id" | "userId" | "accountRiskProfileId" | "lots" | "createdAt" | "updatedAt"
+> & {
+  id?: string;
+};
+
+type SavedPositionLotPayload = Omit<
+  SavedPortfolioLot,
+  "id" | "userId" | "savedPositionId" | "createdAt" | "updatedAt"
 > & {
   id?: string;
 };
@@ -111,6 +133,22 @@ function mapPosition(row: SavedPositionRow): SavedPortfolioPosition {
   };
 }
 
+function mapLot(row: SavedPositionLotRow): SavedPortfolioLot {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    savedPositionId: row.saved_position_id,
+    entryPrice: Number(row.entry_price),
+    quantity: Number(row.quantity),
+    plannedExitPrice: row.planned_exit_price === null ? null : Number(row.planned_exit_price),
+    sharesToSell: row.shares_to_sell === null ? null : Number(row.shares_to_sell),
+    notes: row.notes,
+    displayOrder: row.display_order,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function profileToRow(userId: string, profile: AccountRiskProfilePayload) {
   const normalized = getDefaultAccountRiskProfile(profile);
 
@@ -147,6 +185,19 @@ function positionToRow(
     normal_fixed_leverage: position.normalFixedLeverage ?? null,
     temporary_fixed_leverage: position.temporaryFixedLeverage ?? null,
     notes: position.notes?.trim() || null,
+  };
+}
+
+function lotToRow(userId: string, savedPositionId: string, lot: SavedPositionLotPayload) {
+  return {
+    user_id: userId,
+    saved_position_id: savedPositionId,
+    entry_price: lot.entryPrice,
+    quantity: lot.quantity,
+    planned_exit_price: lot.plannedExitPrice ?? null,
+    shares_to_sell: lot.sharesToSell ?? null,
+    notes: lot.notes?.trim() || null,
+    display_order: lot.displayOrder ?? 0,
   };
 }
 
@@ -187,9 +238,44 @@ export async function loadPortfolioRiskData(userId: string): Promise<PortfolioRi
     throw positionError;
   }
 
+  const positions = (positionRows ?? []).map((row) => mapPosition(row as SavedPositionRow));
+
+  if (positions.length === 0) {
+    return {
+      profile,
+      positions,
+      databaseReady: true,
+    };
+  }
+
+  const positionIds = positions.map((position) => position.id);
+  const { data: lotRows, error: lotError } = await client
+    .from("saved_position_lots")
+    .select("*")
+    .eq("user_id", userId)
+    .in("saved_position_id", positionIds)
+    .order("display_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (lotError) {
+    throw lotError;
+  }
+
+  const lotsByPosition = new Map<string, SavedPortfolioLot[]>();
+
+  (lotRows ?? []).forEach((row) => {
+    const lot = mapLot(row as SavedPositionLotRow);
+    const savedPositionId = lot.savedPositionId ?? "";
+    const existing = lotsByPosition.get(savedPositionId) ?? [];
+    lotsByPosition.set(savedPositionId, [...existing, lot]);
+  });
+
   return {
     profile,
-    positions: (positionRows ?? []).map((row) => mapPosition(row as SavedPositionRow)),
+    positions: positions.map((position) => ({
+      ...position,
+      lots: lotsByPosition.get(position.id) ?? [],
+    })),
     databaseReady: true,
   };
 }
@@ -266,6 +352,65 @@ export async function deleteSavedPosition(
     .eq("id", positionId)
     .eq("user_id", userId)
     .eq("account_risk_profile_id", accountRiskProfileId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+export async function createSavedPositionLot(
+  userId: string,
+  savedPositionId: string,
+  lot: SavedPositionLotPayload,
+): Promise<SavedPortfolioLot> {
+  const client = getServiceClient();
+  const { data, error } = await client
+    .from("saved_position_lots")
+    .insert(lotToRow(userId, savedPositionId, lot))
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapLot(data as SavedPositionLotRow);
+}
+
+export async function updateSavedPositionLot(
+  userId: string,
+  savedPositionId: string,
+  lot: SavedPositionLotPayload & { id: string },
+): Promise<SavedPortfolioLot> {
+  const client = getServiceClient();
+  const { data, error } = await client
+    .from("saved_position_lots")
+    .update(lotToRow(userId, savedPositionId, lot))
+    .eq("id", lot.id)
+    .eq("user_id", userId)
+    .eq("saved_position_id", savedPositionId)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapLot(data as SavedPositionLotRow);
+}
+
+export async function deleteSavedPositionLot(
+  userId: string,
+  savedPositionId: string,
+  lotId: string,
+) {
+  const client = getServiceClient();
+  const { error } = await client
+    .from("saved_position_lots")
+    .delete()
+    .eq("id", lotId)
+    .eq("user_id", userId)
+    .eq("saved_position_id", savedPositionId);
 
   if (error) {
     throw error;

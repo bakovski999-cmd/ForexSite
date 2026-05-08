@@ -31,6 +31,21 @@ export type SavedPortfolioPosition = {
   normalFixedLeverage?: number | null;
   temporaryFixedLeverage?: number | null;
   notes?: string | null;
+  lots?: SavedPortfolioLot[];
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type SavedPortfolioLot = {
+  id: string;
+  userId?: string;
+  savedPositionId?: string;
+  entryPrice: number;
+  quantity: number;
+  plannedExitPrice?: number | null;
+  sharesToSell?: number | null;
+  notes?: string | null;
+  displayOrder?: number;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -59,6 +74,26 @@ export type IndividualStopOut = {
   bufferPerShareInstrument: number;
 };
 
+export type PortfolioLotAnalysis = {
+  lot: SavedPortfolioLot;
+  effectiveSharesToSell: number;
+  costBasisInstrument: number;
+  plannedSaleValueInstrument: number | null;
+  plannedProfitInstrument: number | null;
+  plannedProfitAccount: number | null;
+  plannedReturnPercent: number | null;
+};
+
+export type PortfolioPlannedExitSummary = {
+  totalShares: number;
+  weightedAverageEntryPrice: number;
+  plannedSharesToSell: number;
+  totalPlannedSaleValueInstrument: number;
+  totalPlannedProfitInstrument: number;
+  totalPlannedProfitAccount: number;
+  plannedReturnPercent: number;
+};
+
 export type PortfolioPositionAnalysis = {
   position: SavedPortfolioPosition;
   basePrice: number;
@@ -73,6 +108,8 @@ export type PortfolioPositionAnalysis = {
   allocationPercent: number;
   riskBadge: "safe" | "moderate" | "high" | "critical";
   warnings: string[];
+  lotAnalyses: PortfolioLotAnalysis[];
+  plannedExitSummary: PortfolioPlannedExitSummary | null;
 };
 
 export type PortfolioRiskSummary = {
@@ -166,6 +203,121 @@ function calculatePositionPnl(
     : (entryPrice - price) * quantity;
 }
 
+function getSortedLots(position: SavedPortfolioPosition) {
+  return [...(position.lots ?? [])].sort((first, second) => {
+    const firstOrder = first.displayOrder ?? 0;
+    const secondOrder = second.displayOrder ?? 0;
+
+    if (firstOrder !== secondOrder) {
+      return firstOrder - secondOrder;
+    }
+
+    return String(first.createdAt ?? "").localeCompare(String(second.createdAt ?? ""));
+  });
+}
+
+function buildLotAnalyses(
+  position: SavedPortfolioPosition,
+  lots: SavedPortfolioLot[],
+  fxRateInstrumentToAccount: number,
+): {
+  lotAnalyses: PortfolioLotAnalysis[];
+  plannedExitSummary: PortfolioPlannedExitSummary | null;
+} {
+  const lotAnalyses = lots.map((lot) => {
+    const effectiveSharesToSell = lot.sharesToSell ?? lot.quantity;
+    const costBasisInstrument = lot.entryPrice * effectiveSharesToSell;
+    const hasPlan = lot.plannedExitPrice != null && Number.isFinite(lot.plannedExitPrice);
+    const plannedSaleValueInstrument = hasPlan
+      ? lot.plannedExitPrice! * effectiveSharesToSell
+      : null;
+    const plannedProfitInstrument = hasPlan
+      ? calculatePositionPnl(
+          position.direction,
+          lot.entryPrice,
+          lot.plannedExitPrice!,
+          effectiveSharesToSell,
+        )
+      : null;
+    const plannedProfitAccount =
+      plannedProfitInstrument === null ? null : plannedProfitInstrument * fxRateInstrumentToAccount;
+
+    return {
+      lot,
+      effectiveSharesToSell,
+      costBasisInstrument,
+      plannedSaleValueInstrument,
+      plannedProfitInstrument,
+      plannedProfitAccount,
+      plannedReturnPercent:
+        plannedProfitInstrument === null || costBasisInstrument <= 0
+          ? null
+          : (plannedProfitInstrument / costBasisInstrument) * 100,
+    };
+  });
+  const plannedLots = lotAnalyses.filter((analysis) => analysis.plannedProfitInstrument !== null);
+
+  if (plannedLots.length === 0) {
+    return { lotAnalyses, plannedExitSummary: null };
+  }
+
+  const plannedSharesToSell = plannedLots.reduce(
+    (sum, analysis) => sum + analysis.effectiveSharesToSell,
+    0,
+  );
+  const totalCostBasisInstrument = plannedLots.reduce(
+    (sum, analysis) => sum + analysis.costBasisInstrument,
+    0,
+  );
+  const totalPlannedSaleValueInstrument = plannedLots.reduce(
+    (sum, analysis) => sum + (analysis.plannedSaleValueInstrument ?? 0),
+    0,
+  );
+  const totalPlannedProfitInstrument = plannedLots.reduce(
+    (sum, analysis) => sum + (analysis.plannedProfitInstrument ?? 0),
+    0,
+  );
+
+  return {
+    lotAnalyses,
+    plannedExitSummary: {
+      totalShares: lots.reduce((sum, lot) => sum + lot.quantity, 0),
+      weightedAverageEntryPrice:
+        lots.reduce((sum, lot) => sum + lot.entryPrice * lot.quantity, 0) /
+        lots.reduce((sum, lot) => sum + lot.quantity, 0),
+      plannedSharesToSell,
+      totalPlannedSaleValueInstrument,
+      totalPlannedProfitInstrument,
+      totalPlannedProfitAccount: totalPlannedProfitInstrument * fxRateInstrumentToAccount,
+      plannedReturnPercent:
+        totalCostBasisInstrument > 0
+          ? (totalPlannedProfitInstrument / totalCostBasisInstrument) * 100
+          : 0,
+    },
+  };
+}
+
+function aggregatePositionLots(position: SavedPortfolioPosition) {
+  const lots = getSortedLots(position);
+
+  if (lots.length === 0) {
+    return { position, lots };
+  }
+
+  const quantity = lots.reduce((sum, lot) => sum + lot.quantity, 0);
+  const entryValue = lots.reduce((sum, lot) => sum + lot.entryPrice * lot.quantity, 0);
+
+  return {
+    lots,
+    position: {
+      ...position,
+      entryPrice: entryValue / quantity,
+      quantity,
+      lots,
+    },
+  };
+}
+
 export function getDefaultAccountRiskProfile(overrides: Partial<AccountRiskProfile> = {}) {
   return {
     ...defaultProfile,
@@ -219,6 +371,7 @@ export function calculatePortfolioRisk(
 
   positionsInput.forEach((position, index) => {
     const row = index + 1;
+    const lots = getSortedLots(position);
 
     if (!position.symbol.trim()) {
       errors.push(`Позиция ${row}: въведи символ.`);
@@ -240,6 +393,32 @@ export function calculatePortfolioRisk(
       errors.push(`Позиция ${row}: броят акции трябва да е над 0.`);
     }
 
+    lots.forEach((lot, lotIndex) => {
+      const lotRow = `${row}.${lotIndex + 1}`;
+
+      if (!isPositiveNumber(lot.entryPrice)) {
+        errors.push(`Лот ${lotRow}: входната цена трябва да е над 0.`);
+      }
+
+      if (!isPositiveNumber(lot.quantity)) {
+        errors.push(`Лот ${lotRow}: броят акции трябва да е над 0.`);
+      }
+
+      if (lot.plannedExitPrice != null && !isNonNegativeNumber(lot.plannedExitPrice)) {
+        errors.push(`Лот ${lotRow}: целевата цена трябва да е 0 или повече.`);
+      }
+
+      if (lot.sharesToSell != null) {
+        if (!isPositiveNumber(lot.sharesToSell)) {
+          errors.push(`Лот ${lotRow}: броят акции за продажба трябва да е над 0.`);
+        }
+
+        if (lot.sharesToSell > lot.quantity) {
+          errors.push(`Лот ${lotRow}: акциите за продажба не може да са повече от лота.`);
+        }
+      }
+    });
+
     if (position.normalFixedLeverage != null && !isPositiveNumber(position.normalFixedLeverage)) {
       errors.push(`Позиция ${row}: нормалният leverage трябва да е над 0.`);
     }
@@ -260,25 +439,32 @@ export function calculatePortfolioRisk(
   const addedFunds = options.addedFundsSimulation ?? profile.addedFundsSimulation;
   const simulatedBalance = profile.balance + addedFunds;
   const baseAnalyses = positionsInput.map((position) => {
-    const basePrice = position.currentPrice ?? position.entryPrice;
-    const normalFixedLeverage = position.normalFixedLeverage ?? profile.normalFixedLeverage;
+    const aggregated = aggregatePositionLots(position);
+    const normalizedPosition = aggregated.position;
+    const basePrice = normalizedPosition.currentPrice ?? normalizedPosition.entryPrice;
+    const normalFixedLeverage = normalizedPosition.normalFixedLeverage ?? profile.normalFixedLeverage;
     const temporaryFixedLeverage =
-      position.temporaryFixedLeverage ?? profile.temporaryFixedLeverage;
-    const positionValueInstrument = basePrice * position.quantity;
+      normalizedPosition.temporaryFixedLeverage ?? profile.temporaryFixedLeverage;
+    const positionValueInstrument = basePrice * normalizedPosition.quantity;
     const positionValueAccount = positionValueInstrument * profile.fxRateInstrumentToAccount;
     const unrealizedPnLInstrument = calculatePositionPnl(
-      position.direction,
-      position.entryPrice,
+      normalizedPosition.direction,
+      normalizedPosition.entryPrice,
       basePrice,
-      position.quantity,
+      normalizedPosition.quantity,
     );
     const unrealizedPnLAccount = unrealizedPnLInstrument * profile.fxRateInstrumentToAccount;
+    const { lotAnalyses, plannedExitSummary } = buildLotAnalyses(
+      normalizedPosition,
+      aggregated.lots,
+      profile.fxRateInstrumentToAccount,
+    );
 
     return {
       position: {
-        ...position,
-        symbol: position.symbol.trim().toUpperCase(),
-        instrumentCurrency: normalizeCurrency(position.instrumentCurrency, "USD"),
+        ...normalizedPosition,
+        symbol: normalizedPosition.symbol.trim().toUpperCase(),
+        instrumentCurrency: normalizeCurrency(normalizedPosition.instrumentCurrency, "USD"),
       },
       basePrice,
       positionValueInstrument,
@@ -287,6 +473,8 @@ export function calculatePortfolioRisk(
       temporaryUsedMargin: positionValueAccount / temporaryFixedLeverage,
       unrealizedPnLInstrument,
       unrealizedPnLAccount,
+      lotAnalyses,
+      plannedExitSummary,
     };
   });
 
@@ -494,33 +682,38 @@ function calculateStressScenario(
   stressedPositions: SavedPortfolioPosition[],
 ): PortfolioStressResult {
   const stressed = calculatePortfolioRisk(profile, stressedPositions);
+  const originalBaseline = calculatePortfolioRisk(profile, originalPositions);
 
   if (!stressed.ok) {
     return stressed;
   }
 
+  if (!originalBaseline.ok) {
+    return originalBaseline;
+  }
+
   const positions = stressed.positions.map((analysis, index) => {
-    const original = originalPositions[index];
+    const original = originalBaseline.positions[index];
     const crashPrice = analysis.basePrice;
-    const originalBasePrice = original.currentPrice ?? original.entryPrice;
+    const originalBasePrice = original.basePrice;
     const pnlInstrument = calculatePositionPnl(
-      original.direction,
-      original.entryPrice,
+      original.position.direction,
+      original.position.entryPrice,
       crashPrice,
-      original.quantity,
+      original.position.quantity,
     );
     const pnlAccount = pnlInstrument * profile.fxRateInstrumentToAccount;
     const incrementalPnlInstrument = calculatePositionPnl(
-      original.direction,
+      original.position.direction,
       originalBasePrice,
       crashPrice,
-      original.quantity,
+      original.position.quantity,
     );
     const incrementalPnlAccount = incrementalPnlInstrument * profile.fxRateInstrumentToAccount;
 
     return {
-      positionId: getPositionKey(original),
-      symbol: original.symbol,
+      positionId: getPositionKey(original.position),
+      symbol: original.position.symbol,
       crashPrice,
       pnlInstrument,
       pnlAccount,
