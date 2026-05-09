@@ -980,19 +980,19 @@ function PositionLotsPanel({
     <div className="space-y-4 rounded-md border border-white/8 bg-slate-950/25 p-3">
       <div className="grid gap-3 text-xs sm:grid-cols-4">
         <div>
-          <p className="text-slate-500">Total shares</p>
+          <p className="text-slate-500">Общо акции</p>
           <p className="mt-0.5 font-semibold text-slate-100">
             {formatNumber(position.quantity, 2)}
           </p>
         </div>
         <div>
-          <p className="text-slate-500">Avg entry</p>
+          <p className="text-slate-500">Средна цена</p>
           <p className="mt-0.5 font-semibold text-slate-100">
             {formatCurrency(position.entryPrice, instrumentCurrency)}
           </p>
         </div>
         <div>
-          <p className="text-slate-500">Planned sale</p>
+          <p className="text-slate-500">Планирана продажба</p>
           <p className="mt-0.5 font-semibold text-slate-100">
             {plannedSummary
               ? formatCurrency(plannedSummary.totalPlannedSaleValueInstrument, instrumentCurrency)
@@ -1000,7 +1000,7 @@ function PositionLotsPanel({
           </p>
         </div>
         <div>
-          <p className="text-slate-500">Planned profit</p>
+          <p className="text-slate-500">Очаквана печалба</p>
           <p
             className={cn(
               "mt-0.5 font-semibold",
@@ -1017,15 +1017,16 @@ function PositionLotsPanel({
                   plannedSummary.totalPlannedProfitInstrument,
                   instrumentCurrency,
                 )}`
-              : "добави sell price"}
+              : "добави цена на продажба"}
           </p>
         </div>
       </div>
 
       {lots.length === 0 ? (
         <p className="rounded-md border border-white/8 bg-white/[0.02] px-3 py-2 text-xs leading-5 text-slate-400">
-          Тази позиция още няма лотове. Докато няма лотове, risk сметката използва основните
-          полета Entry price и Quantity от позицията.
+          Няма добавени покупки. Добави покупки по-долу – те се включват в средната цена,
+          експозицията и маржина. Докато няма покупки, сметката използва директно цената и
+          количеството на позицията.
         </p>
       ) : (
         <div className="space-y-2">
@@ -1035,82 +1036,89 @@ function PositionLotsPanel({
             const lotAnalysis = analysis.lotAnalyses.find((item) => item.lot.id === lot.id);
             const plannedProfit = lotAnalysis?.plannedProfitAccount;
 
+            const lotName =
+              lot.notes === "Начална позиция" ? "Начална позиция" : `Покупка ${index + 1}`;
             return (
               <div
-                className="grid gap-2 rounded-md border border-white/8 bg-white/[0.018] p-2 md:grid-cols-[1fr_1fr_1fr_1fr_minmax(8rem,1.2fr)_auto]"
+                className="rounded-md border border-white/8 bg-white/[0.018] p-2"
                 key={lot.id}
               >
-                <Field
-                  label={`Lot ${index + 1} entry`}
-                  onChange={(value) => onLotFormChange(formKey, "entryPrice", value)}
-                  type="number"
-                  value={form.entryPrice}
-                />
-                <Field
-                  label="Qty"
-                  onChange={(value) => onLotFormChange(formKey, "quantity", value)}
-                  type="number"
-                  value={form.quantity}
-                />
-                <Field
-                  label="Sell price"
-                  onChange={(value) => onLotFormChange(formKey, "plannedExitPrice", value)}
-                  type="number"
-                  value={form.plannedExitPrice}
-                />
-                <Field
-                  hint="Празно = целия lot."
-                  label="Sell qty"
-                  onChange={(value) => onLotFormChange(formKey, "sharesToSell", value)}
-                  type="number"
-                  value={form.sharesToSell}
-                />
-                <Field
-                  label="Notes"
-                  onChange={(value) => onLotFormChange(formKey, "notes", value)}
-                  value={form.notes}
-                />
-                <div className="flex items-end justify-between gap-2 md:justify-end">
-                  <div className="pb-1 text-xs">
-                    <p className="text-slate-500">Profit</p>
-                    <p
-                      className={cn(
-                        "font-semibold",
-                        plannedProfit == null
-                          ? "text-slate-400"
-                          : plannedProfit < 0
-                            ? "text-rose-100"
-                            : "text-emerald-100",
-                      )}
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  {lotName}
+                </p>
+                <div className="grid gap-2 md:grid-cols-[1fr_1fr_1fr_1fr_minmax(8rem,1.2fr)_auto]">
+                  <Field
+                    label="Цена"
+                    onChange={(value) => onLotFormChange(formKey, "entryPrice", value)}
+                    type="number"
+                    value={form.entryPrice}
+                  />
+                  <Field
+                    label="Количество"
+                    onChange={(value) => onLotFormChange(formKey, "quantity", value)}
+                    type="number"
+                    value={form.quantity}
+                  />
+                  <Field
+                    label="Цена продажба"
+                    onChange={(value) => onLotFormChange(formKey, "plannedExitPrice", value)}
+                    type="number"
+                    value={form.plannedExitPrice}
+                  />
+                  <Field
+                    hint="Празно = цялото количество."
+                    label="Бр. за продажба"
+                    onChange={(value) => onLotFormChange(formKey, "sharesToSell", value)}
+                    type="number"
+                    value={form.sharesToSell}
+                  />
+                  <Field
+                    label="Бележки"
+                    onChange={(value) => onLotFormChange(formKey, "notes", value)}
+                    value={form.notes}
+                  />
+                  <div className="flex items-end justify-between gap-2 md:justify-end">
+                    <div className="pb-1 text-xs">
+                      <p className="text-slate-500">Печалба</p>
+                      <p
+                        className={cn(
+                          "font-semibold",
+                          plannedProfit == null
+                            ? "text-slate-400"
+                            : plannedProfit < 0
+                              ? "text-rose-100"
+                              : "text-emerald-100",
+                        )}
+                      >
+                        {plannedProfit == null
+                          ? "—"
+                          : formatCurrency(plannedProfit, accountCurrency)}
+                      </p>
+                    </div>
+                    <IconButton
+                      disabled={savingLotId === lot.id}
+                      label={`Запази ${lotName}`}
+                      onClick={() => onSaveLot(position, formKey, lot)}
                     >
-                      {plannedProfit == null
-                        ? "няма цел"
-                        : formatCurrency(plannedProfit, accountCurrency)}
-                    </p>
+                      {savingLotId === lot.id ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Save className="size-4" />
+                      )}
+                    </IconButton>
+                    <IconButton
+                      disabled={deletingLotId === lot.id}
+                      label={`Изтрий ${lotName}`}
+                      onClick={() => onDeleteLot(position, lot)}
+                      tone="red"
+                    >
+                      {deletingLotId === lot.id ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="size-4" />
+                      )}
+                    </IconButton>
                   </div>
-                  <IconButton
-                    disabled={savingLotId === lot.id}
-                    label={`Запази lot ${index + 1}`}
-                    onClick={() => onSaveLot(position, formKey, lot)}
-                  >
-                    {savingLotId === lot.id ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <Save className="size-4" />
-                    )}
-                  </IconButton>
-                  <IconButton
-                    disabled={deletingLotId === lot.id}
-                    label={`Изтрий lot ${index + 1}`}
-                    onClick={() => onDeleteLot(position, lot)}
-                    tone="red"
-                  >
-                    {deletingLotId === lot.id ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="size-4" />
-                    )}
-                  </IconButton>
                 </div>
               </div>
             );
@@ -1118,51 +1126,56 @@ function PositionLotsPanel({
         </div>
       )}
 
-      <div className="grid gap-2 border-t border-white/8 pt-3 md:grid-cols-[1fr_1fr_1fr_1fr_minmax(8rem,1.2fr)_auto]">
-        <Field
-          label="New lot entry"
-          onChange={(value) => onLotFormChange(newFormKey, "entryPrice", value)}
-          type="number"
-          value={newForm.entryPrice}
-        />
-        <Field
-          label="Qty"
-          onChange={(value) => onLotFormChange(newFormKey, "quantity", value)}
-          type="number"
-          value={newForm.quantity}
-        />
-        <Field
-          label="Sell price"
-          onChange={(value) => onLotFormChange(newFormKey, "plannedExitPrice", value)}
-          type="number"
-          value={newForm.plannedExitPrice}
-        />
-        <Field
-          hint="Празно = целия lot."
-          label="Sell qty"
-          onChange={(value) => onLotFormChange(newFormKey, "sharesToSell", value)}
-          type="number"
-          value={newForm.sharesToSell}
-        />
-        <Field
-          label="Notes"
-          onChange={(value) => onLotFormChange(newFormKey, "notes", value)}
-          value={newForm.notes}
-        />
-        <div className="flex items-end">
-          <button
-            className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-emerald-200/20 bg-emerald-300/10 px-3 text-sm font-semibold text-emerald-50 transition hover:bg-emerald-300/15 disabled:cursor-not-allowed disabled:opacity-50 md:w-auto"
-            disabled={savingLotId === newFormKey}
-            onClick={() => onSaveLot(position, newFormKey)}
-            type="button"
-          >
-            {savingLotId === newFormKey ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Plus className="size-4" />
-            )}
-            Add lot
-          </button>
+      <div className="border-t border-white/8 pt-3">
+        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          Нова покупка
+        </p>
+        <div className="grid gap-2 md:grid-cols-[1fr_1fr_1fr_1fr_minmax(8rem,1.2fr)_auto]">
+          <Field
+            label="Цена"
+            onChange={(value) => onLotFormChange(newFormKey, "entryPrice", value)}
+            type="number"
+            value={newForm.entryPrice}
+          />
+          <Field
+            label="Количество"
+            onChange={(value) => onLotFormChange(newFormKey, "quantity", value)}
+            type="number"
+            value={newForm.quantity}
+          />
+          <Field
+            label="Цена продажба"
+            onChange={(value) => onLotFormChange(newFormKey, "plannedExitPrice", value)}
+            type="number"
+            value={newForm.plannedExitPrice}
+          />
+          <Field
+            hint="Празно = цялото количество."
+            label="Бр. за продажба"
+            onChange={(value) => onLotFormChange(newFormKey, "sharesToSell", value)}
+            type="number"
+            value={newForm.sharesToSell}
+          />
+          <Field
+            label="Бележки"
+            onChange={(value) => onLotFormChange(newFormKey, "notes", value)}
+            value={newForm.notes}
+          />
+          <div className="flex items-end">
+            <button
+              className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-emerald-200/20 bg-emerald-300/10 px-3 text-sm font-semibold text-emerald-50 transition hover:bg-emerald-300/15 disabled:cursor-not-allowed disabled:opacity-50 md:w-auto"
+              disabled={savingLotId === newFormKey}
+              onClick={() => onSaveLot(position, newFormKey)}
+              type="button"
+            >
+              {savingLotId === newFormKey ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Plus className="size-4" />
+              )}
+              Добави покупка
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1344,7 +1357,7 @@ function PositionsTable({
                           ) : null}
                           {position.lots && position.lots.length > 0 ? (
                             <p className="mt-1 text-[11px] text-cyan-100/75">
-                              {position.lots.length} lots · avg entry
+                              {position.lots.length} покупки · ср. цена
                             </p>
                           ) : null}
                         </td>
@@ -1394,7 +1407,7 @@ function PositionsTable({
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-2">
                             <IconButton
-                              label={`${isExpanded ? "Скрий" : "Покажи"} лотове за ${position.symbol}`}
+                              label={`${isExpanded ? "Скрий" : "Покажи"} покупките за ${position.symbol}`}
                               onClick={() => onTogglePosition(position)}
                             >
                               <ChevronDown
