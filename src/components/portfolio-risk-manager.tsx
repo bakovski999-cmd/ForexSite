@@ -91,6 +91,11 @@ type HelpTopic =
   | "riskMarginLevel"
   | "unrealizedPnl"
   | "stopOutBuffer"
+  | "accountLoad"
+  | "usedRiskMargin"
+  | "capacityTo50"
+  | "capacityTo100"
+  | "stressLoss20"
   | "margin"
   | "autoClose"
   | "risk";
@@ -140,6 +145,36 @@ const HELP_CONTENT: Record<HelpTopic, HelpContent> = {
     what: "Приблизителната загуба, която акаунтът може да понесе преди stop-out зоната.",
     read: "Това е най-практичният буфер: колко още загуба има място да поеме акаунтът преди принудително затваряне.",
     example: "€1,891 buffer означава, че при още около €1,891 загуба акаунтът може да стигне stop-out условията.",
+  },
+  accountLoad: {
+    title: "Account Load",
+    what: "Процентът от equity, който е зает като risk margin при временно намален leverage.",
+    read: "0-20% е спокойно, 20-50% е умерено, над 50% вече е тежко натоварване, а 100% е критична зона.",
+    example: "27% load означава, че около една четвърт от equity вече е натоварена като risk margin.",
+  },
+  usedRiskMargin: {
+    title: "Used Risk Margin",
+    what: "Колко margin използват позициите при risk leverage сценария.",
+    read: "Това е по-консервативното margin число. Колкото расте, толкова по-бързо пада свободният буфер.",
+    example: "€542 used risk margin при €2,000 equity дава около 27% account load.",
+  },
+  capacityTo50: {
+    title: "До 50% Load",
+    what: "Колко допълнителен risk margin може да се добави преди акаунтът да стигне 50% натоварване.",
+    read: "Това не е препоръка да го използваш докрай. То е ориентир колко място има до тежко натоварване.",
+    example: "€457 до 50% load означава, че още €457 risk margin ще преместят акаунта към по-напрегната зона.",
+  },
+  capacityTo100: {
+    title: "До 100% Load",
+    what: "Колко допълнителен risk margin остава до пълно натоварване на equity.",
+    read: "Колкото по-малко е числото, толкова по-близо е акаунтът до критична margin зона.",
+    example: "€1,457 до 100% load означава, че при още толкова risk margin акаунтът би бил напълно натоварен.",
+  },
+  stressLoss20: {
+    title: "20% Stress Loss",
+    what: "Ориентировъчна загуба, ако всички позиции се преместят с 20% срещу портфолиото.",
+    read: "Това е бърз sanity check. За по-точни сценарии използвай отделния Stress test tab.",
+    example: "-€542 означава, че при 20% спад equity би намалял приблизително с €542.",
   },
   margin: {
     title: "Margin",
@@ -455,6 +490,17 @@ function getAccountLoadLabel(loadPercent: number) {
   return "спокойно";
 }
 
+function getCapacityToLoad(result: Extract<PortfolioRiskResult, { ok: true }>, targetLoadPercent: number) {
+  const equity = result.summary.equity;
+  const usedMargin = result.summary.temporary.usedMargin;
+
+  if (!Number.isFinite(equity) || equity <= 0 || !Number.isFinite(usedMargin)) {
+    return 0;
+  }
+
+  return Math.max((equity * targetLoadPercent) / 100 - usedMargin, 0);
+}
+
 function Field({
   label,
   value,
@@ -688,6 +734,77 @@ function SummaryCell({
           className={cn(
             "absolute top-full mt-1",
             helpAlign === "right" ? "right-3" : "left-3",
+          )}
+          content={helpContent}
+          onClose={() => onToggleHelp(helpTopic)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function KpiCard({
+  label,
+  value,
+  hint,
+  tone = "slate",
+  helpTopic,
+  openHelp,
+  onToggleHelp,
+  helpAlign = "left",
+  compact = false,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: "green" | "red" | "amber" | "slate" | "cyan";
+  helpTopic?: HelpTopic;
+  openHelp: HelpTopic | null;
+  onToggleHelp: (topic: HelpTopic) => void;
+  helpAlign?: "left" | "right";
+  compact?: boolean;
+}) {
+  const helpContent = helpTopic && openHelp === helpTopic ? HELP_CONTENT[helpTopic] : null;
+
+  return (
+    <div
+      className={cn(
+        "relative min-w-0 rounded-xl border border-white/10 bg-slate-950/20",
+        compact ? "p-3" : "p-4",
+        helpContent && "z-50",
+      )}
+    >
+      <div className="flex min-w-0 items-center gap-1.5">
+        <p className="truncate text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          {label}
+        </p>
+        {helpTopic ? (
+          <HelpTrigger
+            label={label}
+            onToggleHelp={onToggleHelp}
+            openHelp={openHelp}
+            topic={helpTopic}
+          />
+        ) : null}
+      </div>
+      <p
+        className={cn(
+          "mt-2 truncate font-bold text-white",
+          compact ? "text-xl" : "text-2xl",
+          tone === "green" && "text-emerald-300",
+          tone === "red" && "text-rose-300",
+          tone === "amber" && "text-amber-200",
+          tone === "cyan" && "text-cyan-200",
+        )}
+      >
+        {value}
+      </p>
+      {hint ? <p className="mt-2 text-sm leading-6 text-slate-500">{hint}</p> : null}
+      {helpContent && helpTopic ? (
+        <HelpPanel
+          className={cn(
+            "absolute top-full mt-2",
+            helpAlign === "right" ? "right-0" : "left-0",
           )}
           content={helpContent}
           onClose={() => onToggleHelp(helpTopic)}
@@ -1612,14 +1729,32 @@ function RiskMetricRow({
   label,
   value,
   tone = "slate",
+  helpTopic,
+  openHelp,
+  onToggleHelp,
 }: {
   label: string;
   value: string;
   tone?: "slate" | "green" | "red" | "amber";
+  helpTopic?: HelpTopic;
+  openHelp?: HelpTopic | null;
+  onToggleHelp?: (topic: HelpTopic) => void;
 }) {
+  const showHelp = helpTopic && openHelp === helpTopic;
+
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-white/8 py-2 last:border-b-0">
-      <span className="text-xs text-slate-500">{label}</span>
+    <div className="relative flex items-center justify-between gap-3 border-b border-white/8 py-2 last:border-b-0">
+      <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+        {label}
+        {helpTopic && onToggleHelp ? (
+          <HelpTrigger
+            label={label}
+            onToggleHelp={onToggleHelp}
+            openHelp={openHelp ?? null}
+            topic={helpTopic}
+          />
+        ) : null}
+      </span>
       <span
         className={cn(
           "text-sm font-semibold text-slate-300",
@@ -1630,6 +1765,13 @@ function RiskMetricRow({
       >
         {value}
       </span>
+      {showHelp && helpTopic && onToggleHelp ? (
+        <HelpPanel
+          className="absolute left-0 top-full z-50 mt-2"
+          content={HELP_CONTENT[helpTopic]}
+          onClose={() => onToggleHelp(helpTopic)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1638,142 +1780,231 @@ function RiskGaugeSidebar({
   portfolio,
   accountCurrency,
   accountLoadPercent,
+  capacityTo50,
+  capacityTo100,
+  stressLoss20,
+  openHelp,
+  onToggleHelp,
 }: {
   portfolio: Extract<PortfolioRiskResult, { ok: true }>;
   accountCurrency: string;
   accountLoadPercent: number;
+  capacityTo50: number;
+  capacityTo100: number;
+  stressLoss20: number;
+  openHelp: HelpTopic | null;
+  onToggleHelp: (topic: HelpTopic) => void;
 }) {
   const marker = clampPercent(accountLoadPercent);
   const angle = Math.PI * (1 - marker / 100);
-  const needleX = 95 + Math.cos(angle) * 62;
-  const needleY = 92 - Math.sin(angle) * 62;
+  const needleX = 120 + Math.cos(angle) * 72;
+  const needleY = 118 - Math.sin(angle) * 72;
   const tone = getAccountLoadTone(accountLoadPercent);
-  const label = getAccountLoadLabel(accountLoadPercent);
   const riskMargin = portfolio.summary.temporary.marginLevel;
 
   return (
     <aside className="border-b border-white/10 bg-[#0b1322]/80 p-4 lg:border-b-0 lg:border-r">
-      <div className="mx-auto max-w-xs">
-        <div className="relative mx-auto h-40 w-52">
-          <svg aria-label="Account load gauge" className="h-full w-full" viewBox="0 0 190 120">
-            <path
-              d="M25 92 A70 70 0 0 1 68 27"
-              fill="none"
-              stroke="rgba(110,231,183,0.7)"
-              strokeLinecap="round"
-              strokeWidth="14"
-            />
-            <path
-              d="M68 27 A70 70 0 0 1 122 27"
-              fill="none"
-              stroke="rgba(250,204,21,0.78)"
-              strokeLinecap="round"
-              strokeWidth="14"
-            />
-            <path
-              d="M122 27 A70 70 0 0 1 165 92"
-              fill="none"
-              stroke="rgba(248,113,113,0.68)"
-              strokeLinecap="round"
-              strokeWidth="14"
-            />
-            <line
-              stroke="rgba(255,255,255,0.9)"
-              strokeLinecap="round"
-              strokeWidth="3"
-              x1="95"
-              x2={needleX}
-              y1="92"
-              y2={needleY}
-            />
-            <circle cx="95" cy="92" fill="#0b1322" r="7" stroke="rgba(255,255,255,0.75)" strokeWidth="2" />
-            <text fill="rgba(110,231,183,0.75)" fontSize="9" x="20" y="108">
-              безопасно
-            </text>
-            <text fill="rgba(248,113,113,0.8)" fontSize="9" textAnchor="end" x="170" y="108">
-              опасно
-            </text>
-          </svg>
-          <span
-            className={cn(
-              "absolute left-1/2 top-6 -translate-x-1/2 rounded-full px-2 py-0.5 text-[10px] font-semibold",
-              tone === "emerald" && "bg-emerald-300/15 text-emerald-200",
-              tone === "amber" && "bg-amber-300/15 text-amber-200",
-              tone === "orange" && "bg-orange-300/15 text-orange-200",
-              tone === "rose" && "bg-rose-300/15 text-rose-200",
-            )}
-          >
-            {label}
-          </span>
-        </div>
-
-        <div className="text-center">
-          <p className="text-3xl font-bold text-white">{formatPercent(accountLoadPercent)}</p>
-          <p
-            className={cn(
-              "mt-1 text-lg font-bold",
-              tone === "emerald" && "text-emerald-300",
-              tone === "amber" && "text-amber-200",
-              tone === "orange" && "text-orange-200",
-              tone === "rose" && "text-rose-300",
-            )}
-          >
-            {riskLabelBg(portfolio.summary.riskStatus)}
-          </p>
-          <p className="mt-1 text-xs text-slate-500">Account load</p>
-        </div>
-
-        <div className="mt-5">
-          <div className="relative h-2 overflow-hidden rounded-full bg-slate-950/60">
-            <div className="flex h-full">
-              <span className="basis-[20%] bg-emerald-300/75" />
-              <span className="basis-[30%] bg-amber-300/80" />
-              <span className="flex-1 bg-orange-300/75" />
+      <div className="mx-auto max-w-sm">
+        <div className="rounded-xl border border-white/10 bg-slate-950/20 px-4 pb-4 pt-5">
+          <div className="relative mx-auto h-44 w-full max-w-[17rem]">
+            <svg aria-label="Account load gauge" className="h-full w-full" viewBox="0 0 240 155">
+              <path
+                d="M36 118 A84 84 0 0 1 83 43"
+                fill="none"
+                stroke="rgba(116,228,176,0.72)"
+                strokeLinecap="round"
+                strokeWidth="18"
+              />
+              <path
+                d="M83 43 A84 84 0 0 1 157 43"
+                fill="none"
+                stroke="rgba(245,207,88,0.78)"
+                strokeLinecap="round"
+                strokeWidth="18"
+              />
+              <path
+                d="M157 43 A84 84 0 0 1 204 118"
+                fill="none"
+                stroke="rgba(251,113,133,0.68)"
+                strokeLinecap="round"
+                strokeWidth="18"
+              />
+              <line
+                stroke="rgba(255,255,255,0.92)"
+                strokeLinecap="round"
+                strokeWidth="5"
+                x1="120"
+                x2={needleX}
+                y1="118"
+                y2={needleY}
+              />
+              <circle
+                cx="120"
+                cy="118"
+                fill="#0b1322"
+                r="11"
+                stroke="rgba(255,255,255,0.8)"
+                strokeWidth="3"
+              />
+              <circle cx="120" cy="118" fill="rgba(255,255,255,0.88)" r="3" />
+            </svg>
+            <div className="absolute inset-x-0 bottom-0 text-center">
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-slate-950/80 px-3 py-1 text-[11px] font-semibold text-slate-300">
+                <span className="size-1.5 rounded-full bg-emerald-300" />
+                0-20
+                <span className="size-1.5 rounded-full bg-amber-300" />
+                20-50
+                <span className="size-1.5 rounded-full bg-rose-300" />
+                50-100
+              </span>
             </div>
-            <span
-              className="absolute top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.55)]"
-              style={{ left: `${marker}%` }}
+          </div>
+
+          <div className="relative text-center">
+            <div className="flex items-center justify-center gap-2">
+              <p className="text-5xl font-black tracking-tight text-white">
+                {formatPercent(accountLoadPercent)}
+              </p>
+              <HelpTrigger
+                label="Account load"
+                onToggleHelp={onToggleHelp}
+                openHelp={openHelp}
+                topic="accountLoad"
+              />
+            </div>
+            <p
+              className={cn(
+                "mt-2 text-2xl font-black",
+                tone === "emerald" && "text-emerald-300",
+                tone === "amber" && "text-amber-200",
+                tone === "orange" && "text-orange-200",
+                tone === "rose" && "text-rose-300",
+              )}
+            >
+              {riskLabelBg(portfolio.summary.riskStatus)}
+            </p>
+            <p className="mt-1 text-sm text-slate-500">Account load при risk leverage</p>
+            {openHelp === "accountLoad" ? (
+              <HelpPanel
+                className="absolute left-1/2 z-50 mt-2 -translate-x-1/2"
+                content={HELP_CONTENT.accountLoad}
+                onClose={() => onToggleHelp("accountLoad")}
+              />
+            ) : null}
+          </div>
+
+          <div className="mt-5">
+            <div className="relative h-2 overflow-hidden rounded-full bg-slate-950/60">
+              <div className="flex h-full">
+                <span className="basis-[20%] bg-emerald-300/75" />
+                <span className="basis-[30%] bg-amber-300/80" />
+                <span className="flex-1 bg-orange-300/75" />
+              </div>
+              <span
+                className="absolute top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.55)]"
+                style={{ left: `${marker}%` }}
+              />
+            </div>
+            <div className="mt-2 flex justify-between text-[11px] text-slate-500">
+              <span>0%</span>
+              <span>20%</span>
+              <span>50%</span>
+              <span>100%</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-3">
+          <KpiCard
+            helpTopic="stopOutBuffer"
+            hint="загуба, която акаунтът може да понесе приблизително"
+            label="Stop-out buffer"
+            onToggleHelp={onToggleHelp}
+            openHelp={openHelp}
+            value={formatCurrency(portfolio.summary.temporary.maxLossBeforeStopOut, accountCurrency)}
+          />
+          <KpiCard
+            helpTopic="stressLoss20"
+            hint="примерен спад върху всички позиции"
+            label="20% Stress Loss"
+            onToggleHelp={onToggleHelp}
+            openHelp={openHelp}
+            tone="red"
+            value={Number.isFinite(stressLoss20) ? `-${formatCurrency(stressLoss20, accountCurrency)}` : "няма позиции"}
+          />
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            <KpiCard
+              compact
+              helpTopic="capacityTo50"
+              hint="допълнителен risk margin до тежка зона"
+              label="До 50% load"
+              onToggleHelp={onToggleHelp}
+              openHelp={openHelp}
+              tone="amber"
+              value={formatCurrency(capacityTo50, accountCurrency)}
+            />
+            <KpiCard
+              compact
+              helpTopic="capacityTo100"
+              hint="допълнителен risk margin до критична зона"
+              label="До 100% load"
+              onToggleHelp={onToggleHelp}
+              openHelp={openHelp}
+              tone="red"
+              value={formatCurrency(capacityTo100, accountCurrency)}
             />
           </div>
-          <div className="mt-2 flex justify-between text-[11px] text-slate-500">
-            <span>0%</span>
-            <span>20%</span>
-            <span>50%</span>
-            <span>100%</span>
+        </div>
+
+        <div className="mt-3 rounded-xl border border-white/10 bg-slate-950/20 p-4">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Account snapshot
+            </p>
+            <StatusBadge status={portfolio.summary.riskStatus} />
           </div>
-        </div>
-
-        <div className="mt-5 rounded-lg border border-amber-200/20 bg-amber-300/[0.06] p-3">
-          <p className="text-[11px] font-bold uppercase tracking-wide text-amber-200">
-            Stop-out буфер
-          </p>
-          <p className="mt-2 text-2xl font-bold text-white">
-            {formatCurrency(portfolio.summary.temporary.maxLossBeforeStopOut, accountCurrency)}
-          </p>
-          <p className="mt-1 text-xs text-slate-500">преди ликвидационна зона</p>
-        </div>
-
-        <div className="mt-4">
+          <RiskMetricRow
+            label="Equity"
+            helpTopic="equity"
+            onToggleHelp={onToggleHelp}
+            openHelp={openHelp}
+            value={formatCurrency(portfolio.summary.equity, accountCurrency)}
+          />
           <RiskMetricRow
             label="Free margin"
+            helpTopic="freeMargin"
+            onToggleHelp={onToggleHelp}
+            openHelp={openHelp}
             tone={portfolio.summary.temporary.freeMargin >= 0 ? "green" : "red"}
             value={formatCurrency(portfolio.summary.temporary.freeMargin, accountCurrency)}
           />
           <RiskMetricRow
-            label="Equity"
-            value={formatCurrency(portfolio.summary.equity, accountCurrency)}
+            label="Used risk margin"
+            helpTopic="usedRiskMargin"
+            onToggleHelp={onToggleHelp}
+            openHelp={openHelp}
+            value={formatCurrency(portfolio.summary.temporary.usedMargin, accountCurrency)}
           />
           <RiskMetricRow
-            label="Risk margin"
+            label="Margin level"
+            helpTopic="riskMarginLevel"
+            onToggleHelp={onToggleHelp}
+            openHelp={openHelp}
             tone={riskMargin >= 200 ? "green" : "amber"}
             value={formatPercent(riskMargin)}
           />
           <RiskMetricRow
             label="Exposure"
+            helpTopic="exposure"
+            onToggleHelp={onToggleHelp}
+            openHelp={openHelp}
             value={formatCurrency(portfolio.summary.totalPositionValueAccount, accountCurrency)}
           />
           <RiskMetricRow
             label="Unrealized P/L"
+            helpTopic="unrealizedPnl"
+            onToggleHelp={onToggleHelp}
+            openHelp={openHelp}
             tone={portfolio.summary.totalUnrealizedPnLAccount >= 0 ? "green" : "red"}
             value={formatCurrency(portfolio.summary.totalUnrealizedPnLAccount, accountCurrency)}
           />
@@ -1814,6 +2045,8 @@ function ActionPill({
 function PositionCards({
   positions,
   accountCurrency,
+  openHelp,
+  onToggleHelp,
   onEdit,
   onDelete,
   onAddLot,
@@ -1830,6 +2063,8 @@ function PositionCards({
 }: {
   positions: PortfolioPositionAnalysis[];
   accountCurrency: string;
+  openHelp: HelpTopic | null;
+  onToggleHelp: (topic: HelpTopic) => void;
   onEdit: (position: SavedPortfolioPosition) => void;
   onDelete: (position: SavedPortfolioPosition) => void;
   onAddLot: (position: SavedPortfolioPosition) => void;
@@ -1852,42 +2087,244 @@ function PositionCards({
     );
   }
 
-  return (
-    <div className="space-y-3">
-      {positions.map((analysis) => {
-        const position = analysis.position;
-        const lots = position.lots ?? [];
-        const isExpanded = expandedPositionId === position.id;
-        const allocation = clampPercent(analysis.allocationPercent);
-        const instrumentCurrency = position.instrumentCurrency;
+  const tableHelpTopic =
+    openHelp === "margin" || openHelp === "autoClose" || openHelp === "risk" ? openHelp : null;
 
-        return (
-          <article
-            className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.025]"
-            key={position.id}
-          >
-            <div className="flex flex-col gap-3 border-b border-white/8 px-4 py-3 xl:flex-row xl:items-start xl:justify-between">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-lg font-bold text-white">{position.symbol}</h3>
-                  <span className="rounded-md border border-emerald-200/20 bg-emerald-300/10 px-2 py-0.5 text-xs font-bold text-emerald-200">
-                    {directionLabel(position.direction)}
-                  </span>
-                  <span className="text-sm text-slate-500">
-                    {formatNumber(position.quantity, 2)} акции · {lots.length}{" "}
-                    {lots.length === 1 ? "лот" : "лота"}
-                  </span>
-                </div>
-                {position.assetName ? (
-                  <p className="mt-1 text-xs text-slate-500">{position.assetName}</p>
-                ) : null}
+  return (
+    <section className="relative rounded-xl border border-white/10 bg-slate-950/15">
+      {tableHelpTopic ? (
+        <HelpPanel
+          className="absolute right-3 top-12 z-50"
+          content={HELP_CONTENT[tableHelpTopic]}
+          onClose={() => onToggleHelp(tableHelpTopic)}
+        />
+      ) : null}
+
+      <div className="hidden overflow-x-auto lg:block">
+        <table className="w-full min-w-[1040px] text-left text-sm">
+          <thead className="border-b border-white/10 text-[11px] uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-4 py-3 font-bold">Symbol</th>
+              <th className="px-3 py-3 font-bold">Side</th>
+              <th className="px-3 py-3 text-right font-bold">Qty</th>
+              <th className="px-3 py-3 text-right font-bold">Value</th>
+              <th className="px-3 py-3 text-right font-bold">
+                <HelpLabel
+                  align="right"
+                  label="Margin"
+                  onToggleHelp={onToggleHelp}
+                  openHelp={openHelp}
+                  topic="margin"
+                />
+              </th>
+              <th className="px-3 py-3 text-right font-bold">
+                <HelpLabel
+                  align="right"
+                  label="Auto-close"
+                  onToggleHelp={onToggleHelp}
+                  openHelp={openHelp}
+                  topic="autoClose"
+                />
+              </th>
+              <th className="px-3 py-3 font-bold">
+                <HelpLabel
+                  label="Risk"
+                  onToggleHelp={onToggleHelp}
+                  openHelp={openHelp}
+                  topic="risk"
+                />
+              </th>
+              <th className="px-4 py-3 text-right font-bold">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/8">
+            {positions.map((analysis) => {
+              const position = analysis.position;
+              const lots = position.lots ?? [];
+              const isExpanded = expandedPositionId === position.id;
+              const instrumentCurrency = position.instrumentCurrency;
+
+              return (
+                <Fragment key={position.id}>
+                  <tr className="align-middle text-slate-300">
+                    <td className="px-4 py-4">
+                      <button
+                        className="group text-left"
+                        onClick={() => onTogglePosition(position)}
+                        type="button"
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className="text-base font-black text-white group-hover:text-cyan-100">
+                            {position.symbol}
+                          </span>
+                          <ChevronDown
+                            className={cn(
+                              "size-4 text-slate-500 transition group-hover:text-slate-200",
+                              isExpanded && "rotate-180",
+                            )}
+                          />
+                        </span>
+                        <span className="mt-1 block text-xs text-slate-500">
+                          {lots.length} {lots.length === 1 ? "лот" : "лота"} ·{" "}
+                          {formatPercent(analysis.allocationPercent)} allocation
+                        </span>
+                      </button>
+                    </td>
+                    <td className="px-3 py-4">
+                      <span className="inline-flex min-w-20 justify-center rounded-md border border-emerald-200/20 bg-emerald-300/10 px-2 py-1 text-xs font-black text-emerald-200">
+                        {directionLabel(position.direction)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-4 text-right font-bold text-white">
+                      {formatNumber(position.quantity, 2)}
+                    </td>
+                    <td className="px-3 py-4 text-right">
+                      <p className="font-bold text-white">
+                        {formatCurrency(analysis.positionValueAccount, accountCurrency)}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {formatCurrency(analysis.positionValueInstrument, instrumentCurrency)}
+                      </p>
+                    </td>
+                    <td className="px-3 py-4 text-right">
+                      <p className="font-bold text-white">
+                        {formatCurrency(analysis.normalUsedMargin, accountCurrency)}
+                      </p>
+                      <p className="text-xs font-semibold text-amber-200">
+                        {formatCurrency(analysis.temporaryUsedMargin, accountCurrency)} risk
+                      </p>
+                    </td>
+                    <td className="px-3 py-4 text-right">
+                      <p className="font-bold text-rose-300">
+                        {formatCurrency(
+                          analysis.temporaryAutoClose.displayAutoClosePrice,
+                          instrumentCurrency,
+                        )}
+                      </p>
+                    </td>
+                    <td className="px-3 py-4">
+                      <StatusBadge status={analysis.riskBadge} />
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="flex justify-end gap-2">
+                        <ActionPill onClick={() => onAddLot(position)} tone="blue">
+                          <PlusCircle className="size-4" />
+                          Лот
+                        </ActionPill>
+                        <ActionPill onClick={() => onSell(position)} tone="green">
+                          <DollarSign className="size-4" />
+                          Продай
+                        </ActionPill>
+                        <IconButton label={`Редактирай ${position.symbol}`} onClick={() => onEdit(position)}>
+                          <Edit3 className="size-4" />
+                        </IconButton>
+                        <IconButton
+                          disabled={deletingId === position.id}
+                          label={`Изтрий ${position.symbol}`}
+                          onClick={() => onDelete(position)}
+                          tone="red"
+                        >
+                          {deletingId === position.id ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="size-4" />
+                          )}
+                        </IconButton>
+                      </div>
+                    </td>
+                  </tr>
+                  {isExpanded ? (
+                    <tr>
+                      <td className="px-4 pb-4" colSpan={8}>
+                        <PositionLotsPanel
+                          accountCurrency={accountCurrency}
+                          analysis={analysis}
+                          deletingLotId={deletingLotId}
+                          lotForms={lotForms}
+                          onDeleteLot={onDeleteLot}
+                          onLotFormChange={onLotFormChange}
+                          onSaveLot={onSaveLot}
+                          savingLotId={savingLotId}
+                        />
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="space-y-2 p-3 lg:hidden">
+        {positions.map((analysis) => {
+          const position = analysis.position;
+          const lots = position.lots ?? [];
+          const isExpanded = expandedPositionId === position.id;
+          const instrumentCurrency = position.instrumentCurrency;
+
+          return (
+            <article
+              className="rounded-lg border border-white/10 bg-white/[0.025] p-3"
+              key={position.id}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <button className="min-w-0 text-left" onClick={() => onTogglePosition(position)} type="button">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-black text-white">{position.symbol}</p>
+                    <span className="rounded-md border border-emerald-200/20 bg-emerald-300/10 px-2 py-0.5 text-xs font-bold text-emerald-200">
+                      {directionLabel(position.direction)}
+                    </span>
+                    <StatusBadge status={analysis.riskBadge} />
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {lots.length} {lots.length === 1 ? "лот" : "лота"} ·{" "}
+                    {formatPercent(analysis.allocationPercent)} allocation
+                  </p>
+                </button>
+                <IconButton
+                  label={`${isExpanded ? "Скрий" : "Покажи"} лотовете за ${position.symbol}`}
+                  onClick={() => onTogglePosition(position)}
+                >
+                  <ChevronDown className={cn("size-4 transition", isExpanded && "rotate-180")} />
+                </IconButton>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <StatusBadge status={analysis.riskBadge} />
+              <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <p className="text-slate-500">Qty</p>
+                  <p className="font-semibold text-white">{formatNumber(position.quantity, 2)}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Value</p>
+                  <p className="font-semibold text-white">
+                    {formatCurrency(analysis.positionValueAccount, accountCurrency)}
+                  </p>
+                  <p className="text-slate-500">
+                    {formatCurrency(analysis.positionValueInstrument, instrumentCurrency)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Margin risk</p>
+                  <p className="font-semibold text-amber-200">
+                    {formatCurrency(analysis.temporaryUsedMargin, accountCurrency)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Auto-close</p>
+                  <p className="font-semibold text-rose-300">
+                    {formatCurrency(
+                      analysis.temporaryAutoClose.displayAutoClosePrice,
+                      instrumentCurrency,
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
                 <ActionPill onClick={() => onAddLot(position)} tone="blue">
                   <PlusCircle className="size-4" />
-                  Добави лот
+                  Лот
                 </ActionPill>
                 <ActionPill onClick={() => onSell(position)} tone="green">
                   <DollarSign className="size-4" />
@@ -1909,85 +2346,6 @@ function PositionCards({
                   )}
                 </IconButton>
               </div>
-            </div>
-
-            <div className="px-4 py-3">
-              <div className="mb-2 flex items-center justify-between gap-3 text-xs">
-                <span className="font-medium text-slate-500">Дял от портфолио</span>
-                <span className="font-bold text-cyan-100">{formatPercent(analysis.allocationPercent)}</span>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-slate-950/65">
-                <div className="h-full rounded-full bg-cyan-300/85" style={{ width: `${allocation}%` }} />
-              </div>
-
-              <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
-                <div>
-                  <p className="text-xs text-slate-500">Текуща цена</p>
-                  <p className="mt-1 font-semibold text-slate-100">
-                    {formatCurrency(analysis.basePrice, instrumentCurrency)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500">Стойност</p>
-                  <p className="mt-1 font-semibold text-slate-100">
-                    {formatCurrency(analysis.positionValueAccount, accountCurrency)}
-                  </p>
-                  {instrumentCurrency !== accountCurrency ? (
-                    <p className="text-xs text-slate-500">
-                      {formatCurrency(analysis.positionValueInstrument, instrumentCurrency)}
-                    </p>
-                  ) : null}
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500">Маржин</p>
-                  <p className="mt-1 font-semibold text-slate-100">
-                    {formatCurrency(analysis.normalUsedMargin, accountCurrency)}
-                  </p>
-                  <p className="text-xs text-amber-200">
-                    {formatCurrency(analysis.temporaryUsedMargin, accountCurrency)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500">Авто-закриване</p>
-                  <p className="mt-1 font-semibold text-rose-200">
-                    {formatCurrency(
-                      analysis.temporaryAutoClose.displayAutoClosePrice,
-                      instrumentCurrency,
-                    )}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="border-t border-white/8 bg-slate-950/10 px-4 py-3">
-              <button
-                className="flex w-full items-center gap-2 text-left text-sm font-semibold text-slate-400 transition hover:text-slate-100"
-                onClick={() => onTogglePosition(position)}
-                type="button"
-              >
-                <ChevronDown className={cn("size-4 transition", isExpanded && "rotate-180")} />
-                Лотове ({lots.length})
-                <span className="rounded border border-amber-200/20 bg-amber-300/10 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
-                  {instrumentCurrency}
-                </span>
-              </button>
-
-              {lots.length > 0 ? (
-                <div className="mt-3 space-y-1.5">
-                  {lots.slice(0, isExpanded ? lots.length : 3).map((lot, index) => (
-                    <div
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-white/8 bg-white/[0.018] px-3 py-2 text-sm"
-                      key={lot.id}
-                    >
-                      <span className="text-slate-500">Лот #{index + 1}</span>
-                      <span className="font-semibold text-slate-200">
-                        Entry {formatCurrency(lot.entryPrice, instrumentCurrency)}
-                      </span>
-                      <span className="text-slate-400">{formatNumber(lot.quantity, 2)} акции</span>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
 
               {isExpanded ? (
                 <div className="mt-3">
@@ -2003,11 +2361,11 @@ function PositionCards({
                   />
                 </div>
               ) : null}
-            </div>
-          </article>
-        );
-      })}
-    </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -2056,6 +2414,10 @@ export function PortfolioRiskManager() {
   const uniformStress = useMemo(
     () => calculateUniformDropStress(profile, positions, parseAmount(uniformDrop, 0)),
     [positions, profile, uniformDrop],
+  );
+  const quickStress20 = useMemo(
+    () => calculateUniformDropStress(profile, positions, 20),
+    [positions, profile],
   );
   const customStress = useMemo(() => {
     const parsedCrashPrices = Object.fromEntries(
@@ -2373,6 +2735,9 @@ export function PortfolioRiskManager() {
   const accountLoadMarkerPct = clampPercent(accountLoadPercent);
   const accountLoadLabelPct = Math.min(92, Math.max(8, accountLoadMarkerPct));
   const accountLoadTone = getAccountLoadTone(accountLoadPercent);
+  const capacityTo50 = savedPortfolio ? getCapacityToLoad(savedPortfolio, 50) : 0;
+  const capacityTo100 = savedPortfolio ? getCapacityToLoad(savedPortfolio, 100) : 0;
+  const quickStressLoss20 = quickStress20.ok ? quickStress20.totalLossAccount : Number.NaN;
 
   function handleDrawerSaved(updatedPositions: SavedPortfolioPosition[]) {
     setPositions(updatedPositions);
@@ -2606,36 +2971,73 @@ export function PortfolioRiskManager() {
             </button>
           </div>
 
-          <div className="grid min-w-0 lg:grid-cols-[280px_minmax(0,1fr)]">
+          <div className="grid gap-3 border-b border-white/10 p-4 sm:grid-cols-2 xl:grid-cols-5">
+            <KpiCard
+              compact
+              helpTopic="equity"
+              label="Equity"
+              onToggleHelp={toggleHelp}
+              openHelp={openHelp}
+              value={formatCurrency(savedPortfolio.summary.equity, accountCurrency)}
+            />
+            <KpiCard
+              compact
+              helpTopic="freeMargin"
+              label="Free margin"
+              onToggleHelp={toggleHelp}
+              openHelp={openHelp}
+              tone={savedPortfolio.summary.temporary.freeMargin >= 0 ? "green" : "red"}
+              value={formatCurrency(savedPortfolio.summary.temporary.freeMargin, accountCurrency)}
+            />
+            <KpiCard
+              compact
+              helpTopic="exposure"
+              label="Exposure"
+              onToggleHelp={toggleHelp}
+              openHelp={openHelp}
+              value={formatCurrency(
+                savedPortfolio.summary.totalPositionValueAccount,
+                accountCurrency,
+              )}
+            />
+            <KpiCard
+              compact
+              helpAlign="right"
+              helpTopic="riskMarginLevel"
+              label="Risk margin level"
+              onToggleHelp={toggleHelp}
+              openHelp={openHelp}
+              tone={savedPortfolio.summary.temporary.marginLevel >= 200 ? "green" : "amber"}
+              value={formatPercent(savedPortfolio.summary.temporary.marginLevel)}
+            />
+            <KpiCard
+              compact
+              helpAlign="right"
+              helpTopic="unrealizedPnl"
+              label="Unrealized P/L"
+              onToggleHelp={toggleHelp}
+              openHelp={openHelp}
+              tone={savedPortfolio.summary.totalUnrealizedPnLAccount >= 0 ? "green" : "red"}
+              value={formatCurrency(
+                savedPortfolio.summary.totalUnrealizedPnLAccount,
+                accountCurrency,
+              )}
+            />
+          </div>
+
+          <div className="grid min-w-0 lg:grid-cols-[360px_minmax(0,1fr)]">
             <RiskGaugeSidebar
               accountCurrency={accountCurrency}
               accountLoadPercent={accountLoadPercent}
+              capacityTo50={capacityTo50}
+              capacityTo100={capacityTo100}
+              onToggleHelp={toggleHelp}
+              openHelp={openHelp}
               portfolio={savedPortfolio}
+              stressLoss20={quickStressLoss20}
             />
 
             <div className="min-w-0">
-              <div className="flex min-w-0 gap-1 overflow-x-auto border-b border-white/10 px-4">
-                {[
-                  ["positions", `Позиции (${savedPortfolio.positions.length})`],
-                  ["allocation", "Разпределение"],
-                  ["stress", "Стрес тест"],
-                ].map(([tab, label]) => (
-                  <button
-                    className={cn(
-                      "h-12 shrink-0 border-b-2 px-4 text-sm font-bold transition",
-                      activeWorkbenchTab === tab
-                        ? "border-blue-400 text-white"
-                        : "border-transparent text-slate-500 hover:text-slate-200",
-                    )}
-                    key={tab}
-                    onClick={() => setActiveWorkbenchTab(tab as PortfolioWorkbenchTab)}
-                    type="button"
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
               <div className="min-h-[26rem] p-4">
                 {activeWorkbenchTab === "positions" ? (
                   <div className="space-y-4">
@@ -2652,7 +3054,9 @@ export function PortfolioRiskManager() {
                       onLotFormChange={updateLotForm}
                       onSaveLot={(position, formKey, lot) => void saveLot(position, formKey, lot)}
                       onSell={(position) => setSellTarget(position)}
+                      onToggleHelp={toggleHelp}
                       onTogglePosition={togglePositionDetails}
+                      openHelp={openHelp}
                       positions={savedPortfolio.positions}
                       savingLotId={savingLotId}
                     />
@@ -2869,12 +3273,39 @@ export function PortfolioRiskManager() {
               </div>
 
               <div className="flex flex-wrap gap-2 border-t border-white/10 px-4 py-3">
+                {[
+                  ["positions", `Positions (${savedPortfolio.positions.length})`],
+                  ["allocation", "Allocation"],
+                  ["stress", "Stress test"],
+                ].map(([tab, label]) => (
+                  <button
+                    className={cn(
+                      "rounded-md border px-3 py-2 text-sm font-semibold transition",
+                      activeWorkbenchTab === tab
+                        ? "border-blue-300/30 bg-blue-400/15 text-blue-100"
+                        : "border-white/10 bg-white/[0.03] text-slate-400 hover:text-slate-100",
+                    )}
+                    key={tab}
+                    onClick={() => {
+                      setActiveWorkbenchTab(tab as PortfolioWorkbenchTab);
+                      setSettingsOpen(false);
+                    }}
+                    type="button"
+                  >
+                    {label}
+                  </button>
+                ))}
                 <button
-                  className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-400 hover:text-slate-100"
+                  className={cn(
+                    "rounded-md border px-3 py-2 text-sm font-semibold transition",
+                    settingsOpen
+                      ? "border-amber-200/25 bg-amber-300/10 text-amber-100"
+                      : "border-white/10 bg-white/[0.03] text-slate-400 hover:text-slate-100",
+                  )}
                   onClick={() => setSettingsOpen((current) => !current)}
                   type="button"
                 >
-                  Настройки на акаунта
+                  Account settings
                 </button>
                 <button
                   className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-400 hover:text-slate-100"
