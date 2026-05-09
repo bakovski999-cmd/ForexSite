@@ -102,6 +102,8 @@ type HelpContent = {
   example: string;
 };
 
+type PortfolioWorkbenchTab = "positions" | "allocation" | "stress";
+
 const HELP_CONTENT: Record<HelpTopic, HelpContent> = {
   equity: {
     title: "Equity",
@@ -376,6 +378,22 @@ function riskLabel(status: "safe" | "moderate" | "high" | "critical") {
   }
 
   return "Critical";
+}
+
+function riskLabelBg(status: "safe" | "moderate" | "high" | "critical") {
+  if (status === "safe") {
+    return "Спокоен риск";
+  }
+
+  if (status === "moderate") {
+    return "Умерен риск";
+  }
+
+  if (status === "high") {
+    return "Висок риск";
+  }
+
+  return "Критичен риск";
 }
 
 function directionLabel(direction: PortfolioDirection) {
@@ -1590,6 +1608,409 @@ function PositionsTable({
   );
 }
 
+function RiskMetricRow({
+  label,
+  value,
+  tone = "slate",
+}: {
+  label: string;
+  value: string;
+  tone?: "slate" | "green" | "red" | "amber";
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-white/8 py-2 last:border-b-0">
+      <span className="text-xs text-slate-500">{label}</span>
+      <span
+        className={cn(
+          "text-sm font-semibold text-slate-300",
+          tone === "green" && "text-emerald-300",
+          tone === "red" && "text-rose-300",
+          tone === "amber" && "text-amber-200",
+        )}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function RiskGaugeSidebar({
+  portfolio,
+  accountCurrency,
+  accountLoadPercent,
+}: {
+  portfolio: Extract<PortfolioRiskResult, { ok: true }>;
+  accountCurrency: string;
+  accountLoadPercent: number;
+}) {
+  const marker = clampPercent(accountLoadPercent);
+  const angle = Math.PI * (1 - marker / 100);
+  const needleX = 95 + Math.cos(angle) * 62;
+  const needleY = 92 - Math.sin(angle) * 62;
+  const tone = getAccountLoadTone(accountLoadPercent);
+  const label = getAccountLoadLabel(accountLoadPercent);
+  const riskMargin = portfolio.summary.temporary.marginLevel;
+
+  return (
+    <aside className="border-b border-white/10 bg-[#0b1322]/80 p-4 lg:border-b-0 lg:border-r">
+      <div className="mx-auto max-w-xs">
+        <div className="relative mx-auto h-40 w-52">
+          <svg aria-label="Account load gauge" className="h-full w-full" viewBox="0 0 190 120">
+            <path
+              d="M25 92 A70 70 0 0 1 68 27"
+              fill="none"
+              stroke="rgba(110,231,183,0.7)"
+              strokeLinecap="round"
+              strokeWidth="14"
+            />
+            <path
+              d="M68 27 A70 70 0 0 1 122 27"
+              fill="none"
+              stroke="rgba(250,204,21,0.78)"
+              strokeLinecap="round"
+              strokeWidth="14"
+            />
+            <path
+              d="M122 27 A70 70 0 0 1 165 92"
+              fill="none"
+              stroke="rgba(248,113,113,0.68)"
+              strokeLinecap="round"
+              strokeWidth="14"
+            />
+            <line
+              stroke="rgba(255,255,255,0.9)"
+              strokeLinecap="round"
+              strokeWidth="3"
+              x1="95"
+              x2={needleX}
+              y1="92"
+              y2={needleY}
+            />
+            <circle cx="95" cy="92" fill="#0b1322" r="7" stroke="rgba(255,255,255,0.75)" strokeWidth="2" />
+            <text fill="rgba(110,231,183,0.75)" fontSize="9" x="20" y="108">
+              безопасно
+            </text>
+            <text fill="rgba(248,113,113,0.8)" fontSize="9" textAnchor="end" x="170" y="108">
+              опасно
+            </text>
+          </svg>
+          <span
+            className={cn(
+              "absolute left-1/2 top-6 -translate-x-1/2 rounded-full px-2 py-0.5 text-[10px] font-semibold",
+              tone === "emerald" && "bg-emerald-300/15 text-emerald-200",
+              tone === "amber" && "bg-amber-300/15 text-amber-200",
+              tone === "orange" && "bg-orange-300/15 text-orange-200",
+              tone === "rose" && "bg-rose-300/15 text-rose-200",
+            )}
+          >
+            {label}
+          </span>
+        </div>
+
+        <div className="text-center">
+          <p className="text-3xl font-bold text-white">{formatPercent(accountLoadPercent)}</p>
+          <p
+            className={cn(
+              "mt-1 text-lg font-bold",
+              tone === "emerald" && "text-emerald-300",
+              tone === "amber" && "text-amber-200",
+              tone === "orange" && "text-orange-200",
+              tone === "rose" && "text-rose-300",
+            )}
+          >
+            {riskLabelBg(portfolio.summary.riskStatus)}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">Account load</p>
+        </div>
+
+        <div className="mt-5">
+          <div className="relative h-2 overflow-hidden rounded-full bg-slate-950/60">
+            <div className="flex h-full">
+              <span className="basis-[20%] bg-emerald-300/75" />
+              <span className="basis-[30%] bg-amber-300/80" />
+              <span className="flex-1 bg-orange-300/75" />
+            </div>
+            <span
+              className="absolute top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.55)]"
+              style={{ left: `${marker}%` }}
+            />
+          </div>
+          <div className="mt-2 flex justify-between text-[11px] text-slate-500">
+            <span>0%</span>
+            <span>20%</span>
+            <span>50%</span>
+            <span>100%</span>
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-lg border border-amber-200/20 bg-amber-300/[0.06] p-3">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-amber-200">
+            Stop-out буфер
+          </p>
+          <p className="mt-2 text-2xl font-bold text-white">
+            {formatCurrency(portfolio.summary.temporary.maxLossBeforeStopOut, accountCurrency)}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">преди ликвидационна зона</p>
+        </div>
+
+        <div className="mt-4">
+          <RiskMetricRow
+            label="Free margin"
+            tone={portfolio.summary.temporary.freeMargin >= 0 ? "green" : "red"}
+            value={formatCurrency(portfolio.summary.temporary.freeMargin, accountCurrency)}
+          />
+          <RiskMetricRow
+            label="Equity"
+            value={formatCurrency(portfolio.summary.equity, accountCurrency)}
+          />
+          <RiskMetricRow
+            label="Risk margin"
+            tone={riskMargin >= 200 ? "green" : "amber"}
+            value={formatPercent(riskMargin)}
+          />
+          <RiskMetricRow
+            label="Exposure"
+            value={formatCurrency(portfolio.summary.totalPositionValueAccount, accountCurrency)}
+          />
+          <RiskMetricRow
+            label="Unrealized P/L"
+            tone={portfolio.summary.totalUnrealizedPnLAccount >= 0 ? "green" : "red"}
+            value={formatCurrency(portfolio.summary.totalUnrealizedPnLAccount, accountCurrency)}
+          />
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function ActionPill({
+  children,
+  onClick,
+  tone = "slate",
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  tone?: "slate" | "blue" | "green";
+}) {
+  return (
+    <button
+      className={cn(
+        "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-3 text-xs font-semibold transition",
+        tone === "slate" &&
+          "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]",
+        tone === "blue" &&
+          "border-blue-300/20 bg-blue-400/15 text-blue-100 hover:bg-blue-400/20",
+        tone === "green" &&
+          "border-emerald-300/20 bg-emerald-400/15 text-emerald-100 hover:bg-emerald-400/20",
+      )}
+      onClick={onClick}
+      type="button"
+    >
+      {children}
+    </button>
+  );
+}
+
+function PositionCards({
+  positions,
+  accountCurrency,
+  onEdit,
+  onDelete,
+  onAddLot,
+  onSell,
+  deletingId,
+  expandedPositionId,
+  lotForms,
+  savingLotId,
+  deletingLotId,
+  onTogglePosition,
+  onLotFormChange,
+  onSaveLot,
+  onDeleteLot,
+}: {
+  positions: PortfolioPositionAnalysis[];
+  accountCurrency: string;
+  onEdit: (position: SavedPortfolioPosition) => void;
+  onDelete: (position: SavedPortfolioPosition) => void;
+  onAddLot: (position: SavedPortfolioPosition) => void;
+  onSell: (position: SavedPortfolioPosition) => void;
+  deletingId: string | null;
+  expandedPositionId: string | null;
+  lotForms: Record<string, LotForm>;
+  savingLotId: string | null;
+  deletingLotId: string | null;
+  onTogglePosition: (position: SavedPortfolioPosition) => void;
+  onLotFormChange: (key: string, field: keyof LotForm, value: string) => void;
+  onSaveLot: (position: SavedPortfolioPosition, formKey: string, lot?: SavedPortfolioLot) => void;
+  onDeleteLot: (position: SavedPortfolioPosition, lot: SavedPortfolioLot) => void;
+}) {
+  if (positions.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-white/10 bg-white/[0.015] px-4 py-8 text-center text-sm text-slate-400">
+        Все още няма позиции. Използвай “Нова позиция”, за да добавиш първата.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {positions.map((analysis) => {
+        const position = analysis.position;
+        const lots = position.lots ?? [];
+        const isExpanded = expandedPositionId === position.id;
+        const allocation = clampPercent(analysis.allocationPercent);
+        const instrumentCurrency = position.instrumentCurrency;
+
+        return (
+          <article
+            className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.025]"
+            key={position.id}
+          >
+            <div className="flex flex-col gap-3 border-b border-white/8 px-4 py-3 xl:flex-row xl:items-start xl:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-lg font-bold text-white">{position.symbol}</h3>
+                  <span className="rounded-md border border-emerald-200/20 bg-emerald-300/10 px-2 py-0.5 text-xs font-bold text-emerald-200">
+                    {directionLabel(position.direction)}
+                  </span>
+                  <span className="text-sm text-slate-500">
+                    {formatNumber(position.quantity, 2)} акции · {lots.length}{" "}
+                    {lots.length === 1 ? "лот" : "лота"}
+                  </span>
+                </div>
+                {position.assetName ? (
+                  <p className="mt-1 text-xs text-slate-500">{position.assetName}</p>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusBadge status={analysis.riskBadge} />
+                <ActionPill onClick={() => onAddLot(position)} tone="blue">
+                  <PlusCircle className="size-4" />
+                  Добави лот
+                </ActionPill>
+                <ActionPill onClick={() => onSell(position)} tone="green">
+                  <DollarSign className="size-4" />
+                  Продай
+                </ActionPill>
+                <IconButton label={`Редактирай ${position.symbol}`} onClick={() => onEdit(position)}>
+                  <Edit3 className="size-4" />
+                </IconButton>
+                <IconButton
+                  disabled={deletingId === position.id}
+                  label={`Изтрий ${position.symbol}`}
+                  onClick={() => onDelete(position)}
+                  tone="red"
+                >
+                  {deletingId === position.id ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="size-4" />
+                  )}
+                </IconButton>
+              </div>
+            </div>
+
+            <div className="px-4 py-3">
+              <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+                <span className="font-medium text-slate-500">Дял от портфолио</span>
+                <span className="font-bold text-cyan-100">{formatPercent(analysis.allocationPercent)}</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-slate-950/65">
+                <div className="h-full rounded-full bg-cyan-300/85" style={{ width: `${allocation}%` }} />
+              </div>
+
+              <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+                <div>
+                  <p className="text-xs text-slate-500">Текуща цена</p>
+                  <p className="mt-1 font-semibold text-slate-100">
+                    {formatCurrency(analysis.basePrice, instrumentCurrency)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Стойност</p>
+                  <p className="mt-1 font-semibold text-slate-100">
+                    {formatCurrency(analysis.positionValueAccount, accountCurrency)}
+                  </p>
+                  {instrumentCurrency !== accountCurrency ? (
+                    <p className="text-xs text-slate-500">
+                      {formatCurrency(analysis.positionValueInstrument, instrumentCurrency)}
+                    </p>
+                  ) : null}
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Маржин</p>
+                  <p className="mt-1 font-semibold text-slate-100">
+                    {formatCurrency(analysis.normalUsedMargin, accountCurrency)}
+                  </p>
+                  <p className="text-xs text-amber-200">
+                    {formatCurrency(analysis.temporaryUsedMargin, accountCurrency)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Авто-закриване</p>
+                  <p className="mt-1 font-semibold text-rose-200">
+                    {formatCurrency(
+                      analysis.temporaryAutoClose.displayAutoClosePrice,
+                      instrumentCurrency,
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t border-white/8 bg-slate-950/10 px-4 py-3">
+              <button
+                className="flex w-full items-center gap-2 text-left text-sm font-semibold text-slate-400 transition hover:text-slate-100"
+                onClick={() => onTogglePosition(position)}
+                type="button"
+              >
+                <ChevronDown className={cn("size-4 transition", isExpanded && "rotate-180")} />
+                Лотове ({lots.length})
+                <span className="rounded border border-amber-200/20 bg-amber-300/10 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
+                  {instrumentCurrency}
+                </span>
+              </button>
+
+              {lots.length > 0 ? (
+                <div className="mt-3 space-y-1.5">
+                  {lots.slice(0, isExpanded ? lots.length : 3).map((lot, index) => (
+                    <div
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-white/8 bg-white/[0.018] px-3 py-2 text-sm"
+                      key={lot.id}
+                    >
+                      <span className="text-slate-500">Лот #{index + 1}</span>
+                      <span className="font-semibold text-slate-200">
+                        Entry {formatCurrency(lot.entryPrice, instrumentCurrency)}
+                      </span>
+                      <span className="text-slate-400">{formatNumber(lot.quantity, 2)} акции</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {isExpanded ? (
+                <div className="mt-3">
+                  <PositionLotsPanel
+                    accountCurrency={accountCurrency}
+                    analysis={analysis}
+                    deletingLotId={deletingLotId}
+                    lotForms={lotForms}
+                    onDeleteLot={onDeleteLot}
+                    onLotFormChange={onLotFormChange}
+                    onSaveLot={onSaveLot}
+                    savingLotId={savingLotId}
+                  />
+                </div>
+              ) : null}
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 export function PortfolioRiskManager() {
   const [profileForm, setProfileForm] = useState<ProfileForm>(
     profileToForm(getDefaultAccountRiskProfile()),
@@ -1609,6 +2030,8 @@ export function PortfolioRiskManager() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [stressOpen, setStressOpen] = useState(false);
   const [openHelp, setOpenHelp] = useState<HelpTopic | null>(null);
+  const [activeWorkbenchTab, setActiveWorkbenchTab] = useState<PortfolioWorkbenchTab>("positions");
+  const [positionEditorOpen, setPositionEditorOpen] = useState(false);
   const [expandedPositionId, setExpandedPositionId] = useState<string | null>(null);
   const [lotForms, setLotForms] = useState<Record<string, LotForm>>({});
   const [savingLotId, setSavingLotId] = useState<string | null>(null);
@@ -1795,6 +2218,7 @@ export function PortfolioRiskManager() {
       applyApiNotice(data);
       setPositionForm(emptyPositionForm());
       setEditingId(null);
+      setPositionEditorOpen(false);
       setPreviewRequested(false);
       setMessage(editingId ? "Позицията е обновена." : "Позицията е запазена.");
     } catch (saveError) {
@@ -1936,6 +2360,7 @@ export function PortfolioRiskManager() {
     setEditingId(position.id);
     setPositionForm(positionToForm(position));
     setPreviewRequested(true);
+    setPositionEditorOpen(true);
   }
 
   function toggleHelp(topic: HelpTopic) {
@@ -1956,7 +2381,7 @@ export function PortfolioRiskManager() {
 
   return (
     <div className="space-y-4">
-      <section className="rounded-lg border border-white/10 bg-[#0b1322]/80">
+      <section className="hidden rounded-lg border border-white/10 bg-[#0b1322]/80">
         <div className="flex flex-col gap-4 border-b border-white/8 px-4 py-3 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -2142,7 +2567,401 @@ export function PortfolioRiskManager() {
         </div>
       ) : null}
 
-      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+      {savedPortfolio ? (
+        <section className="overflow-hidden rounded-xl border border-white/10 bg-[#0b1322]/80 shadow-2xl shadow-black/20">
+          <div className="flex items-center gap-2 border-b border-white/10 bg-white/[0.025] px-4 py-3">
+            <span className="size-2.5 rounded-full bg-rose-400" />
+            <span className="size-2.5 rounded-full bg-amber-300" />
+            <span className="size-2.5 rounded-full bg-emerald-400" />
+            <span className="ml-3 min-w-0 flex-1 rounded-md bg-white/[0.045] px-3 py-1.5 text-xs text-slate-500">
+              /risk-calculator
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-base font-bold text-white">Portfolio Risk</h2>
+                <span className="text-sm text-slate-500">
+                  {profileForm.brokerName || "Broker"} · {accountCurrency}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                Управление на позиции, лотове, продажби и account load.
+              </p>
+            </div>
+            <button
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-blue-300/20 bg-blue-500 px-4 text-sm font-bold text-white transition hover:bg-blue-400"
+              onClick={() => {
+                setEditingId(null);
+                setPositionForm(emptyPositionForm());
+                setPreviewRequested(false);
+                setPositionEditorOpen(true);
+                setActiveWorkbenchTab("positions");
+              }}
+              type="button"
+            >
+              <Plus className="size-4" />
+              Нова позиция
+            </button>
+          </div>
+
+          <div className="grid min-w-0 lg:grid-cols-[280px_minmax(0,1fr)]">
+            <RiskGaugeSidebar
+              accountCurrency={accountCurrency}
+              accountLoadPercent={accountLoadPercent}
+              portfolio={savedPortfolio}
+            />
+
+            <div className="min-w-0">
+              <div className="flex min-w-0 gap-1 overflow-x-auto border-b border-white/10 px-4">
+                {[
+                  ["positions", `Позиции (${savedPortfolio.positions.length})`],
+                  ["allocation", "Разпределение"],
+                  ["stress", "Стрес тест"],
+                ].map(([tab, label]) => (
+                  <button
+                    className={cn(
+                      "h-12 shrink-0 border-b-2 px-4 text-sm font-bold transition",
+                      activeWorkbenchTab === tab
+                        ? "border-blue-400 text-white"
+                        : "border-transparent text-slate-500 hover:text-slate-200",
+                    )}
+                    key={tab}
+                    onClick={() => setActiveWorkbenchTab(tab as PortfolioWorkbenchTab)}
+                    type="button"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="min-h-[26rem] p-4">
+                {activeWorkbenchTab === "positions" ? (
+                  <div className="space-y-4">
+                    <PositionCards
+                      accountCurrency={accountCurrency}
+                      deletingLotId={deletingLotId}
+                      deletingId={deletingId}
+                      expandedPositionId={expandedPositionId}
+                      lotForms={lotForms}
+                      onAddLot={(position) => setAddLotTarget(position)}
+                      onDeleteLot={(position, lot) => void deleteLot(position, lot)}
+                      onDelete={(position) => void deletePosition(position)}
+                      onEdit={startEdit}
+                      onLotFormChange={updateLotForm}
+                      onSaveLot={(position, formKey, lot) => void saveLot(position, formKey, lot)}
+                      onSell={(position) => setSellTarget(position)}
+                      onTogglePosition={togglePositionDetails}
+                      positions={savedPortfolio.positions}
+                      savingLotId={savingLotId}
+                    />
+
+                    {positionEditorOpen ? (
+                      <div className="rounded-lg border border-white/10 bg-slate-950/20 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <h3 className="text-base font-bold text-white">
+                              {editingId ? "Редакция на позиция" : "Нова позиция"}
+                            </h3>
+                            <p className="mt-1 text-xs text-slate-500">
+                              Основни настройки за символ, цена, количество и leverage.
+                            </p>
+                          </div>
+                          <button
+                            aria-label="Затвори редактора"
+                            className="inline-flex size-8 items-center justify-center rounded-md border border-white/10 text-slate-400 hover:bg-white/[0.06] hover:text-white"
+                            onClick={() => {
+                              setPositionEditorOpen(false);
+                              setEditingId(null);
+                              setPositionForm(emptyPositionForm());
+                              setPreviewRequested(false);
+                            }}
+                            type="button"
+                          >
+                            <X className="size-4" />
+                          </button>
+                        </div>
+
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                          <Field
+                            label="Symbol"
+                            onChange={(value) => updatePositionField("symbol", value)}
+                            value={positionForm.symbol}
+                          />
+                          <Field
+                            label="Asset name"
+                            onChange={(value) => updatePositionField("assetName", value)}
+                            value={positionForm.assetName}
+                          />
+                          <SelectField
+                            label="Direction"
+                            onChange={(value) => updatePositionField("direction", value)}
+                            value={positionForm.direction}
+                          >
+                            <option value="buy">BUY</option>
+                            <option value="sell">SELL</option>
+                          </SelectField>
+                          <Field
+                            label="Currency"
+                            onChange={(value) => updatePositionField("instrumentCurrency", value)}
+                            value={positionForm.instrumentCurrency}
+                          />
+                          <Field
+                            label="Entry price"
+                            onChange={(value) => updatePositionField("entryPrice", value)}
+                            type="number"
+                            value={positionForm.entryPrice}
+                          />
+                          <Field
+                            hint="Празно за планирана позиция."
+                            label="Current price"
+                            onChange={(value) => updatePositionField("currentPrice", value)}
+                            type="number"
+                            value={positionForm.currentPrice}
+                          />
+                          <Field
+                            label="Quantity"
+                            onChange={(value) => updatePositionField("quantity", value)}
+                            type="number"
+                            value={positionForm.quantity}
+                          />
+                          <Field
+                            hint="Празно = account setting."
+                            label="Normal leverage"
+                            onChange={(value) => updatePositionField("normalFixedLeverage", value)}
+                            type="number"
+                            value={positionForm.normalFixedLeverage}
+                          />
+                          <Field
+                            hint="Празно = account setting."
+                            label="Risk leverage"
+                            onChange={(value) => updatePositionField("temporaryFixedLeverage", value)}
+                            type="number"
+                            value={positionForm.temporaryFixedLeverage}
+                          />
+                          <Field
+                            className="sm:col-span-2 xl:col-span-3"
+                            label="Notes"
+                            onChange={(value) => updatePositionField("notes", value)}
+                            value={positionForm.notes}
+                          />
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-2 border-t border-white/8 pt-3">
+                          <button
+                            className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 bg-white/[0.03] px-3 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.06]"
+                            onClick={() => setPreviewRequested(true)}
+                            type="button"
+                          >
+                            <Activity className="size-4" />
+                            Preview
+                          </button>
+                          <button
+                            className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-blue-300/20 bg-blue-500 px-3 text-sm font-bold text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
+                            disabled={saving}
+                            onClick={() => void savePosition()}
+                            type="button"
+                          >
+                            {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+                            {editingId ? "Update" : "Save"}
+                          </button>
+                        </div>
+
+                        {previewPortfolio ? (
+                          <div className="mt-4 grid gap-2 rounded-md border border-white/8 bg-white/[0.018] p-3 text-xs sm:grid-cols-4">
+                            {previewPortfolio.ok ? (
+                              <>
+                                <SummaryCell
+                                  label="Exposure"
+                                  value={formatCurrency(
+                                    previewPortfolio.summary.totalPositionValueAccount,
+                                    previewPortfolio.summary.accountCurrency,
+                                  )}
+                                />
+                                <SummaryCell
+                                  label="Margin risk"
+                                  value={formatCurrency(
+                                    previewPortfolio.summary.temporary.usedMargin,
+                                    previewPortfolio.summary.accountCurrency,
+                                  )}
+                                />
+                                <SummaryCell
+                                  label="Level normal"
+                                  value={formatPercent(previewPortfolio.summary.normal.marginLevel)}
+                                />
+                                <SummaryCell
+                                  label="Level risk"
+                                  value={formatPercent(previewPortfolio.summary.temporary.marginLevel)}
+                                />
+                              </>
+                            ) : (
+                              <p className="sm:col-span-4 text-rose-100">
+                                {previewPortfolio.errors.join(" ")}
+                              </p>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {activeWorkbenchTab === "allocation" ? (
+                  <PortfolioAllocationChart
+                    accountCurrency={accountCurrency}
+                    positions={savedPortfolio.positions}
+                  />
+                ) : null}
+
+                {activeWorkbenchTab === "stress" ? (
+                  <div className="grid gap-6 xl:grid-cols-2">
+                    <div className="space-y-3">
+                      <Field
+                        hint="Пример: 10, 20, 30 или 50."
+                        label="Uniform drop %"
+                        onChange={setUniformDrop}
+                        type="number"
+                        value={uniformDrop}
+                      />
+                      <StressResultView
+                        currency={accountCurrency}
+                        result={uniformStress}
+                        title={`Uniform Drop · ${uniformDrop || 0}%`}
+                      />
+                    </div>
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-white">Custom crash</p>
+                        <InfoHint text="Празно = текуща/входна цена" />
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {positions.length > 0 ? (
+                          positions.map((position) => {
+                            const key = getPositionKey(position);
+
+                            return (
+                              <Field
+                                key={key}
+                                label={`${position.symbol} crash`}
+                                onChange={(value) =>
+                                  setCrashPrices((current) => ({ ...current, [key]: value }))
+                                }
+                                type="number"
+                                value={crashPrices[key] ?? ""}
+                              />
+                            );
+                          })
+                        ) : (
+                          <p className="text-sm text-slate-400">
+                            Добави позиции, за да въведеш crash prices.
+                          </p>
+                        )}
+                      </div>
+                      <StressResultView
+                        currency={accountCurrency}
+                        result={customStress}
+                        title="Custom Crash"
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap gap-2 border-t border-white/10 px-4 py-3">
+                <button
+                  className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-400 hover:text-slate-100"
+                  onClick={() => setSettingsOpen((current) => !current)}
+                  type="button"
+                >
+                  Настройки на акаунта
+                </button>
+                <button
+                  className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-400 hover:text-slate-100"
+                  onClick={() => {
+                    setSettingsOpen(true);
+                  }}
+                  type="button"
+                >
+                  Add funds симулация
+                </button>
+              </div>
+
+              {settingsOpen ? (
+                <div className="border-t border-white/10 p-4">
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    <Field
+                      label="Account name"
+                      onChange={(value) => updateProfileField("accountName", value)}
+                      value={profileForm.accountName}
+                    />
+                    <Field
+                      label="Broker"
+                      onChange={(value) => updateProfileField("brokerName", value)}
+                      value={profileForm.brokerName}
+                    />
+                    <Field
+                      label="Balance"
+                      onChange={(value) => updateProfileField("balance", value)}
+                      type="number"
+                      value={profileForm.balance}
+                    />
+                    <Field
+                      label="Add funds"
+                      onChange={(value) => updateProfileField("addedFundsSimulation", value)}
+                      type="number"
+                      value={profileForm.addedFundsSimulation}
+                    />
+                    <Field
+                      label="Currency"
+                      onChange={(value) => updateProfileField("accountCurrency", value)}
+                      value={profileForm.accountCurrency}
+                    />
+                    <Field
+                      label="Stop-out %"
+                      onChange={(value) => updateProfileField("stopOutLevelPercent", value)}
+                      type="number"
+                      value={profileForm.stopOutLevelPercent}
+                    />
+                    <Field
+                      label="Normal leverage"
+                      onChange={(value) => updateProfileField("normalFixedLeverage", value)}
+                      type="number"
+                      value={profileForm.normalFixedLeverage}
+                    />
+                    <Field
+                      label="Risk leverage"
+                      onChange={(value) => updateProfileField("temporaryFixedLeverage", value)}
+                      type="number"
+                      value={profileForm.temporaryFixedLeverage}
+                    />
+                    <Field
+                      hint={`Колко ${profileForm.accountCurrency || "EUR"} е 1 USD.`}
+                      label="FX USD"
+                      onChange={(value) => updateProfileField("fxRateInstrumentToAccount", value)}
+                      type="number"
+                      value={profileForm.fxRateInstrumentToAccount}
+                    />
+                  </div>
+                  <div className="mt-4 flex justify-end border-t border-white/8 pt-3">
+                    <button
+                      className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 bg-white/[0.04] px-3 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={saving}
+                      onClick={() => void saveProfile()}
+                      type="button"
+                    >
+                      {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+                      Save settings
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      <div className="hidden">
         <div className="min-w-0 space-y-4">
           <PortfolioAllocationChart
             accountCurrency={accountCurrency}

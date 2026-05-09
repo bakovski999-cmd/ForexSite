@@ -80,8 +80,25 @@ type SavedPositionLotPayload = Omit<
   id?: string;
 };
 
+type FallbackSavedPositionSale = {
+  id: string;
+  savedPositionId: string;
+  savedPositionLotId: string | null;
+  symbol: string;
+  entryPrice: number;
+  sellPrice: number;
+  sharesSold: number;
+  realizedPnlInstrument: number;
+  realizedPnlAccount: number;
+  fxRate: number;
+  notes: string | null;
+  soldAt: string;
+  createdAt: string;
+};
+
 const fallbackLotIdPrefix = "note-lot:";
 const fallbackBaseLotIdPrefix = `${fallbackLotIdPrefix}base:`;
+const fallbackSaleIdPrefix = "note-sale:";
 const notesLotsMarkerStart = "<!-- portfolio-risk-lots:";
 const notesLotsMarkerEnd = " -->";
 
@@ -150,6 +167,54 @@ function sanitizeLotFromMetadata(value: unknown, positionId: string): SavedPortf
   };
 }
 
+function sanitizeSaleFromMetadata(value: unknown, positionId: string): FallbackSavedPositionSale | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const sale = value as Partial<FallbackSavedPositionSale>;
+  const entryPrice = Number(sale.entryPrice);
+  const sellPrice = Number(sale.sellPrice);
+  const sharesSold = Number(sale.sharesSold);
+  const realizedPnlInstrument = Number(sale.realizedPnlInstrument);
+  const realizedPnlAccount = Number(sale.realizedPnlAccount);
+  const fxRate = Number(sale.fxRate);
+
+  if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
+    return null;
+  }
+
+  if (!Number.isFinite(sellPrice) || sellPrice <= 0) {
+    return null;
+  }
+
+  if (!Number.isFinite(sharesSold) || sharesSold <= 0) {
+    return null;
+  }
+
+  return {
+    id:
+      typeof sale.id === "string" && sale.id.startsWith(fallbackSaleIdPrefix)
+        ? sale.id
+        : `${fallbackSaleIdPrefix}${randomUUID()}`,
+    savedPositionId: positionId,
+    savedPositionLotId:
+      typeof sale.savedPositionLotId === "string" && sale.savedPositionLotId
+        ? sale.savedPositionLotId
+        : null,
+    symbol: typeof sale.symbol === "string" ? sale.symbol : "",
+    entryPrice,
+    sellPrice,
+    sharesSold,
+    realizedPnlInstrument: Number.isFinite(realizedPnlInstrument) ? realizedPnlInstrument : 0,
+    realizedPnlAccount: Number.isFinite(realizedPnlAccount) ? realizedPnlAccount : 0,
+    fxRate: Number.isFinite(fxRate) && fxRate > 0 ? fxRate : 1,
+    notes: typeof sale.notes === "string" && sale.notes.trim() ? sale.notes.trim() : null,
+    soldAt: typeof sale.soldAt === "string" ? sale.soldAt : new Date().toISOString(),
+    createdAt: typeof sale.createdAt === "string" ? sale.createdAt : new Date().toISOString(),
+  };
+}
+
 function splitNotesMetadata(notes: string | null, positionId: string) {
   const rawNotes = notes ?? "";
   const markerStartIndex = rawNotes.indexOf(notesLotsMarkerStart);
@@ -158,6 +223,7 @@ function splitNotesMetadata(notes: string | null, positionId: string) {
     return {
       userNotes: rawNotes.trim() || null,
       fallbackLots: [] as SavedPortfolioLot[],
+      fallbackSales: [] as FallbackSavedPositionSale[],
     };
   }
 
@@ -168,6 +234,7 @@ function splitNotesMetadata(notes: string | null, positionId: string) {
     return {
       userNotes: rawNotes.trim() || null,
       fallbackLots: [] as SavedPortfolioLot[],
+      fallbackSales: [] as FallbackSavedPositionSale[],
     };
   }
 
@@ -185,16 +252,25 @@ function splitNotesMetadata(notes: string | null, positionId: string) {
       decodedJson = encodedJson;
     }
 
-    const metadata = JSON.parse(decodedJson) as { lots?: unknown[] };
+    const metadata = JSON.parse(decodedJson) as { lots?: unknown[]; sales?: unknown[] };
     const fallbackLots = Array.isArray(metadata.lots)
       ? metadata.lots
           .map((lot) => sanitizeLotFromMetadata(lot, positionId))
           .filter((lot): lot is SavedPortfolioLot => Boolean(lot))
       : [];
+    const fallbackSales = Array.isArray(metadata.sales)
+      ? metadata.sales
+          .map((sale) => sanitizeSaleFromMetadata(sale, positionId))
+          .filter((sale): sale is FallbackSavedPositionSale => Boolean(sale))
+      : [];
 
-    return { userNotes, fallbackLots };
+    return { userNotes, fallbackLots, fallbackSales };
   } catch {
-    return { userNotes, fallbackLots: [] as SavedPortfolioLot[] };
+    return {
+      userNotes,
+      fallbackLots: [] as SavedPortfolioLot[],
+      fallbackSales: [] as FallbackSavedPositionSale[],
+    };
   }
 }
 
@@ -212,10 +288,31 @@ function serializeLotForMetadata(lot: SavedPortfolioLot) {
   };
 }
 
-function buildNotesWithFallbackLots(userNotes: string | null | undefined, lots: SavedPortfolioLot[]) {
+function serializeSaleForMetadata(sale: FallbackSavedPositionSale) {
+  return {
+    id: sale.id,
+    savedPositionLotId: sale.savedPositionLotId,
+    symbol: sale.symbol,
+    entryPrice: sale.entryPrice,
+    sellPrice: sale.sellPrice,
+    sharesSold: sale.sharesSold,
+    realizedPnlInstrument: sale.realizedPnlInstrument,
+    realizedPnlAccount: sale.realizedPnlAccount,
+    fxRate: sale.fxRate,
+    notes: sale.notes,
+    soldAt: sale.soldAt,
+    createdAt: sale.createdAt,
+  };
+}
+
+function buildNotesWithFallbackMetadata(
+  userNotes: string | null | undefined,
+  lots: SavedPortfolioLot[],
+  sales: FallbackSavedPositionSale[] = [],
+) {
   const cleanNotes = userNotes?.trim() ?? "";
 
-  if (lots.length === 0) {
+  if (lots.length === 0 && sales.length === 0) {
     return cleanNotes || null;
   }
 
@@ -223,6 +320,7 @@ function buildNotesWithFallbackLots(userNotes: string | null | undefined, lots: 
     JSON.stringify({
       version: 1,
       lots: lots.map(serializeLotForMetadata),
+      sales: sales.map(serializeSaleForMetadata),
     }),
   );
   const marker = `${notesLotsMarkerStart}${metadata}${notesLotsMarkerEnd}`;
@@ -444,10 +542,29 @@ async function saveFallbackLotsToPositionNotes(
   row: SavedPositionRow,
   lots: SavedPortfolioLot[],
 ) {
+  const { userNotes, fallbackSales } = splitNotesMetadata(row.notes, row.id);
+  const { error } = await client
+    .from("saved_positions")
+    .update({ notes: buildNotesWithFallbackMetadata(userNotes, lots, fallbackSales) })
+    .eq("id", row.id)
+    .eq("user_id", userId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function saveFallbackMetadataToPositionNotes(
+  client: ReturnType<typeof getServiceClient>,
+  userId: string,
+  row: SavedPositionRow,
+  lots: SavedPortfolioLot[],
+  sales: FallbackSavedPositionSale[],
+) {
   const { userNotes } = splitNotesMetadata(row.notes, row.id);
   const { error } = await client
     .from("saved_positions")
-    .update({ notes: buildNotesWithFallbackLots(userNotes, lots) })
+    .update({ notes: buildNotesWithFallbackMetadata(userNotes, lots, sales) })
     .eq("id", row.id)
     .eq("user_id", userId);
 
@@ -518,6 +635,97 @@ async function deleteFallbackSavedPositionLot(
   await saveFallbackLotsToPositionNotes(client, userId, row, nextLots);
 }
 
+function createFallbackSale(
+  row: SavedPositionRow,
+  lot: SavedPortfolioLot,
+  sale: { lotId: string; sharesToSell: number; sellPrice: number },
+  fxRate: number,
+  notes?: string | null,
+): FallbackSavedPositionSale {
+  const now = new Date().toISOString();
+  const realizedPnlInstrument =
+    row.direction === "sell"
+      ? (lot.entryPrice - sale.sellPrice) * sale.sharesToSell
+      : (sale.sellPrice - lot.entryPrice) * sale.sharesToSell;
+  const realizedPnlAccount =
+    Number.isFinite(fxRate) && fxRate > 0 ? realizedPnlInstrument / fxRate : realizedPnlInstrument;
+
+  return {
+    id: `${fallbackSaleIdPrefix}${randomUUID()}`,
+    savedPositionId: row.id,
+    savedPositionLotId: sale.lotId,
+    symbol: row.symbol,
+    entryPrice: lot.entryPrice,
+    sellPrice: sale.sellPrice,
+    sharesSold: sale.sharesToSell,
+    realizedPnlInstrument,
+    realizedPnlAccount,
+    fxRate: Number.isFinite(fxRate) && fxRate > 0 ? fxRate : 1,
+    notes: notes?.trim() || null,
+    soldAt: now,
+    createdAt: now,
+  };
+}
+
+async function applyFallbackSaleToLots(
+  client: ReturnType<typeof getServiceClient>,
+  userId: string,
+  positionId: string,
+  sales: Array<{ lotId: string; sharesToSell: number; sellPrice: number }>,
+  fxRate: number,
+  notes?: string | null,
+) {
+  const row = await fetchSavedPositionRow(client, userId, positionId);
+  const { fallbackLots, fallbackSales } = splitNotesMetadata(row.notes, row.id);
+  let nextLots = ensureBaseFallbackLot(row, fallbackLots);
+  const nextSales = [...fallbackSales];
+
+  for (const sale of sales) {
+    const lot = nextLots.find((item) => item.id === sale.lotId);
+
+    if (!lot) {
+      throw new Error("Лотът за продажба не беше намерен.");
+    }
+
+    if (sale.sharesToSell > lot.quantity) {
+      throw new Error("Не може да продадеш повече акции от наличните в лота.");
+    }
+
+    nextSales.push(createFallbackSale(row, lot, sale, fxRate, notes));
+    const nextQuantity = lot.quantity - sale.sharesToSell;
+    nextLots =
+      nextQuantity <= 0
+        ? nextLots.filter((item) => item.id !== lot.id)
+        : nextLots.map((item) =>
+            item.id === lot.id
+              ? {
+                  ...item,
+                  quantity: nextQuantity,
+                  updatedAt: new Date().toISOString(),
+                }
+              : item,
+          );
+  }
+
+  const totalRemaining = nextLots.reduce((sum, lot) => sum + lot.quantity, 0);
+
+  if (totalRemaining <= 0) {
+    const { error } = await client
+      .from("saved_positions")
+      .delete()
+      .eq("id", positionId)
+      .eq("user_id", userId);
+
+    if (error) {
+      throw error;
+    }
+
+    return;
+  }
+
+  await saveFallbackMetadataToPositionNotes(client, userId, row, nextLots, nextSales);
+}
+
 function getDatabaseErrorText(error: unknown) {
   if (error instanceof Error) {
     return error.message;
@@ -539,6 +747,19 @@ function isMissingLotsTableError(error: unknown) {
 
   return (
     text.includes("saved_position_lots") &&
+    (text.includes("does not exist") ||
+      text.includes("schema cache") ||
+      text.includes("relation") ||
+      text.includes("42p01") ||
+      text.includes("pgrst205"))
+  );
+}
+
+function isMissingSalesTableError(error: unknown) {
+  const text = getDatabaseErrorText(error).toLowerCase();
+
+  return (
+    text.includes("saved_position_sales") &&
     (text.includes("does not exist") ||
       text.includes("schema cache") ||
       text.includes("relation") ||
@@ -686,10 +907,10 @@ export async function updateSavedPosition(
 ): Promise<SavedPortfolioPosition> {
   const client = getServiceClient();
   const currentRow = await fetchSavedPositionRow(client, userId, position.id);
-  const { fallbackLots } = splitNotesMetadata(currentRow.notes, position.id);
+  const { fallbackLots, fallbackSales } = splitNotesMetadata(currentRow.notes, position.id);
   const nextRow = {
     ...positionToRow(userId, accountRiskProfileId, position),
-    notes: buildNotesWithFallbackLots(position.notes, fallbackLots),
+    notes: buildNotesWithFallbackMetadata(position.notes, fallbackLots, fallbackSales),
   };
   const { data, error } = await client
     .from("saved_positions")
@@ -859,15 +1080,12 @@ export async function applySaleToLots(
   notes?: string | null,
 ): Promise<void> {
   const client = getServiceClient();
+  const positionRow = await fetchSavedPositionRow(client, userId, positionId);
 
-  const { data: positionRow } = await client
-    .from("saved_positions")
-    .select("symbol, instrument_currency, account_risk_profile_id")
-    .eq("id", positionId)
-    .eq("user_id", userId)
-    .single();
-
-  const symbol = (positionRow as { symbol?: string } | null)?.symbol ?? "";
+  if (sales.some((sale) => sale.lotId.startsWith(fallbackLotIdPrefix))) {
+    await applyFallbackSaleToLots(client, userId, positionId, sales, fxRate, notes);
+    return;
+  }
 
   for (const sale of sales) {
     const { data: lotRow, error: lotFetchError } = await client
@@ -878,24 +1096,41 @@ export async function applySaleToLots(
       .eq("saved_position_id", positionId)
       .single();
 
-    if (lotFetchError || !lotRow) {
-      continue;
+    if (lotFetchError) {
+      if (isMissingLotsTableError(lotFetchError)) {
+        await applyFallbackSaleToLots(client, userId, positionId, sales, fxRate, notes);
+        return;
+      }
+
+      throw lotFetchError;
+    }
+
+    if (!lotRow) {
+      throw new Error("Лотът за продажба не беше намерен.");
     }
 
     const lot = lotRow as SavedPositionLotRow;
     const entryPrice = Number(lot.entry_price);
-    const realizedPnLInstrument = (sale.sellPrice - entryPrice) * sale.sharesToSell;
+
+    if (sale.sharesToSell > Number(lot.quantity)) {
+      throw new Error("Не може да продадеш повече акции от наличните в лота.");
+    }
+
+    const realizedPnLInstrument =
+      positionRow.direction === "sell"
+        ? (entryPrice - sale.sellPrice) * sale.sharesToSell
+        : (sale.sellPrice - entryPrice) * sale.sharesToSell;
     const realizedPnLAccount =
       Number.isFinite(fxRate) && fxRate > 0
         ? realizedPnLInstrument / fxRate
         : realizedPnLInstrument;
 
-    await client.from("saved_position_sales").insert({
+    const { error: saleInsertError } = await client.from("saved_position_sales").insert({
       id: randomUUID(),
       user_id: userId,
       saved_position_id: positionId,
       saved_position_lot_id: sale.lotId,
-      symbol,
+      symbol: positionRow.symbol,
       entry_price: entryPrice,
       sell_price: sale.sellPrice,
       shares_sold: sale.sharesToSell,
@@ -905,6 +1140,33 @@ export async function applySaleToLots(
       notes: notes ?? null,
       sold_at: new Date().toISOString(),
     });
+
+    if (saleInsertError) {
+      if (isMissingSalesTableError(saleInsertError)) {
+        const currentRow = await fetchSavedPositionRow(client, userId, positionId);
+        const { fallbackLots, fallbackSales } = splitNotesMetadata(currentRow.notes, currentRow.id);
+        const fallbackLot: SavedPortfolioLot = {
+          id: sale.lotId,
+          userId,
+          savedPositionId: positionId,
+          entryPrice,
+          quantity: Number(lot.quantity),
+          plannedExitPrice: lot.planned_exit_price,
+          sharesToSell: lot.shares_to_sell,
+          notes: lot.notes,
+          displayOrder: lot.display_order,
+          createdAt: lot.created_at,
+          updatedAt: lot.updated_at,
+        };
+
+        await saveFallbackMetadataToPositionNotes(client, userId, currentRow, fallbackLots, [
+          ...fallbackSales,
+          createFallbackSale(positionRow, fallbackLot, sale, fxRate, notes),
+        ]);
+      } else {
+        throw saleInsertError;
+      }
+    }
 
     const newQuantity = Number(lot.quantity) - sale.sharesToSell;
 

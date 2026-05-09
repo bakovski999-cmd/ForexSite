@@ -18,8 +18,6 @@ type ApiResponse = {
   positions?: SavedPortfolioPosition[];
 };
 
-const fallbackLotIdPrefix = "note-lot:";
-
 function parseNum(value: string): number {
   const n = parseFloat(value);
   return Number.isFinite(n) ? n : Number.NaN;
@@ -55,10 +53,7 @@ export function SellPositionDrawer({
   const instrumentCurrency = position.instrumentCurrency;
 
   const lots = useMemo(
-    () =>
-      (position.lots ?? []).filter(
-        (lot) => lot.quantity > 0 && !lot.id.startsWith(fallbackLotIdPrefix),
-      ),
+    () => (position.lots ?? []).filter((lot) => lot.quantity > 0),
     [position.lots],
   );
 
@@ -110,7 +105,8 @@ export function SellPositionDrawer({
 
       const proceeds = lotValid ? sharesToSell * sellPrice : 0;
       const costBasis = lotValid ? sharesToSell * lot.entryPrice : 0;
-      const realizedPnLInstrument = proceeds - costBasis;
+      const realizedPnLInstrument =
+        position.direction === "sell" ? costBasis - proceeds : proceeds - costBasis;
       const realizedPnLAccount =
         Number.isFinite(fxRate) && fxRate > 0
           ? realizedPnLInstrument / fxRate
@@ -141,7 +137,10 @@ export function SellPositionDrawer({
     );
     const allValid = perLot.every((item) => item.lotValid);
 
-    const realizedPnLInstrument = totals.proceedsInstrument - totals.costBasisInstrument;
+    const realizedPnLInstrument =
+      position.direction === "sell"
+        ? totals.costBasisInstrument - totals.proceedsInstrument
+        : totals.proceedsInstrument - totals.costBasisInstrument;
     const realizedPnLAccount =
       Number.isFinite(fxRate) && fxRate > 0
         ? realizedPnLInstrument / fxRate
@@ -157,7 +156,7 @@ export function SellPositionDrawer({
       allValid,
       hasSelection: checkedLots.length > 0,
     };
-  }, [lots, lotSales, fxRate]);
+  }, [lots, lotSales, fxRate, position.direction]);
 
   async function handleSave() {
     const validationErrors: string[] = [];
@@ -214,9 +213,6 @@ export function SellPositionDrawer({
     }
   }
 
-  const hasOnlyFallbackLots =
-    lots.length === 0 && (position.lots ?? []).some((lot) => lot.id.startsWith(fallbackLotIdPrefix));
-
   return (
     <>
       <div
@@ -256,11 +252,7 @@ export function SellPositionDrawer({
         </div>
 
         <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
-          {hasOnlyFallbackLots ? (
-            <div className="rounded-md border border-amber-200/20 bg-amber-300/[0.06] px-3 py-2.5 text-sm text-amber-100">
-              Лотовете са в стар формат. Добави нов лот за да обновиш данните, след което ще можеш да продаваш.
-            </div>
-          ) : lots.length === 0 ? (
+          {lots.length === 0 ? (
             <p className="text-sm text-slate-400">Няма лотове за продажба.</p>
           ) : (
             lots.map((lot, index) => {
@@ -270,7 +262,9 @@ export function SellPositionDrawer({
               const sellPrice = parseNum(sale?.sellPrice ?? "");
               const pnlInstrument =
                 isChecked && Number.isFinite(sharesToSell) && Number.isFinite(sellPrice)
-                  ? (sellPrice - lot.entryPrice) * sharesToSell
+                  ? position.direction === "sell"
+                    ? (lot.entryPrice - sellPrice) * sharesToSell
+                    : (sellPrice - lot.entryPrice) * sharesToSell
                   : null;
               const pnlAccount =
                 pnlInstrument !== null && Number.isFinite(fxRate) && fxRate > 0

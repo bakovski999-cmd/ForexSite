@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createClient } from "@supabase/supabase-js";
 import {
+  applySaleToLots,
   createSavedPositionLot,
   deleteSavedPositionLot,
   loadPortfolioRiskData,
@@ -38,9 +39,9 @@ const profileRow = {
   updated_at: "2026-05-08T00:00:00.000Z",
 };
 
-function encodeFallbackLots(lots: unknown[]) {
+function encodeFallbackLots(lots: unknown[], sales: unknown[] = []) {
   return `<!-- portfolio-risk-lots:${encodeURIComponent(
-    JSON.stringify({ version: 1, lots }),
+    JSON.stringify({ version: 1, lots, sales }),
   )} -->`;
 }
 
@@ -67,6 +68,7 @@ function createPositionRow(notes: string | null = null) {
 type MockState = {
   positionRows: ReturnType<typeof createPositionRow>[];
   lotsTableMissing: boolean;
+  salesTableMissing: boolean;
   lotRows: Array<{
     id: string;
     user_id: string;
@@ -87,6 +89,10 @@ function createPortfolioRiskClientMock(state: MockState) {
     code: "PGRST205",
     message: "Could not find the table 'public.saved_position_lots' in the schema cache",
   };
+  const missingSalesError = {
+    code: "PGRST205",
+    message: "Could not find the table 'public.saved_position_sales' in the schema cache",
+  };
 
   function makeQuery(table: string) {
     let operation: "select" | "insert" | "update" | "delete" = "select";
@@ -100,6 +106,11 @@ function createPortfolioRiskClientMock(state: MockState) {
       }
 
       if (table === "saved_positions") {
+        if (operation === "delete") {
+          state.positionRows = [];
+          return { data: null, error: null };
+        }
+
         if (operation === "update" && updatePayload) {
           state.positionRows = state.positionRows.map((row) =>
             row.id === "position-1" ? { ...row, ...updatePayload } : row,
@@ -137,6 +148,12 @@ function createPortfolioRiskClientMock(state: MockState) {
         }
 
         return { data: state.lotRows, error: null };
+      }
+
+      if (table === "saved_position_sales") {
+        return state.salesTableMissing
+          ? { data: null, error: missingSalesError }
+          : { data: insertPayload, error: null };
       }
 
       throw new Error(`Unexpected table ${table}`);
@@ -189,6 +206,7 @@ describe("portfolio risk repository", () => {
   test("loads fallback lots from saved position notes when the lots table is missing", async () => {
     const state: MockState = {
       lotsTableMissing: true,
+      salesTableMissing: true,
       lotRows: [],
       positionRows: [
         createPositionRow(
@@ -232,6 +250,7 @@ describe("portfolio risk repository", () => {
   test("creates, updates and deletes fallback lots in saved position notes", async () => {
     const state: MockState = {
       lotsTableMissing: true,
+      salesTableMissing: true,
       lotRows: [],
       positionRows: [createPositionRow("Human note")],
     };
@@ -297,6 +316,7 @@ describe("portfolio risk repository", () => {
   test("seeds the base position before the first saved lot when the lots table exists", async () => {
     const state: MockState = {
       lotsTableMissing: false,
+      salesTableMissing: true,
       lotRows: [],
       positionRows: [createPositionRow("Human note")],
     };
@@ -345,6 +365,7 @@ describe("portfolio risk repository", () => {
   test("preserves fallback lots when the main position notes are edited", async () => {
     const state: MockState = {
       lotsTableMissing: true,
+      salesTableMissing: true,
       lotRows: [],
       positionRows: [
         createPositionRow(
@@ -383,5 +404,78 @@ describe("portfolio risk repository", () => {
       entryPrice: 15.7,
       quantity: 2,
     });
+  });
+
+  test("sells fallback lots from saved position notes when lot and sales tables are missing", async () => {
+    const state: MockState = {
+      lotsTableMissing: true,
+      salesTableMissing: true,
+      lotRows: [],
+      positionRows: [
+        createPositionRow(
+          `Human note\n${encodeFallbackLots([
+            {
+              id: "note-lot:existing",
+              entryPrice: 15.7,
+              quantity: 2,
+              plannedExitPrice: 45,
+              notes: "fallback lot",
+            },
+          ])}`,
+        ),
+      ],
+    };
+    vi.mocked(createClient).mockReturnValue(createPortfolioRiskClientMock(state) as never);
+
+    await applySaleToLots(
+      "user-1",
+      "position-1",
+      [{ lotId: "note-lot:existing", sharesToSell: 1, sellPrice: 20 }],
+      0.85,
+      "partial sale",
+    );
+
+    const data = await loadPortfolioRiskData("user-1");
+
+    expect(data.positions[0].notes).toBe("Human note");
+    expect(data.positions[0].lots).toEqual([
+      expect.objectContaining({ id: "note-lot:base:position-1", quantity: 6 }),
+      expect.objectContaining({ id: "note-lot:existing", quantity: 1 }),
+    ]);
+    expect(state.positionRows[0].notes).toContain("portfolio-risk-lots");
+    expect(decodeURIComponent(state.positionRows[0].notes ?? "")).toContain("note-sale:");
+    expect(decodeURIComponent(state.positionRows[0].notes ?? "")).toContain("partial sale");
+  });
+
+  test("deletes the position after selling all fallback lots", async () => {
+    const state: MockState = {
+      lotsTableMissing: true,
+      salesTableMissing: true,
+      lotRows: [],
+      positionRows: [
+        createPositionRow(
+          encodeFallbackLots([
+            {
+              id: "note-lot:existing",
+              entryPrice: 15.7,
+              quantity: 2,
+            },
+          ]),
+        ),
+      ],
+    };
+    vi.mocked(createClient).mockReturnValue(createPortfolioRiskClientMock(state) as never);
+
+    await applySaleToLots(
+      "user-1",
+      "position-1",
+      [
+        { lotId: "note-lot:base:position-1", sharesToSell: 6, sellPrice: 20 },
+        { lotId: "note-lot:existing", sharesToSell: 2, sellPrice: 20 },
+      ],
+      0.85,
+    );
+
+    expect(state.positionRows).toEqual([]);
   });
 });
