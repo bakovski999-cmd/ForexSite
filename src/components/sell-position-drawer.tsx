@@ -97,11 +97,6 @@ export function SellPositionDrawer({
   const summary = useMemo(() => {
     const checkedLots = lots.filter((lot) => lotSales[lot.id]?.checked);
 
-    let totalShares = 0;
-    let proceedsInstrument = 0;
-    let costBasisInstrument = 0;
-    let allValid = true;
-
     const perLot = checkedLots.map((lot) => {
       const sale = lotSales[lot.id];
       const sharesToSell = parseNum(sale?.sharesToSell ?? "");
@@ -113,8 +108,6 @@ export function SellPositionDrawer({
         Number.isFinite(sellPrice) &&
         sellPrice > 0;
 
-      if (!lotValid) allValid = false;
-
       const proceeds = lotValid ? sharesToSell * sellPrice : 0;
       const costBasis = lotValid ? sharesToSell * lot.entryPrice : 0;
       const realizedPnLInstrument = proceeds - costBasis;
@@ -122,10 +115,6 @@ export function SellPositionDrawer({
         Number.isFinite(fxRate) && fxRate > 0
           ? realizedPnLInstrument / fxRate
           : realizedPnLInstrument;
-
-      totalShares += lotValid ? sharesToSell : 0;
-      proceedsInstrument += proceeds;
-      costBasisInstrument += costBasis;
 
       return {
         lot,
@@ -136,17 +125,32 @@ export function SellPositionDrawer({
         lotValid,
       };
     });
+    const totals = perLot.reduce(
+      (acc, item) => ({
+        totalShares: acc.totalShares + (item.lotValid ? item.sharesToSell : 0),
+        proceedsInstrument:
+          acc.proceedsInstrument + (item.lotValid ? item.sharesToSell * item.sellPrice : 0),
+        costBasisInstrument:
+          acc.costBasisInstrument + (item.lotValid ? item.sharesToSell * item.lot.entryPrice : 0),
+      }),
+      {
+        totalShares: 0,
+        proceedsInstrument: 0,
+        costBasisInstrument: 0,
+      },
+    );
+    const allValid = perLot.every((item) => item.lotValid);
 
-    const realizedPnLInstrument = proceedsInstrument - costBasisInstrument;
+    const realizedPnLInstrument = totals.proceedsInstrument - totals.costBasisInstrument;
     const realizedPnLAccount =
       Number.isFinite(fxRate) && fxRate > 0
         ? realizedPnLInstrument / fxRate
         : realizedPnLInstrument;
 
     return {
-      totalShares,
-      proceedsInstrument,
-      costBasisInstrument,
+      totalShares: totals.totalShares,
+      proceedsInstrument: totals.proceedsInstrument,
+      costBasisInstrument: totals.costBasisInstrument,
       realizedPnLInstrument,
       realizedPnLAccount,
       perLot,
