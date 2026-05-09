@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { randomUUID } from "node:crypto";
 
 import { env, isSupabaseConfigured } from "@/lib/env";
 import {
@@ -79,8 +80,9 @@ type SavedPositionLotPayload = Omit<
   id?: string;
 };
 
-const missingLotsTableMessage =
-  "Лотовете още не са активирани в Supabase. Старите позиции се показват нормално. За да използваш лотове, стартирай SQL миграцията от supabase/schema.sql.";
+const fallbackLotIdPrefix = "note-lot:";
+const notesLotsMarkerStart = "<!-- portfolio-risk-lots:";
+const notesLotsMarkerEnd = " -->";
 
 function getServiceClient() {
   if (!isSupabaseConfigured) {
@@ -93,6 +95,138 @@ function getServiceClient() {
       persistSession: false,
     },
   });
+}
+
+function sanitizeLotFromMetadata(value: unknown, positionId: string): SavedPortfolioLot | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const lot = value as Partial<SavedPortfolioLot>;
+  const entryPrice = Number(lot.entryPrice);
+  const quantity = Number(lot.quantity);
+  const plannedExitPrice =
+    lot.plannedExitPrice === null || lot.plannedExitPrice === undefined
+      ? null
+      : Number(lot.plannedExitPrice);
+  const sharesToSell =
+    lot.sharesToSell === null || lot.sharesToSell === undefined ? null : Number(lot.sharesToSell);
+
+  if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
+    return null;
+  }
+
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return null;
+  }
+
+  if (plannedExitPrice !== null && (!Number.isFinite(plannedExitPrice) || plannedExitPrice < 0)) {
+    return null;
+  }
+
+  if (sharesToSell !== null && (!Number.isFinite(sharesToSell) || sharesToSell <= 0)) {
+    return null;
+  }
+
+  if (sharesToSell !== null && sharesToSell > quantity) {
+    return null;
+  }
+
+  return {
+    id:
+      typeof lot.id === "string" && lot.id.startsWith(fallbackLotIdPrefix)
+        ? lot.id
+        : `${fallbackLotIdPrefix}${randomUUID()}`,
+    savedPositionId: positionId,
+    entryPrice,
+    quantity,
+    plannedExitPrice,
+    sharesToSell,
+    notes: typeof lot.notes === "string" && lot.notes.trim() ? lot.notes.trim() : null,
+    displayOrder: Number.isFinite(Number(lot.displayOrder)) ? Number(lot.displayOrder) : 0,
+    createdAt: typeof lot.createdAt === "string" ? lot.createdAt : undefined,
+    updatedAt: typeof lot.updatedAt === "string" ? lot.updatedAt : undefined,
+  };
+}
+
+function splitNotesMetadata(notes: string | null, positionId: string) {
+  const rawNotes = notes ?? "";
+  const markerStartIndex = rawNotes.indexOf(notesLotsMarkerStart);
+
+  if (markerStartIndex === -1) {
+    return {
+      userNotes: rawNotes.trim() || null,
+      fallbackLots: [] as SavedPortfolioLot[],
+    };
+  }
+
+  const jsonStartIndex = markerStartIndex + notesLotsMarkerStart.length;
+  const markerEndIndex = rawNotes.indexOf(notesLotsMarkerEnd, jsonStartIndex);
+
+  if (markerEndIndex === -1) {
+    return {
+      userNotes: rawNotes.trim() || null,
+      fallbackLots: [] as SavedPortfolioLot[],
+    };
+  }
+
+  const beforeMarker = rawNotes.slice(0, markerStartIndex);
+  const afterMarker = rawNotes.slice(markerEndIndex + notesLotsMarkerEnd.length);
+  const userNotes = `${beforeMarker}${afterMarker}`.trim() || null;
+  const encodedJson = rawNotes.slice(jsonStartIndex, markerEndIndex);
+
+  try {
+    let decodedJson = encodedJson;
+
+    try {
+      decodedJson = decodeURIComponent(encodedJson);
+    } catch {
+      decodedJson = encodedJson;
+    }
+
+    const metadata = JSON.parse(decodedJson) as { lots?: unknown[] };
+    const fallbackLots = Array.isArray(metadata.lots)
+      ? metadata.lots
+          .map((lot) => sanitizeLotFromMetadata(lot, positionId))
+          .filter((lot): lot is SavedPortfolioLot => Boolean(lot))
+      : [];
+
+    return { userNotes, fallbackLots };
+  } catch {
+    return { userNotes, fallbackLots: [] as SavedPortfolioLot[] };
+  }
+}
+
+function serializeLotForMetadata(lot: SavedPortfolioLot) {
+  return {
+    id: lot.id,
+    entryPrice: lot.entryPrice,
+    quantity: lot.quantity,
+    plannedExitPrice: lot.plannedExitPrice ?? null,
+    sharesToSell: lot.sharesToSell ?? null,
+    notes: lot.notes ?? null,
+    displayOrder: lot.displayOrder ?? 0,
+    createdAt: lot.createdAt,
+    updatedAt: lot.updatedAt,
+  };
+}
+
+function buildNotesWithFallbackLots(userNotes: string | null | undefined, lots: SavedPortfolioLot[]) {
+  const cleanNotes = userNotes?.trim() ?? "";
+
+  if (lots.length === 0) {
+    return cleanNotes || null;
+  }
+
+  const metadata = encodeURIComponent(
+    JSON.stringify({
+      version: 1,
+      lots: lots.map(serializeLotForMetadata),
+    }),
+  );
+  const marker = `${notesLotsMarkerStart}${metadata}${notesLotsMarkerEnd}`;
+
+  return [cleanNotes, marker].filter(Boolean).join("\n");
 }
 
 function mapProfile(row: AccountRiskProfileRow): AccountRiskProfile {
@@ -115,6 +249,8 @@ function mapProfile(row: AccountRiskProfileRow): AccountRiskProfile {
 }
 
 function mapPosition(row: SavedPositionRow): SavedPortfolioPosition {
+  const { userNotes, fallbackLots } = splitNotesMetadata(row.notes, row.id);
+
   return {
     id: row.id,
     userId: row.user_id,
@@ -130,7 +266,8 @@ function mapPosition(row: SavedPositionRow): SavedPortfolioPosition {
       row.normal_fixed_leverage === null ? null : Number(row.normal_fixed_leverage),
     temporaryFixedLeverage:
       row.temporary_fixed_leverage === null ? null : Number(row.temporary_fixed_leverage),
-    notes: row.notes,
+    notes: userNotes,
+    lots: fallbackLots,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -202,6 +339,121 @@ function lotToRow(userId: string, savedPositionId: string, lot: SavedPositionLot
     notes: lot.notes?.trim() || null,
     display_order: lot.displayOrder ?? 0,
   };
+}
+
+function lotPayloadToFallbackLot(
+  savedPositionId: string,
+  lot: SavedPositionLotPayload,
+  existingLot?: SavedPortfolioLot,
+): SavedPortfolioLot {
+  const now = new Date().toISOString();
+
+  return {
+    id:
+      existingLot?.id ??
+      (lot.id?.startsWith(fallbackLotIdPrefix) ? lot.id : `${fallbackLotIdPrefix}${randomUUID()}`),
+    savedPositionId,
+    entryPrice: lot.entryPrice,
+    quantity: lot.quantity,
+    plannedExitPrice: lot.plannedExitPrice ?? null,
+    sharesToSell: lot.sharesToSell ?? null,
+    notes: lot.notes?.trim() || null,
+    displayOrder: lot.displayOrder ?? existingLot?.displayOrder ?? 0,
+    createdAt: existingLot?.createdAt ?? now,
+    updatedAt: now,
+  };
+}
+
+async function fetchSavedPositionRow(
+  client: ReturnType<typeof getServiceClient>,
+  userId: string,
+  savedPositionId: string,
+) {
+  const { data, error } = await client
+    .from("saved_positions")
+    .select("*")
+    .eq("id", savedPositionId)
+    .eq("user_id", userId)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as SavedPositionRow;
+}
+
+async function saveFallbackLotsToPositionNotes(
+  client: ReturnType<typeof getServiceClient>,
+  userId: string,
+  row: SavedPositionRow,
+  lots: SavedPortfolioLot[],
+) {
+  const { userNotes } = splitNotesMetadata(row.notes, row.id);
+  const { error } = await client
+    .from("saved_positions")
+    .update({ notes: buildNotesWithFallbackLots(userNotes, lots) })
+    .eq("id", row.id)
+    .eq("user_id", userId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function createFallbackSavedPositionLot(
+  client: ReturnType<typeof getServiceClient>,
+  userId: string,
+  savedPositionId: string,
+  lot: SavedPositionLotPayload,
+) {
+  const row = await fetchSavedPositionRow(client, userId, savedPositionId);
+  const { fallbackLots } = splitNotesMetadata(row.notes, row.id);
+  const savedLot = lotPayloadToFallbackLot(savedPositionId, lot);
+  const nextLots = [...fallbackLots, savedLot];
+
+  await saveFallbackLotsToPositionNotes(client, userId, row, nextLots);
+
+  return savedLot;
+}
+
+async function updateFallbackSavedPositionLot(
+  client: ReturnType<typeof getServiceClient>,
+  userId: string,
+  savedPositionId: string,
+  lot: SavedPositionLotPayload & { id: string },
+) {
+  const row = await fetchSavedPositionRow(client, userId, savedPositionId);
+  const { fallbackLots } = splitNotesMetadata(row.notes, row.id);
+  const existingLot = fallbackLots.find((item) => item.id === lot.id);
+
+  if (!existingLot) {
+    throw new Error("Лотът не беше намерен.");
+  }
+
+  const savedLot = lotPayloadToFallbackLot(savedPositionId, lot, existingLot);
+  const nextLots = fallbackLots.map((item) => (item.id === lot.id ? savedLot : item));
+
+  await saveFallbackLotsToPositionNotes(client, userId, row, nextLots);
+
+  return savedLot;
+}
+
+async function deleteFallbackSavedPositionLot(
+  client: ReturnType<typeof getServiceClient>,
+  userId: string,
+  savedPositionId: string,
+  lotId: string,
+) {
+  const row = await fetchSavedPositionRow(client, userId, savedPositionId);
+  const { fallbackLots } = splitNotesMetadata(row.notes, row.id);
+  const nextLots = fallbackLots.filter((item) => item.id !== lotId);
+
+  if (nextLots.length === fallbackLots.length) {
+    throw new Error("Лотът не беше намерен.");
+  }
+
+  await saveFallbackLotsToPositionNotes(client, userId, row, nextLots);
 }
 
 function getDatabaseErrorText(error: unknown) {
@@ -293,9 +545,8 @@ export async function loadPortfolioRiskData(userId: string): Promise<PortfolioRi
     if (isMissingLotsTableError(lotError)) {
       return {
         profile,
-        positions: positions.map((position) => ({ ...position, lots: [] })),
-        databaseReady: false,
-        message: missingLotsTableMessage,
+        positions,
+        databaseReady: true,
       };
     }
 
@@ -315,7 +566,7 @@ export async function loadPortfolioRiskData(userId: string): Promise<PortfolioRi
     profile,
     positions: positions.map((position) => ({
       ...position,
-      lots: lotsByPosition.get(position.id) ?? [],
+      lots: [...(lotsByPosition.get(position.id) ?? []), ...(position.lots ?? [])],
     })),
     databaseReady: true,
   };
@@ -365,9 +616,15 @@ export async function updateSavedPosition(
   position: SavedPositionPayload & { id: string },
 ): Promise<SavedPortfolioPosition> {
   const client = getServiceClient();
+  const currentRow = await fetchSavedPositionRow(client, userId, position.id);
+  const { fallbackLots } = splitNotesMetadata(currentRow.notes, position.id);
+  const nextRow = {
+    ...positionToRow(userId, accountRiskProfileId, position),
+    notes: buildNotesWithFallbackLots(position.notes, fallbackLots),
+  };
   const { data, error } = await client
     .from("saved_positions")
-    .update(positionToRow(userId, accountRiskProfileId, position))
+    .update(nextRow)
     .eq("id", position.id)
     .eq("user_id", userId)
     .eq("account_risk_profile_id", accountRiskProfileId)
@@ -412,6 +669,10 @@ export async function createSavedPositionLot(
     .single();
 
   if (error) {
+    if (isMissingLotsTableError(error)) {
+      return createFallbackSavedPositionLot(client, userId, savedPositionId, lot);
+    }
+
     throw error;
   }
 
@@ -424,6 +685,11 @@ export async function updateSavedPositionLot(
   lot: SavedPositionLotPayload & { id: string },
 ): Promise<SavedPortfolioLot> {
   const client = getServiceClient();
+
+  if (lot.id.startsWith(fallbackLotIdPrefix)) {
+    return updateFallbackSavedPositionLot(client, userId, savedPositionId, lot);
+  }
+
   const { data, error } = await client
     .from("saved_position_lots")
     .update(lotToRow(userId, savedPositionId, lot))
@@ -434,6 +700,10 @@ export async function updateSavedPositionLot(
     .single();
 
   if (error) {
+    if (isMissingLotsTableError(error)) {
+      return updateFallbackSavedPositionLot(client, userId, savedPositionId, lot);
+    }
+
     throw error;
   }
 
@@ -446,6 +716,12 @@ export async function deleteSavedPositionLot(
   lotId: string,
 ) {
   const client = getServiceClient();
+
+  if (lotId.startsWith(fallbackLotIdPrefix)) {
+    await deleteFallbackSavedPositionLot(client, userId, savedPositionId, lotId);
+    return;
+  }
+
   const { error } = await client
     .from("saved_position_lots")
     .delete()
@@ -454,6 +730,11 @@ export async function deleteSavedPositionLot(
     .eq("saved_position_id", savedPositionId);
 
   if (error) {
+    if (isMissingLotsTableError(error)) {
+      await deleteFallbackSavedPositionLot(client, userId, savedPositionId, lotId);
+      return;
+    }
+
     throw error;
   }
 }

@@ -265,7 +265,13 @@ export async function PUT(request: Request) {
     const profile = await saveAccountRiskProfile(userId, readProfile(body.profile));
     const data = await loadPortfolioRiskData(userId);
 
-    return NextResponse.json({ ok: true, profile, positions: data.positions });
+    return NextResponse.json({
+      ok: true,
+      profile,
+      positions: data.positions,
+      databaseReady: data.databaseReady,
+      message: data.message,
+    });
   } catch (error) {
     return jsonError(normalizeDatabaseError(error), 500);
   }
@@ -298,6 +304,8 @@ export async function POST(request: Request) {
         lot: savedLot,
         profile: data.profile,
         positions: data.positions,
+        databaseReady: data.databaseReady,
+        message: data.message,
       });
     }
 
@@ -317,6 +325,8 @@ export async function POST(request: Request) {
       profile,
       position: savedPosition,
       positions: data.positions,
+      databaseReady: data.databaseReady,
+      message: data.message,
     });
   } catch (error) {
     return jsonError(normalizeDatabaseError(error), 500);
@@ -358,6 +368,8 @@ export async function PATCH(request: Request) {
         lot: updatedLot,
         profile: data.profile,
         positions: data.positions,
+        databaseReady: data.databaseReady,
+        message: data.message,
       });
     }
 
@@ -385,6 +397,8 @@ export async function PATCH(request: Request) {
       profile,
       position: updatedPosition,
       positions: data.positions,
+      databaseReady: data.databaseReady,
+      message: data.message,
     });
   } catch (error) {
     return jsonError(normalizeDatabaseError(error), 500);
@@ -413,7 +427,13 @@ export async function DELETE(request: Request) {
       await deleteSavedPositionLot(userId, positionId, lotId);
       const data = await loadPortfolioRiskData(userId);
 
-      return NextResponse.json({ ok: true, positions: data.positions, profile: data.profile });
+      return NextResponse.json({
+        ok: true,
+        positions: data.positions,
+        profile: data.profile,
+        databaseReady: data.databaseReady,
+        message: data.message,
+      });
     }
 
     const positionId = url.searchParams.get("id");
@@ -426,7 +446,13 @@ export async function DELETE(request: Request) {
     await deleteSavedPosition(userId, profileId, positionId);
     const data = await loadPortfolioRiskData(userId);
 
-    return NextResponse.json({ ok: true, positions: data.positions, profile: data.profile });
+    return NextResponse.json({
+      ok: true,
+      positions: data.positions,
+      profile: data.profile,
+      databaseReady: data.databaseReady,
+      message: data.message,
+    });
   } catch (error) {
     return jsonError(normalizeDatabaseError(error), 500);
   }

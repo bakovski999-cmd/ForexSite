@@ -96,10 +96,9 @@ describe("portfolio risk route validation", () => {
     expect(loadPortfolioRiskData).not.toHaveBeenCalled();
   });
 
-  test("GET returns saved positions with a lots migration warning", async () => {
+  test("GET returns saved positions without exposing storage fallback details", async () => {
     vi.mocked(loadPortfolioRiskData).mockResolvedValue({
-      databaseReady: false,
-      message: "Лотовете още не са активирани в Supabase. Старите позиции се показват нормално.",
+      databaseReady: true,
       profile: {
         id: "profile-1",
         accountName: "Test",
@@ -131,23 +130,21 @@ describe("portfolio risk route validation", () => {
     const body = (await response.json()) as {
       ok: boolean;
       databaseReady: boolean;
-      message: string;
+      message?: string;
       positions: unknown[];
     };
 
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(body.databaseReady).toBe(false);
-    expect(body.message).toContain("Лотовете още не са активирани");
+    expect(body.databaseReady).toBe(true);
+    expect(body.message).toBeUndefined();
     expect(body.positions).toHaveLength(1);
   });
 
   test("lot action database errors render clean messages instead of object strings", async () => {
     vi.mocked(createSavedPositionLot).mockRejectedValue({
-      code: "PGRST205",
-      message: "Could not find the table 'public.saved_position_lots' in the schema cache",
-      details: null,
-      hint: null,
+      message: "Database write failed",
+      details: "Connection was closed",
     });
 
     const response = await POST(
@@ -169,7 +166,8 @@ describe("portfolio risk route validation", () => {
     expect(response.status).toBe(500);
     expect(body.ok).toBe(false);
     expect(body.message).not.toBe("[object Object]");
-    expect(body.message).toContain("Supabase таблиците");
+    expect(body.message).toContain("Database write failed");
+    expect(body.message).toContain("Connection was closed");
   });
 
   test("lot actions return refreshed portfolio data", async () => {
