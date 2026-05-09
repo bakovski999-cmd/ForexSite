@@ -81,6 +81,7 @@ type SavedPositionLotPayload = Omit<
 };
 
 const fallbackLotIdPrefix = "note-lot:";
+const fallbackBaseLotIdPrefix = `${fallbackLotIdPrefix}base:`;
 const notesLotsMarkerStart = "<!-- portfolio-risk-lots:";
 const notesLotsMarkerEnd = " -->";
 
@@ -250,6 +251,7 @@ function mapProfile(row: AccountRiskProfileRow): AccountRiskProfile {
 
 function mapPosition(row: SavedPositionRow): SavedPortfolioPosition {
   const { userNotes, fallbackLots } = splitNotesMetadata(row.notes, row.id);
+  const lots = ensureBaseFallbackLot(row, fallbackLots);
 
   return {
     id: row.id,
@@ -267,7 +269,7 @@ function mapPosition(row: SavedPositionRow): SavedPortfolioPosition {
     temporaryFixedLeverage:
       row.temporary_fixed_leverage === null ? null : Number(row.temporary_fixed_leverage),
     notes: userNotes,
-    lots: fallbackLots,
+    lots,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -287,6 +289,46 @@ function mapLot(row: SavedPositionLotRow): SavedPortfolioLot {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function createBaseFallbackLotFromPosition(row: SavedPositionRow): SavedPortfolioLot {
+  return {
+    id: `${fallbackBaseLotIdPrefix}${row.id}`,
+    userId: row.user_id,
+    savedPositionId: row.id,
+    entryPrice: Number(row.entry_price),
+    quantity: Number(row.quantity),
+    plannedExitPrice: null,
+    sharesToSell: null,
+    notes: "Начална позиция",
+    displayOrder: 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function isBaseLotForPosition(row: SavedPositionRow, lot: SavedPortfolioLot) {
+  return (
+    lot.id === `${fallbackBaseLotIdPrefix}${row.id}` ||
+    (lot.displayOrder === 0 &&
+      lot.notes === "Начална позиция" &&
+      Math.abs(lot.entryPrice - Number(row.entry_price)) < 0.0000001 &&
+      Math.abs(lot.quantity - Number(row.quantity)) < 0.0000001)
+  );
+}
+
+function ensureBaseFallbackLot(row: SavedPositionRow, lots: SavedPortfolioLot[]) {
+  if (lots.length === 0) {
+    return lots;
+  }
+
+  const hasBaseLot = lots.some((lot) => isBaseLotForPosition(row, lot));
+
+  if (hasBaseLot) {
+    return lots;
+  }
+
+  return [createBaseFallbackLotFromPosition(row), ...lots];
 }
 
 function profileToRow(userId: string, profile: AccountRiskProfilePayload) {
@@ -338,6 +380,19 @@ function lotToRow(userId: string, savedPositionId: string, lot: SavedPositionLot
     shares_to_sell: lot.sharesToSell ?? null,
     notes: lot.notes?.trim() || null,
     display_order: lot.displayOrder ?? 0,
+  };
+}
+
+function baseLotToRow(userId: string, row: SavedPositionRow) {
+  return {
+    user_id: userId,
+    saved_position_id: row.id,
+    entry_price: row.entry_price,
+    quantity: row.quantity,
+    planned_exit_price: null,
+    shares_to_sell: null,
+    notes: "Начална позиция",
+    display_order: 0,
   };
 }
 
@@ -409,8 +464,13 @@ async function createFallbackSavedPositionLot(
 ) {
   const row = await fetchSavedPositionRow(client, userId, savedPositionId);
   const { fallbackLots } = splitNotesMetadata(row.notes, row.id);
-  const savedLot = lotPayloadToFallbackLot(savedPositionId, lot);
-  const nextLots = [...fallbackLots, savedLot];
+  const seededLots =
+    fallbackLots.length > 0 ? ensureBaseFallbackLot(row, fallbackLots) : [createBaseFallbackLotFromPosition(row)];
+  const savedLot = lotPayloadToFallbackLot(savedPositionId, {
+    ...lot,
+    displayOrder: Math.max(lot.displayOrder ?? seededLots.length, seededLots.length),
+  });
+  const nextLots = [...seededLots, savedLot];
 
   await saveFallbackLotsToPositionNotes(client, userId, row, nextLots);
 
@@ -425,14 +485,15 @@ async function updateFallbackSavedPositionLot(
 ) {
   const row = await fetchSavedPositionRow(client, userId, savedPositionId);
   const { fallbackLots } = splitNotesMetadata(row.notes, row.id);
-  const existingLot = fallbackLots.find((item) => item.id === lot.id);
+  const seededLots = ensureBaseFallbackLot(row, fallbackLots);
+  const existingLot = seededLots.find((item) => item.id === lot.id);
 
   if (!existingLot) {
     throw new Error("Лотът не беше намерен.");
   }
 
   const savedLot = lotPayloadToFallbackLot(savedPositionId, lot, existingLot);
-  const nextLots = fallbackLots.map((item) => (item.id === lot.id ? savedLot : item));
+  const nextLots = seededLots.map((item) => (item.id === lot.id ? savedLot : item));
 
   await saveFallbackLotsToPositionNotes(client, userId, row, nextLots);
 
@@ -447,9 +508,10 @@ async function deleteFallbackSavedPositionLot(
 ) {
   const row = await fetchSavedPositionRow(client, userId, savedPositionId);
   const { fallbackLots } = splitNotesMetadata(row.notes, row.id);
-  const nextLots = fallbackLots.filter((item) => item.id !== lotId);
+  const seededLots = ensureBaseFallbackLot(row, fallbackLots);
+  const nextLots = seededLots.filter((item) => item.id !== lotId);
 
-  if (nextLots.length === fallbackLots.length) {
+  if (nextLots.length === seededLots.length) {
     throw new Error("Лотът не беше намерен.");
   }
 
@@ -522,7 +584,9 @@ export async function loadPortfolioRiskData(userId: string): Promise<PortfolioRi
     throw positionError;
   }
 
-  const positions = (positionRows ?? []).map((row) => mapPosition(row as SavedPositionRow));
+  const savedPositionRows = (positionRows ?? []) as SavedPositionRow[];
+  const positionRowsById = new Map(savedPositionRows.map((row) => [row.id, row]));
+  const positions = savedPositionRows.map((row) => mapPosition(row));
 
   if (positions.length === 0) {
     return {
@@ -564,10 +628,15 @@ export async function loadPortfolioRiskData(userId: string): Promise<PortfolioRi
 
   return {
     profile,
-    positions: positions.map((position) => ({
-      ...position,
-      lots: [...(lotsByPosition.get(position.id) ?? []), ...(position.lots ?? [])],
-    })),
+    positions: positions.map((position) => {
+      const combinedLots = [...(lotsByPosition.get(position.id) ?? []), ...(position.lots ?? [])];
+      const row = positionRowsById.get(position.id);
+
+      return {
+        ...position,
+        lots: row ? ensureBaseFallbackLot(row, combinedLots) : combinedLots,
+      };
+    }),
     databaseReady: true,
   };
 }
@@ -662,9 +731,52 @@ export async function createSavedPositionLot(
   lot: SavedPositionLotPayload,
 ): Promise<SavedPortfolioLot> {
   const client = getServiceClient();
+  const positionRow = await fetchSavedPositionRow(client, userId, savedPositionId);
+  const { data: existingLotRows, error: existingLotsError } = await client
+    .from("saved_position_lots")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("saved_position_id", savedPositionId)
+    .order("display_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (existingLotsError) {
+    if (isMissingLotsTableError(existingLotsError)) {
+      return createFallbackSavedPositionLot(client, userId, savedPositionId, lot);
+    }
+
+    throw existingLotsError;
+  }
+
+  const existingLots = ((existingLotRows ?? []) as SavedPositionLotRow[]).map(mapLot);
+  const shouldSeedBaseLot =
+    existingLots.length === 0 || !existingLots.some((item) => isBaseLotForPosition(positionRow, item));
+
+  if (shouldSeedBaseLot) {
+    const { error: baseLotError } = await client
+      .from("saved_position_lots")
+      .insert(baseLotToRow(userId, positionRow));
+
+    if (baseLotError) {
+      if (isMissingLotsTableError(baseLotError)) {
+        return createFallbackSavedPositionLot(client, userId, savedPositionId, lot);
+      }
+
+      throw baseLotError;
+    }
+  }
+
   const { data, error } = await client
     .from("saved_position_lots")
-    .insert(lotToRow(userId, savedPositionId, lot))
+    .insert(
+      lotToRow(userId, savedPositionId, {
+        ...lot,
+        displayOrder: Math.max(
+          lot.displayOrder ?? existingLots.length,
+          existingLots.length + (shouldSeedBaseLot ? 1 : 0),
+        ),
+      }),
+    )
     .select("*")
     .single();
 

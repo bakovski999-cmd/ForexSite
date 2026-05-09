@@ -67,6 +67,19 @@ function createPositionRow(notes: string | null = null) {
 type MockState = {
   positionRows: ReturnType<typeof createPositionRow>[];
   lotsTableMissing: boolean;
+  lotRows: Array<{
+    id: string;
+    user_id: string;
+    saved_position_id: string;
+    entry_price: number;
+    quantity: number;
+    planned_exit_price: number | null;
+    shares_to_sell: number | null;
+    notes: string | null;
+    display_order: number;
+    created_at: string;
+    updated_at: string;
+  }>;
 };
 
 function createPortfolioRiskClientMock(state: MockState) {
@@ -78,6 +91,7 @@ function createPortfolioRiskClientMock(state: MockState) {
   function makeQuery(table: string) {
     let operation: "select" | "insert" | "update" | "delete" = "select";
     let ordered = false;
+    let insertPayload: Record<string, unknown> | null = null;
     let updatePayload: Record<string, unknown> | null = null;
 
     const execute = async () => {
@@ -99,9 +113,30 @@ function createPortfolioRiskClientMock(state: MockState) {
       }
 
       if (table === "saved_position_lots") {
-        return state.lotsTableMissing
-          ? { data: null, error: missingLotsError }
-          : { data: [], error: null };
+        if (state.lotsTableMissing) {
+          return { data: null, error: missingLotsError };
+        }
+
+        if (operation === "insert" && insertPayload) {
+          const row = {
+            id: `lot-${state.lotRows.length + 1}`,
+            user_id: insertPayload.user_id as string,
+            saved_position_id: insertPayload.saved_position_id as string,
+            entry_price: insertPayload.entry_price as number,
+            quantity: insertPayload.quantity as number,
+            planned_exit_price: (insertPayload.planned_exit_price as number | null) ?? null,
+            shares_to_sell: (insertPayload.shares_to_sell as number | null) ?? null,
+            notes: (insertPayload.notes as string | null) ?? null,
+            display_order: (insertPayload.display_order as number | null) ?? 0,
+            created_at: "2026-05-08T00:00:00.000Z",
+            updated_at: "2026-05-08T00:00:00.000Z",
+          };
+          state.lotRows = [...state.lotRows, row];
+
+          return { data: row, error: null };
+        }
+
+        return { data: state.lotRows, error: null };
       }
 
       throw new Error(`Unexpected table ${table}`);
@@ -114,8 +149,9 @@ function createPortfolioRiskClientMock(state: MockState) {
       }),
       eq: vi.fn(() => query),
       in: vi.fn(() => query),
-      insert: vi.fn(() => {
+      insert: vi.fn((payload: Record<string, unknown>) => {
         operation = "insert";
+        insertPayload = payload;
         return query;
       }),
       limit: vi.fn(() => query),
@@ -153,6 +189,7 @@ describe("portfolio risk repository", () => {
   test("loads fallback lots from saved position notes when the lots table is missing", async () => {
     const state: MockState = {
       lotsTableMissing: true,
+      lotRows: [],
       positionRows: [
         createPositionRow(
           `User visible note\n${encodeFallbackLots([
@@ -177,6 +214,12 @@ describe("portfolio risk repository", () => {
     expect(data.positions[0].notes).toBe("User visible note");
     expect(data.positions[0].lots).toEqual([
       expect.objectContaining({
+        id: "note-lot:base:position-1",
+        entryPrice: 16.3,
+        quantity: 6,
+        notes: "Начална позиция",
+      }),
+      expect.objectContaining({
         id: "note-lot:existing",
         entryPrice: 15.7,
         quantity: 2,
@@ -189,6 +232,7 @@ describe("portfolio risk repository", () => {
   test("creates, updates and deletes fallback lots in saved position notes", async () => {
     const state: MockState = {
       lotsTableMissing: true,
+      lotRows: [],
       positionRows: [createPositionRow("Human note")],
     };
     vi.mocked(createClient).mockReturnValue(createPortfolioRiskClientMock(state) as never);
@@ -207,8 +251,14 @@ describe("portfolio risk repository", () => {
     expect(state.positionRows[0].notes).toContain("portfolio-risk-lots");
 
     let data = await loadPortfolioRiskData("user-1");
-    expect(data.positions[0].lots).toHaveLength(1);
+    expect(data.positions[0].lots).toHaveLength(2);
     expect(data.positions[0].lots?.[0]).toMatchObject({
+      id: "note-lot:base:position-1",
+      entryPrice: 16.3,
+      quantity: 6,
+      notes: "Начална позиция",
+    });
+    expect(data.positions[0].lots?.[1]).toMatchObject({
       entryPrice: 15.7,
       quantity: 2,
       plannedExitPrice: 45,
@@ -225,7 +275,7 @@ describe("portfolio risk repository", () => {
     });
 
     data = await loadPortfolioRiskData("user-1");
-    expect(data.positions[0].lots?.[0]).toMatchObject({
+    expect(data.positions[0].lots?.[1]).toMatchObject({
       plannedExitPrice: 50,
       sharesToSell: 1,
       notes: "updated lot",
@@ -234,13 +284,68 @@ describe("portfolio risk repository", () => {
     await deleteSavedPositionLot("user-1", "position-1", created.id);
 
     data = await loadPortfolioRiskData("user-1");
-    expect(data.positions[0].lots).toEqual([]);
+    expect(data.positions[0].lots).toEqual([
+      expect.objectContaining({
+        id: "note-lot:base:position-1",
+        entryPrice: 16.3,
+        quantity: 6,
+      }),
+    ]);
     expect(data.positions[0].notes).toBe("Human note");
+  });
+
+  test("seeds the base position before the first saved lot when the lots table exists", async () => {
+    const state: MockState = {
+      lotsTableMissing: false,
+      lotRows: [],
+      positionRows: [createPositionRow("Human note")],
+    };
+    vi.mocked(createClient).mockReturnValue(createPortfolioRiskClientMock(state) as never);
+
+    const created = await createSavedPositionLot("user-1", "position-1", {
+      entryPrice: 15.7,
+      quantity: 2,
+      plannedExitPrice: 45,
+      sharesToSell: null,
+      notes: "second lot",
+      displayOrder: 0,
+    });
+
+    expect(created.id).toBe("lot-2");
+    expect(state.lotRows).toHaveLength(2);
+    expect(state.lotRows[0]).toMatchObject({
+      entry_price: 16.3,
+      quantity: 6,
+      notes: "Начална позиция",
+      display_order: 0,
+    });
+    expect(state.lotRows[1]).toMatchObject({
+      entry_price: 15.7,
+      quantity: 2,
+      planned_exit_price: 45,
+      notes: "second lot",
+      display_order: 1,
+    });
+
+    const data = await loadPortfolioRiskData("user-1");
+
+    expect(data.positions[0].lots).toHaveLength(2);
+    expect(data.positions[0].lots?.[0]).toMatchObject({
+      entryPrice: 16.3,
+      quantity: 6,
+      notes: "Начална позиция",
+    });
+    expect(data.positions[0].lots?.[1]).toMatchObject({
+      entryPrice: 15.7,
+      quantity: 2,
+      plannedExitPrice: 45,
+    });
   });
 
   test("preserves fallback lots when the main position notes are edited", async () => {
     const state: MockState = {
       lotsTableMissing: true,
+      lotRows: [],
       positionRows: [
         createPositionRow(
           `Old note\n${encodeFallbackLots([
@@ -273,7 +378,7 @@ describe("portfolio risk repository", () => {
     const data = await loadPortfolioRiskData("user-1");
 
     expect(data.positions[0].notes).toBe("New note");
-    expect(data.positions[0].lots?.[0]).toMatchObject({
+    expect(data.positions[0].lots?.[1]).toMatchObject({
       id: "note-lot:existing",
       entryPrice: 15.7,
       quantity: 2,
