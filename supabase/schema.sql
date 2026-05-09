@@ -219,3 +219,49 @@ create policy "Users can delete own saved position lots"
 on public.saved_position_lots
 for delete
 using (auth.uid() = user_id);
+
+-- saved_position_sales: realized P&L records
+create table if not exists public.saved_position_sales (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  saved_position_id uuid not null references public.saved_positions(id) on delete cascade,
+  saved_position_lot_id uuid references public.saved_position_lots(id) on delete set null,
+  symbol text not null,
+  entry_price numeric not null,
+  sell_price numeric not null check (sell_price > 0),
+  shares_sold numeric not null check (shares_sold > 0),
+  realized_pnl_instrument numeric not null,
+  realized_pnl_account numeric not null,
+  fx_rate numeric not null,
+  notes text,
+  sold_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists saved_position_sales_user_id_idx
+  on public.saved_position_sales (user_id);
+create index if not exists saved_position_sales_position_id_idx
+  on public.saved_position_sales (saved_position_id);
+
+alter table public.saved_position_sales enable row level security;
+
+drop policy if exists "Users can read own sales"
+  on public.saved_position_sales;
+create policy "Users can read own sales"
+on public.saved_position_sales
+for select
+using (auth.uid() = user_id);
+
+drop policy if exists "Users can insert own sales"
+  on public.saved_position_sales;
+create policy "Users can insert own sales"
+on public.saved_position_sales
+for insert
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can delete own sales"
+  on public.saved_position_sales;
+create policy "Users can delete own sales"
+on public.saved_position_sales
+for delete
+using (auth.uid() = user_id);

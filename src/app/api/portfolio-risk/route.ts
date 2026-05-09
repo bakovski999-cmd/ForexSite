@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getCurrentSession } from "@/lib/auth";
 import {
+  applySaleToLots,
   createSavedPositionLot,
   createSavedPosition,
   deleteSavedPositionLot,
@@ -227,6 +228,7 @@ function normalizeDatabaseError(error: unknown) {
     normalizedMessage.includes("account_risk_profiles") ||
     normalizedMessage.includes("saved_positions") ||
     normalizedMessage.includes("saved_position_lots") ||
+    normalizedMessage.includes("saved_position_sales") ||
     normalizedMessage.includes("relation") ||
     normalizedMessage.includes("schema cache") ||
     normalizedMessage.includes("pgrst205") ||
@@ -304,6 +306,56 @@ export async function POST(request: Request) {
         lot: savedLot,
         profile: data.profile,
         positions: data.positions,
+        databaseReady: data.databaseReady,
+        message: data.message,
+      });
+    }
+
+    if (action === "sell-lots") {
+      const positionId = typeof body.positionId === "string" ? body.positionId : "";
+      const fxRate = toNumber(body.fxRate, 1);
+      const salesRaw = Array.isArray(body.sales) ? body.sales : [];
+      const saleNotes = body.notes ? String(body.notes) : null;
+
+      if (!positionId) {
+        return jsonError("Липсва id на позицията.");
+      }
+
+      if (salesRaw.length === 0) {
+        return jsonError("Няма избрани лотове за продажба.");
+      }
+
+      const sales = salesRaw.map((item: unknown) => {
+        const s = (item ?? {}) as Record<string, unknown>;
+        return {
+          lotId: typeof s.lotId === "string" ? s.lotId : "",
+          sharesToSell: toNumber(s.sharesToSell),
+          sellPrice: toNumber(s.sellPrice),
+        };
+      });
+
+      const saleErrors: string[] = [];
+      sales.forEach((s) => {
+        if (!s.lotId) saleErrors.push("Липсва id на лот.");
+        if (!Number.isFinite(s.sharesToSell) || s.sharesToSell <= 0) {
+          saleErrors.push("Неверен брой акции за продажба.");
+        }
+        if (!Number.isFinite(s.sellPrice) || s.sellPrice <= 0) {
+          saleErrors.push("Неверна цена на продажба.");
+        }
+      });
+
+      if (saleErrors.length > 0) {
+        return jsonError(saleErrors.join(" "));
+      }
+
+      await applySaleToLots(userId, positionId, sales, fxRate, saleNotes);
+      const data = await loadPortfolioRiskData(userId);
+
+      return NextResponse.json({
+        ok: true,
+        positions: data.positions,
+        profile: data.profile,
         databaseReady: data.databaseReady,
         message: data.message,
       });

@@ -850,3 +850,95 @@ export async function deleteSavedPositionLot(
     throw error;
   }
 }
+
+export async function applySaleToLots(
+  userId: string,
+  positionId: string,
+  sales: Array<{ lotId: string; sharesToSell: number; sellPrice: number }>,
+  fxRate: number,
+  notes?: string | null,
+): Promise<void> {
+  const client = getServiceClient();
+
+  const { data: positionRow } = await client
+    .from("saved_positions")
+    .select("symbol, instrument_currency, account_risk_profile_id")
+    .eq("id", positionId)
+    .eq("user_id", userId)
+    .single();
+
+  const symbol = (positionRow as { symbol?: string } | null)?.symbol ?? "";
+
+  for (const sale of sales) {
+    const { data: lotRow, error: lotFetchError } = await client
+      .from("saved_position_lots")
+      .select("*")
+      .eq("id", sale.lotId)
+      .eq("user_id", userId)
+      .eq("saved_position_id", positionId)
+      .single();
+
+    if (lotFetchError || !lotRow) {
+      continue;
+    }
+
+    const lot = lotRow as SavedPositionLotRow;
+    const entryPrice = Number(lot.entry_price);
+    const realizedPnLInstrument = (sale.sellPrice - entryPrice) * sale.sharesToSell;
+    const realizedPnLAccount =
+      Number.isFinite(fxRate) && fxRate > 0
+        ? realizedPnLInstrument / fxRate
+        : realizedPnLInstrument;
+
+    await client.from("saved_position_sales").insert({
+      id: randomUUID(),
+      user_id: userId,
+      saved_position_id: positionId,
+      saved_position_lot_id: sale.lotId,
+      symbol,
+      entry_price: entryPrice,
+      sell_price: sale.sellPrice,
+      shares_sold: sale.sharesToSell,
+      realized_pnl_instrument: realizedPnLInstrument,
+      realized_pnl_account: realizedPnLAccount,
+      fx_rate: fxRate,
+      notes: notes ?? null,
+      sold_at: new Date().toISOString(),
+    });
+
+    const newQuantity = Number(lot.quantity) - sale.sharesToSell;
+
+    if (newQuantity <= 0) {
+      await client
+        .from("saved_position_lots")
+        .delete()
+        .eq("id", sale.lotId)
+        .eq("user_id", userId);
+    } else {
+      await client
+        .from("saved_position_lots")
+        .update({ quantity: newQuantity })
+        .eq("id", sale.lotId)
+        .eq("user_id", userId);
+    }
+  }
+
+  const { data: remainingLots } = await client
+    .from("saved_position_lots")
+    .select("quantity")
+    .eq("saved_position_id", positionId)
+    .eq("user_id", userId);
+
+  const totalRemaining = ((remainingLots ?? []) as Array<{ quantity: number }>).reduce(
+    (sum, lot) => sum + Number(lot.quantity),
+    0,
+  );
+
+  if (totalRemaining <= 0) {
+    await client
+      .from("saved_positions")
+      .delete()
+      .eq("id", positionId)
+      .eq("user_id", userId);
+  }
+}

@@ -6,10 +6,12 @@ import {
   BarChart3,
   BriefcaseBusiness,
   ChevronDown,
+  DollarSign,
   Edit3,
   Info,
   Loader2,
   Plus,
+  PlusCircle,
   Save,
   Trash2,
   X,
@@ -17,6 +19,8 @@ import {
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
+import { AddLotDrawer } from "@/components/add-lot-drawer";
+import { SellPositionDrawer } from "@/components/sell-position-drawer";
 import {
   calculateCustomCrashStress,
   calculatePortfolioRisk,
@@ -708,7 +712,7 @@ function IconButton({
   onClick: () => void;
   children: ReactNode;
   disabled?: boolean;
-  tone?: "slate" | "red";
+  tone?: "slate" | "red" | "green";
 }) {
   return (
     <button
@@ -716,6 +720,7 @@ function IconButton({
       className={cn(
         "inline-flex size-8 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-slate-400 transition hover:bg-white/[0.06] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50",
         tone === "red" && "hover:border-rose-200/25 hover:bg-rose-300/10 hover:text-rose-100",
+        tone === "green" && "hover:border-emerald-200/25 hover:bg-emerald-300/10 hover:text-emerald-100",
       )}
       disabled={disabled}
       onClick={onClick}
@@ -1187,6 +1192,8 @@ function PositionsTable({
   accountCurrency,
   onEdit,
   onDelete,
+  onAddLot,
+  onSell,
   deletingId,
   expandedPositionId,
   lotForms,
@@ -1203,6 +1210,8 @@ function PositionsTable({
   accountCurrency: string;
   onEdit: (position: SavedPortfolioPosition) => void;
   onDelete: (position: SavedPortfolioPosition) => void;
+  onAddLot: (position: SavedPortfolioPosition) => void;
+  onSell: (position: SavedPortfolioPosition) => void;
   deletingId: string | null;
   expandedPositionId: string | null;
   lotForms: Record<string, LotForm>;
@@ -1414,6 +1423,12 @@ function PositionsTable({
                                 className={cn("size-4 transition", isExpanded && "rotate-180")}
                               />
                             </IconButton>
+                            <IconButton label={`Добави лот към ${position.symbol}`} onClick={() => onAddLot(position)}>
+                              <PlusCircle className="size-4" />
+                            </IconButton>
+                            <IconButton label={`Продай от ${position.symbol}`} onClick={() => onSell(position)} tone="green">
+                              <DollarSign className="size-4" />
+                            </IconButton>
                             <IconButton label={`Редактирай ${position.symbol}`} onClick={() => onEdit(position)}>
                               <Edit3 className="size-4" />
                             </IconButton>
@@ -1488,6 +1503,12 @@ function PositionsTable({
                         <ChevronDown
                           className={cn("size-4 transition", isExpanded && "rotate-180")}
                         />
+                      </IconButton>
+                      <IconButton label={`Добави лот към ${position.symbol}`} onClick={() => onAddLot(position)}>
+                        <PlusCircle className="size-4" />
+                      </IconButton>
+                      <IconButton label={`Продай от ${position.symbol}`} onClick={() => onSell(position)} tone="green">
+                        <DollarSign className="size-4" />
                       </IconButton>
                       <IconButton label={`Редактирай ${position.symbol}`} onClick={() => onEdit(position)}>
                         <Edit3 className="size-4" />
@@ -1592,6 +1613,8 @@ export function PortfolioRiskManager() {
   const [lotForms, setLotForms] = useState<Record<string, LotForm>>({});
   const [savingLotId, setSavingLotId] = useState<string | null>(null);
   const [deletingLotId, setDeletingLotId] = useState<string | null>(null);
+  const [addLotTarget, setAddLotTarget] = useState<SavedPortfolioPosition | null>(null);
+  const [sellTarget, setSellTarget] = useState<SavedPortfolioPosition | null>(null);
 
   const profile = useMemo(() => formToProfile(profileForm), [profileForm]);
   const portfolio = useMemo(() => calculatePortfolioRisk(profile, positions), [profile, positions]);
@@ -1926,6 +1949,11 @@ export function PortfolioRiskManager() {
   const accountLoadLabelPct = Math.min(92, Math.max(8, accountLoadMarkerPct));
   const accountLoadTone = getAccountLoadTone(accountLoadPercent);
 
+  function handleDrawerSaved(updatedPositions: SavedPortfolioPosition[]) {
+    setPositions(updatedPositions);
+    setMessage("Данните са записани.");
+  }
+
   return (
     <div className="space-y-4">
       <section className="rounded-lg border border-white/10 bg-[#0b1322]/80">
@@ -2127,11 +2155,13 @@ export function PortfolioRiskManager() {
             deletingId={deletingId}
             expandedPositionId={expandedPositionId}
             lotForms={lotForms}
+            onAddLot={(position) => setAddLotTarget(position)}
             onDeleteLot={(position, lot) => void deleteLot(position, lot)}
             onDelete={(position) => void deletePosition(position)}
             onEdit={startEdit}
             onLotFormChange={updateLotForm}
             onSaveLot={(position, formKey, lot) => void saveLot(position, formKey, lot)}
+            onSell={(position) => setSellTarget(position)}
             onToggleHelp={toggleHelp}
             onTogglePosition={togglePositionDetails}
             openHelp={openHelp}
@@ -2441,6 +2471,26 @@ export function PortfolioRiskManager() {
           ) : null}
         </aside>
       </div>
+
+      {addLotTarget ? (
+        <AddLotDrawer
+          accountCurrency={accountCurrency}
+          fxRate={profile.fxRateInstrumentToAccount}
+          onClose={() => setAddLotTarget(null)}
+          onSaved={handleDrawerSaved}
+          position={addLotTarget}
+        />
+      ) : null}
+
+      {sellTarget ? (
+        <SellPositionDrawer
+          accountCurrency={accountCurrency}
+          fxRate={profile.fxRateInstrumentToAccount}
+          onClose={() => setSellTarget(null)}
+          onSaved={handleDrawerSaved}
+          position={sellTarget}
+        />
+      ) : null}
     </div>
   );
 }
