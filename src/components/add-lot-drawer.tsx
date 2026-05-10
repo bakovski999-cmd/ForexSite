@@ -56,6 +56,14 @@ function fmtPrice(value: number, currency: string): string {
   }
 }
 
+function fmtSignedCurr(value: number, currency: string): string {
+  if (!Number.isFinite(value)) return "—";
+  const formatted = fmtCurr(Math.abs(value), currency);
+  if (value > 0) return `+${formatted}`;
+  if (value < 0) return `-${formatted}`;
+  return formatted;
+}
+
 function buildBaseLot(position: SavedPortfolioPosition): SavedPortfolioLot {
   return {
     id: `preview-base-lot:${position.id}`,
@@ -99,6 +107,7 @@ export function AddLotDrawer({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAutoCloseHelp, setShowAutoCloseHelp] = useState(false);
 
   function updateField(field: keyof AddLotForm, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -118,6 +127,18 @@ export function AddLotDrawer({
     const costInstrument = ep * qty;
     const costAccount = Number.isFinite(fxRate) && fxRate > 0 ? costInstrument * fxRate : costInstrument;
     const plannedExit = parseNum(form.plannedExitPrice);
+    const hasPlannedExit = Number.isFinite(plannedExit) && plannedExit > 0;
+    const plannedProfitInstrument = hasPlannedExit
+      ? position.direction === "buy"
+        ? (plannedExit - ep) * qty
+        : (ep - plannedExit) * qty
+      : null;
+    const plannedProfitAccount =
+      plannedProfitInstrument === null
+        ? null
+        : Number.isFinite(fxRate) && fxRate > 0
+          ? plannedProfitInstrument * fxRate
+          : plannedProfitInstrument;
     const baseLots = existingLots.length > 0 ? existingLots : [buildBaseLot(position)];
     const draftLot: SavedPortfolioLot = {
       id: `preview-lot:${position.id}`,
@@ -145,6 +166,8 @@ export function AddLotDrawer({
         newAvgEntry,
         costInstrument,
         costAccount,
+        plannedProfitInstrument,
+        plannedProfitAccount,
         normalAutoClose: null,
         normalAutoCloseBelowZero: false,
         riskAutoClose: null,
@@ -163,6 +186,8 @@ export function AddLotDrawer({
       newAvgEntry,
       costInstrument,
       costAccount,
+      plannedProfitInstrument,
+      plannedProfitAccount,
       normalAutoClose: draftLotAnalysis?.normalAutoClosePrice ?? null,
       normalAutoCloseBelowZero: draftLotAnalysis?.normalAutoCloseBelowZero ?? false,
       riskAutoClose: draftLotAnalysis?.riskAutoClosePrice ?? null,
@@ -379,8 +404,57 @@ export function AddLotDrawer({
                     ) : null}
                   </p>
                 </div>
-                <div className="col-span-2 rounded-md border border-white/10 bg-slate-950/35 px-3 py-2">
-                  <p className="text-slate-500">Auto-close след добавяне</p>
+                <div className="relative col-span-2 rounded-md border border-white/10 bg-slate-950/35 px-3 py-2">
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-slate-500">Auto-close след добавяне</p>
+                    <button
+                      aria-expanded={showAutoCloseHelp}
+                      aria-label="Обяснение за auto-close и загуба"
+                      className="inline-flex size-4 items-center justify-center rounded-full border border-white/15 bg-white/[0.03] text-[10px] font-bold leading-none text-slate-400 transition hover:border-white/25 hover:text-slate-100"
+                      onClick={() => setShowAutoCloseHelp((current) => !current)}
+                      type="button"
+                    >
+                      !
+                    </button>
+                  </div>
+                  {showAutoCloseHelp ? (
+                    <div className="absolute left-2 right-2 top-8 z-20 rounded-md border border-white/10 bg-slate-950/95 p-3 text-[11px] leading-4 text-slate-300 shadow-2xl shadow-black/45 backdrop-blur">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="font-semibold text-white">Как да четеш auto-close</p>
+                        <button
+                          aria-label="Затвори обяснението"
+                          className="inline-flex size-5 shrink-0 items-center justify-center rounded border border-white/10 text-slate-500 transition hover:bg-white/[0.05] hover:text-slate-100"
+                          onClick={() => setShowAutoCloseHelp(false)}
+                          type="button"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </div>
+                      <div className="mt-2 space-y-2">
+                        <p>
+                          <span className="font-semibold text-amber-100">Risk auto-close</span> е
+                          по-консервативната цена при временно по-нисък leverage, например 1:5.
+                        </p>
+                        <p>
+                          <span className="font-semibold text-slate-100">Normal auto-close</span> е
+                          ориентир при стандартния leverage, например 1:20.
+                        </p>
+                        <p>
+                          <span className="font-semibold text-rose-100">Загуба от тази покупка</span>{" "}
+                          е приблизителната загуба само от новия lot до risk auto-close.
+                        </p>
+                        <p>
+                          <span className="font-semibold text-slate-100">Общо за позицията</span> е
+                          сборът на загубите до risk auto-close за всички lots в тази акция.
+                        </p>
+                        <p>
+                          Ако пише <span className="font-semibold text-slate-100">Max loss до $0</span>,
+                          няма реална auto-close цена; показва максималната загуба, ако BUY акцията
+                          падне до $0.
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
                   {preview.errors.length > 0 ? (
                     <p className="mt-1 leading-5 text-rose-100">{preview.errors.join(" ")}</p>
                   ) : (
@@ -413,6 +487,37 @@ export function AddLotDrawer({
                         <span className="font-semibold text-slate-100">
                           ~{fmtCurr(preview.positionLossToStopOut ?? Number.NaN, accountCurrency)}
                         </span>
+                      </div>
+                      <div className="mt-1.5 rounded border border-white/8 bg-white/[0.025] px-2 py-1.5">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-slate-500">Очаквана печалба от тази покупка</span>
+                          {preview.plannedProfitAccount === null ? (
+                            <span className="text-right font-medium text-slate-500">
+                              въведи продажна цена
+                            </span>
+                          ) : (
+                            <span
+                              className={
+                                preview.plannedProfitAccount > 0
+                                  ? "font-semibold text-emerald-200"
+                                  : preview.plannedProfitAccount < 0
+                                    ? "font-semibold text-rose-100"
+                                    : "font-semibold text-slate-100"
+                              }
+                            >
+                              {fmtSignedCurr(preview.plannedProfitAccount, accountCurrency)}
+                            </span>
+                          )}
+                        </div>
+                        {preview.plannedProfitAccount === null ? (
+                          <p className="mt-1 text-[11px] text-slate-600">
+                            Въведи продажна цена, за да видиш очаквана печалба.
+                          </p>
+                        ) : instrumentCurrency !== accountCurrency ? (
+                          <p className="mt-1 text-right text-[11px] text-slate-500">
+                            {fmtSignedCurr(preview.plannedProfitInstrument ?? Number.NaN, instrumentCurrency)}
+                          </p>
+                        ) : null}
                       </div>
                       <p className="mt-1 text-[11px] leading-4 text-slate-500">
                         Първата сума е само за новия lot до risk auto-close. Общата сума е сборът за всички lots в тази позиция.
