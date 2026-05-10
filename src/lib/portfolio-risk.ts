@@ -78,8 +78,12 @@ export type PortfolioLotAnalysis = {
   lot: SavedPortfolioLot;
   effectiveSharesToSell: number;
   costBasisInstrument: number;
+  normalAutoCloseRawPrice: number;
   normalAutoClosePrice: number;
+  normalAutoCloseBelowZero: boolean;
+  riskAutoCloseRawPrice: number;
   riskAutoClosePrice: number;
+  riskAutoCloseBelowZero: boolean;
   lossToNormalStopInstrument: number;
   lossToNormalStopAccount: number;
   lossToRiskStopInstrument: number;
@@ -93,6 +97,7 @@ export type PortfolioLotAnalysis = {
 export type PortfolioAutoCloseRange = {
   min: number;
   max: number;
+  hasBelowZero: boolean;
 };
 
 export type PortfolioPlannedExitSummary = {
@@ -261,8 +266,12 @@ function buildLotAnalyses(
       lot,
       effectiveSharesToSell,
       costBasisInstrument,
+      normalAutoCloseRawPrice: Number.NaN,
       normalAutoClosePrice: Number.NaN,
+      normalAutoCloseBelowZero: false,
+      riskAutoCloseRawPrice: Number.NaN,
       riskAutoClosePrice: Number.NaN,
+      riskAutoCloseBelowZero: false,
       lossToNormalStopInstrument: 0,
       lossToNormalStopAccount: 0,
       lossToRiskStopInstrument: 0,
@@ -386,16 +395,22 @@ function calculateLotStopLossInstrument(
   return Math.max(loss, 0);
 }
 
-function buildRange(values: number[]): PortfolioAutoCloseRange {
-  const finiteValues = values.filter((value) => Number.isFinite(value));
+function buildAutoCloseRange(
+  values: { price: number; belowZero: boolean }[],
+): PortfolioAutoCloseRange {
+  const finiteValues = values
+    .filter((value) => !value.belowZero && Number.isFinite(value.price))
+    .map((value) => value.price);
+  const hasBelowZero = values.some((value) => value.belowZero);
 
   if (finiteValues.length === 0) {
-    return { min: Number.NaN, max: Number.NaN };
+    return { min: Number.NaN, max: Number.NaN, hasBelowZero };
   }
 
   return {
     min: Math.min(...finiteValues),
     max: Math.max(...finiteValues),
+    hasBelowZero,
   };
 }
 
@@ -659,22 +674,22 @@ export function calculatePortfolioRisk(
     const temporaryAutoClose = buildIndividualStopOut(position, temporary);
     const effectiveRiskLots = getEffectiveRiskLots(position.position);
     const riskLotAnalyses = effectiveRiskLots.map((lot) => {
-      const normalAutoClosePrice = Math.max(
-        0,
-        calculateLotAutoClosePrice(
-          position.position.direction,
-          lot.entryPrice,
-          normalAutoClose.bufferPerShareInstrument,
-        ),
+      const normalAutoCloseRawPrice = calculateLotAutoClosePrice(
+        position.position.direction,
+        lot.entryPrice,
+        normalAutoClose.bufferPerShareInstrument,
       );
-      const riskAutoClosePrice = Math.max(
-        0,
-        calculateLotAutoClosePrice(
-          position.position.direction,
-          lot.entryPrice,
-          temporaryAutoClose.bufferPerShareInstrument,
-        ),
+      const riskAutoCloseRawPrice = calculateLotAutoClosePrice(
+        position.position.direction,
+        lot.entryPrice,
+        temporaryAutoClose.bufferPerShareInstrument,
       );
+      const normalAutoCloseBelowZero =
+        position.position.direction === "buy" && normalAutoCloseRawPrice < 0;
+      const riskAutoCloseBelowZero =
+        position.position.direction === "buy" && riskAutoCloseRawPrice < 0;
+      const normalAutoClosePrice = Math.max(0, normalAutoCloseRawPrice);
+      const riskAutoClosePrice = Math.max(0, riskAutoCloseRawPrice);
       const lossToNormalStopInstrument = calculateLotStopLossInstrument(
         position.position.direction,
         lot.entryPrice,
@@ -690,8 +705,12 @@ export function calculatePortfolioRisk(
 
       return {
         lot,
+        normalAutoCloseRawPrice,
         normalAutoClosePrice,
+        normalAutoCloseBelowZero,
+        riskAutoCloseRawPrice,
         riskAutoClosePrice,
+        riskAutoCloseBelowZero,
         lossToNormalStopInstrument,
         lossToNormalStopAccount: lossToNormalStopInstrument * profile.fxRateInstrumentToAccount,
         lossToRiskStopInstrument,
@@ -708,8 +727,12 @@ export function calculatePortfolioRisk(
 
       return {
         ...lotAnalysis,
+        normalAutoCloseRawPrice: riskLotAnalysis.normalAutoCloseRawPrice,
         normalAutoClosePrice: riskLotAnalysis.normalAutoClosePrice,
+        normalAutoCloseBelowZero: riskLotAnalysis.normalAutoCloseBelowZero,
+        riskAutoCloseRawPrice: riskLotAnalysis.riskAutoCloseRawPrice,
         riskAutoClosePrice: riskLotAnalysis.riskAutoClosePrice,
+        riskAutoCloseBelowZero: riskLotAnalysis.riskAutoCloseBelowZero,
         lossToNormalStopInstrument: riskLotAnalysis.lossToNormalStopInstrument,
         lossToNormalStopAccount: riskLotAnalysis.lossToNormalStopAccount,
         lossToRiskStopInstrument: riskLotAnalysis.lossToRiskStopInstrument,
@@ -753,8 +776,18 @@ export function calculatePortfolioRisk(
       lotAnalyses,
       normalAutoClose,
       temporaryAutoClose,
-      autoCloseRangeNormal: buildRange(riskLotAnalyses.map((item) => item.normalAutoClosePrice)),
-      autoCloseRangeRisk: buildRange(riskLotAnalyses.map((item) => item.riskAutoClosePrice)),
+      autoCloseRangeNormal: buildAutoCloseRange(
+        riskLotAnalyses.map((item) => ({
+          price: item.normalAutoClosePrice,
+          belowZero: item.normalAutoCloseBelowZero,
+        })),
+      ),
+      autoCloseRangeRisk: buildAutoCloseRange(
+        riskLotAnalyses.map((item) => ({
+          price: item.riskAutoClosePrice,
+          belowZero: item.riskAutoCloseBelowZero,
+        })),
+      ),
       totalLossToNormalStopAccount,
       totalLossToRiskStopAccount,
       allocationPercent:

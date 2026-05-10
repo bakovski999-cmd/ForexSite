@@ -50,6 +50,22 @@ describe("portfolio risk manager calculations", () => {
     expect(result.summary.temporary.usedMargin).toBeCloseTo(16.626);
   });
 
+  test("marks BUY auto-close below zero as no real stop price and max loss to zero", () => {
+    const result = calculatePortfolioRisk(profile, [sofiPosition]);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    const analysis = result.positions[0];
+
+    expect(analysis.autoCloseRangeRisk.hasBelowZero).toBe(true);
+    expect(analysis.autoCloseRangeRisk.min).toBeNaN();
+    expect(analysis.totalLossToRiskStopAccount).toBeCloseTo(83.13);
+  });
+
   test("aggregates lots into quantity, weighted entry, exposure and planned profit", () => {
     const result = calculatePortfolioRisk(profile, [
       {
@@ -124,16 +140,16 @@ describe("portfolio risk manager calculations", () => {
     const result = calculatePortfolioRisk({ ...profile, balance: 100 }, [
       {
         ...sofiPosition,
-        currentPrice: 16,
+        currentPrice: 20,
         lots: [
           {
             id: "lot-1",
-            entryPrice: 16,
+            entryPrice: 20,
             quantity: 6,
           },
           {
             id: "lot-2",
-            entryPrice: 12,
+            entryPrice: 16,
             quantity: 4,
           },
         ],
@@ -157,9 +173,47 @@ describe("portfolio risk manager calculations", () => {
     expect(firstLot.riskAutoClosePrice).toBeGreaterThan(secondLot.riskAutoClosePrice);
     expect(analysis.autoCloseRangeRisk.min).toBeCloseTo(secondLot.riskAutoClosePrice);
     expect(analysis.autoCloseRangeRisk.max).toBeCloseTo(firstLot.riskAutoClosePrice);
+    expect(analysis.autoCloseRangeRisk.hasBelowZero).toBe(false);
     expect(firstLot.lossToRiskStopAccount).toBeGreaterThan(0);
     expect(secondLot.lossToRiskStopAccount).toBeGreaterThan(0);
     expect(analysis.totalLossToRiskStopAccount).toBeCloseTo(totalLotLoss);
+  });
+
+  test("keeps positive auto-close range while flagging mixed below-zero BUY lots", () => {
+    const result = calculatePortfolioRisk({ ...profile, balance: 100 }, [
+      {
+        ...sofiPosition,
+        currentPrice: 16,
+        lots: [
+          {
+            id: "higher-entry",
+            entryPrice: 16,
+            quantity: 6,
+          },
+          {
+            id: "lower-entry",
+            entryPrice: 5,
+            quantity: 4,
+          },
+        ],
+      },
+    ]);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    const analysis = result.positions[0];
+    const higherEntryLot = analysis.lotAnalyses[0];
+    const lowerEntryLot = analysis.lotAnalyses[1];
+
+    expect(analysis.autoCloseRangeRisk.hasBelowZero).toBe(true);
+    expect(analysis.autoCloseRangeRisk.min).toBeCloseTo(higherEntryLot.riskAutoClosePrice);
+    expect(analysis.autoCloseRangeRisk.max).toBeCloseTo(higherEntryLot.riskAutoClosePrice);
+    expect(lowerEntryLot.riskAutoCloseBelowZero).toBe(true);
+    expect(lowerEntryLot.lossToRiskStopAccount).toBeCloseTo(17);
   });
 
   test("calculates SELL per-lot stop loss direction", () => {
@@ -187,6 +241,7 @@ describe("portfolio risk manager calculations", () => {
     const lot = result.positions[0].lotAnalyses[0];
 
     expect(lot.riskAutoClosePrice).toBeGreaterThan(lot.lot.entryPrice);
+    expect(result.positions[0].autoCloseRangeRisk.hasBelowZero).toBe(false);
     expect(lot.lossToRiskStopInstrument).toBeGreaterThan(0);
     expect(result.positions[0].totalLossToRiskStopAccount).toBeCloseTo(
       lot.lossToRiskStopAccount,

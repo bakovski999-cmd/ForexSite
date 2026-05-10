@@ -237,7 +237,7 @@ function formatPercent(value: number) {
 
 function formatCurrencyRange(range: PortfolioAutoCloseRange, currency = "USD") {
   if (!Number.isFinite(range.min) || !Number.isFinite(range.max)) {
-    return "няма позиции";
+    return range.hasBelowZero ? "няма реален auto-close" : "няма позиции";
   }
 
   if (Math.abs(range.max - range.min) < 0.005) {
@@ -245,6 +245,43 @@ function formatCurrencyRange(range: PortfolioAutoCloseRange, currency = "USD") {
   }
 
   return `${formatCurrency(range.min, currency)} - ${formatCurrency(range.max, currency)}`;
+}
+
+function AutoCloseDisplay({
+  range,
+  instrumentCurrency,
+  accountCurrency,
+  lossAccount,
+  align = "right",
+}: {
+  range: PortfolioAutoCloseRange;
+  instrumentCurrency: string;
+  accountCurrency: string;
+  lossAccount: number;
+  align?: "left" | "right";
+}) {
+  const hasRealAutoClose = Number.isFinite(range.min) && Number.isFinite(range.max);
+  const primary = formatCurrencyRange(range, instrumentCurrency);
+  const lossLabel = range.hasBelowZero ? "max loss до $0" : "loss до auto-close";
+
+  return (
+    <div className={cn(align === "right" ? "text-right" : "text-left")}>
+      <p
+        className={cn(
+          "font-bold",
+          hasRealAutoClose ? "text-rose-300" : "text-slate-300",
+        )}
+      >
+        {primary}
+      </p>
+      {range.hasBelowZero && hasRealAutoClose ? (
+        <p className="text-xs text-slate-500">част от lots са под $0</p>
+      ) : null}
+      <p className="text-xs text-slate-500">
+        {lossLabel} ~{formatCurrency(lossAccount, accountCurrency)}
+      </p>
+    </div>
+  );
 }
 
 function getPositionFxRate(analysis: PortfolioPositionAnalysis) {
@@ -1675,14 +1712,13 @@ function PositionsTable({
                             {formatCurrency(analysis.temporaryUsedMargin, accountCurrency)}
                           </p>
                         </td>
-                        <td className="px-3 py-3 text-right">
-                          <p>{formatCurrencyRange(analysis.autoCloseRangeNormal, instrumentCurrency)}</p>
-                          <p className="text-xs text-amber-100/80">
-                            {formatCurrencyRange(analysis.autoCloseRangeRisk, instrumentCurrency)}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            loss ~{formatCurrency(analysis.totalLossToRiskStopAccount, accountCurrency)}
-                          </p>
+                        <td className="px-3 py-3">
+                          <AutoCloseDisplay
+                            accountCurrency={accountCurrency}
+                            instrumentCurrency={instrumentCurrency}
+                            lossAccount={analysis.totalLossToRiskStopAccount}
+                            range={analysis.autoCloseRangeRisk}
+                          />
                         </td>
                         <td className="px-3 py-3">
                           <StatusBadge status={analysis.riskBadge} />
@@ -1834,13 +1870,13 @@ function PositionsTable({
                     </div>
                     <div>
                       <p className="text-slate-500">Auto-close N/R</p>
-                      <p className="mt-0.5 text-slate-200">
-                        {formatCurrencyRange(analysis.autoCloseRangeNormal, instrumentCurrency)} /{" "}
-                        {formatCurrencyRange(analysis.autoCloseRangeRisk, instrumentCurrency)}
-                      </p>
-                      <p className="text-[11px] text-slate-500">
-                        loss ~{formatCurrency(analysis.totalLossToRiskStopAccount, accountCurrency)}
-                      </p>
+                      <AutoCloseDisplay
+                        accountCurrency={accountCurrency}
+                        align="left"
+                        instrumentCurrency={instrumentCurrency}
+                        lossAccount={analysis.totalLossToRiskStopAccount}
+                        range={analysis.autoCloseRangeRisk}
+                      />
                     </div>
                   </div>
                   {analysis.warnings.length > 0 ? (
@@ -1955,24 +1991,19 @@ function RiskGaugeSidebar({
         <div className="rounded-xl border border-white/10 bg-slate-950/20 px-4 pb-4 pt-5">
           <div className="relative mx-auto h-44 w-full max-w-[17rem]">
             <svg aria-label="Account load gauge" className="h-full w-full" viewBox="0 0 240 155">
+              <defs>
+                <linearGradient gradientUnits="userSpaceOnUse" id="account-load-arc" x1="36" x2="204" y1="118" y2="118">
+                  <stop offset="0%" stopColor="rgba(94,220,168,0.76)" />
+                  <stop offset="20%" stopColor="rgba(94,220,168,0.76)" />
+                  <stop offset="42%" stopColor="rgba(245,207,88,0.82)" />
+                  <stop offset="62%" stopColor="rgba(224,168,92,0.8)" />
+                  <stop offset="100%" stopColor="rgba(251,113,133,0.72)" />
+                </linearGradient>
+              </defs>
               <path
-                d="M36 118 A84 84 0 0 1 83 43"
+                d="M36 118 A84 84 0 0 1 204 118"
                 fill="none"
-                stroke="rgba(116,228,176,0.72)"
-                strokeLinecap="round"
-                strokeWidth="18"
-              />
-              <path
-                d="M83 43 A84 84 0 0 1 157 43"
-                fill="none"
-                stroke="rgba(245,207,88,0.78)"
-                strokeLinecap="round"
-                strokeWidth="18"
-              />
-              <path
-                d="M157 43 A84 84 0 0 1 204 118"
-                fill="none"
-                stroke="rgba(251,113,133,0.68)"
+                stroke="url(#account-load-arc)"
                 strokeLinecap="round"
                 strokeWidth="18"
               />
@@ -2042,11 +2073,7 @@ function RiskGaugeSidebar({
 
           <div className="mt-5">
             <div className="relative h-2 overflow-hidden rounded-full bg-slate-950/60">
-              <div className="flex h-full">
-                <span className="basis-[20%] bg-emerald-300/75" />
-                <span className="basis-[30%] bg-amber-300/80" />
-                <span className="flex-1 bg-orange-300/75" />
-              </div>
+              <div className="h-full bg-[linear-gradient(90deg,rgba(94,220,168,0.78)_0%,rgba(94,220,168,0.78)_20%,rgba(245,207,88,0.82)_42%,rgba(224,168,92,0.8)_62%,rgba(251,113,133,0.72)_100%)]" />
               <span
                 className="absolute top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.55)]"
                 style={{ left: `${marker}%` }}
@@ -2341,13 +2368,13 @@ function PositionCards({
                         {formatCurrency(analysis.temporaryUsedMargin, accountCurrency)} risk
                       </p>
                     </td>
-                    <td className="px-3 py-4 text-right">
-                      <p className="font-bold text-rose-300">
-                        {formatCurrencyRange(analysis.autoCloseRangeRisk, instrumentCurrency)}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        loss ~{formatCurrency(analysis.totalLossToRiskStopAccount, accountCurrency)}
-                      </p>
+                    <td className="px-3 py-4">
+                      <AutoCloseDisplay
+                        accountCurrency={accountCurrency}
+                        instrumentCurrency={instrumentCurrency}
+                        lossAccount={analysis.totalLossToRiskStopAccount}
+                        range={analysis.autoCloseRangeRisk}
+                      />
                     </td>
                     <td className="px-3 py-4">
                       <StatusBadge status={analysis.riskBadge} />
@@ -2459,12 +2486,13 @@ function PositionCards({
                 </div>
                 <div>
                   <p className="text-slate-500">Auto-close</p>
-                  <p className="font-semibold text-rose-300">
-                    {formatCurrencyRange(analysis.autoCloseRangeRisk, instrumentCurrency)}
-                  </p>
-                  <p className="text-slate-500">
-                    loss ~{formatCurrency(analysis.totalLossToRiskStopAccount, accountCurrency)}
-                  </p>
+                  <AutoCloseDisplay
+                    accountCurrency={accountCurrency}
+                    align="left"
+                    instrumentCurrency={instrumentCurrency}
+                    lossAccount={analysis.totalLossToRiskStopAccount}
+                    range={analysis.autoCloseRangeRisk}
+                  />
                 </div>
               </div>
 

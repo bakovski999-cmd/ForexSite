@@ -146,7 +146,9 @@ export function AddLotDrawer({
         costInstrument,
         costAccount,
         normalAutoClose: null,
+        normalAutoCloseBelowZero: false,
         riskAutoClose: null,
+        riskAutoCloseBelowZero: false,
         newLotLossToStopOut: null,
         positionLossToStopOut: null,
         errors: previewRisk.errors,
@@ -162,7 +164,9 @@ export function AddLotDrawer({
       costInstrument,
       costAccount,
       normalAutoClose: draftLotAnalysis?.normalAutoClosePrice ?? null,
+      normalAutoCloseBelowZero: draftLotAnalysis?.normalAutoCloseBelowZero ?? false,
       riskAutoClose: draftLotAnalysis?.riskAutoClosePrice ?? null,
+      riskAutoCloseBelowZero: draftLotAnalysis?.riskAutoCloseBelowZero ?? false,
       newLotLossToStopOut: draftLotAnalysis?.lossToRiskStopAccount ?? null,
       positionLossToStopOut: positionPreview?.totalLossToRiskStopAccount ?? null,
       errors: [],
@@ -382,14 +386,24 @@ export function AddLotDrawer({
                   ) : (
                     <>
                       <p className="mt-1 font-semibold text-amber-100">
-                        {fmtPrice(preview.riskAutoClose ?? Number.NaN, instrumentCurrency)} risk
-                        <span className="mx-2 font-normal text-slate-600">·</span>
-                        <span className="font-medium text-slate-300">
-                          {fmtPrice(preview.normalAutoClose ?? Number.NaN, instrumentCurrency)} normal
-                        </span>
+                        {preview.riskAutoCloseBelowZero
+                          ? "няма реален risk auto-close"
+                          : `${fmtPrice(preview.riskAutoClose ?? Number.NaN, instrumentCurrency)} risk`}
+                      </p>
+                      <p className="mt-0.5 text-xs font-medium text-slate-400">
+                        {preview.normalAutoCloseBelowZero
+                          ? "normal: няма реален auto-close"
+                          : `normal: ${fmtPrice(
+                              preview.normalAutoClose ?? Number.NaN,
+                              instrumentCurrency,
+                            )}`}
                       </p>
                       <div className="mt-2 flex items-center justify-between gap-3 rounded border border-white/8 bg-white/[0.025] px-2 py-1.5">
-                        <span className="text-slate-500">Загуба от тази покупка</span>
+                        <span className="text-slate-500">
+                          {preview.riskAutoCloseBelowZero
+                            ? "Max loss до $0"
+                            : "Загуба от тази покупка"}
+                        </span>
                         <span className="font-semibold text-rose-100">
                           ~{fmtCurr(preview.newLotLossToStopOut ?? Number.NaN, accountCurrency)}
                         </span>
