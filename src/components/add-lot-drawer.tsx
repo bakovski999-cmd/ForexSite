@@ -42,6 +42,20 @@ function fmtCurr(value: number, currency: string): string {
   }
 }
 
+function fmtPrice(value: number, currency: string): string {
+  if (!Number.isFinite(value)) return "—";
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  } catch {
+    return `${currency} ${value.toFixed(2)}`;
+  }
+}
+
 function buildBaseLot(position: SavedPortfolioPosition): SavedPortfolioLot {
   return {
     id: `preview-base-lot:${position.id}`,
@@ -133,6 +147,7 @@ export function AddLotDrawer({
         costAccount,
         normalAutoClose: null,
         riskAutoClose: null,
+        lossToStopOut: null,
         errors: previewRisk.errors,
       };
     }
@@ -146,6 +161,7 @@ export function AddLotDrawer({
       costAccount,
       normalAutoClose: positionPreview?.normalAutoClose.displayAutoClosePrice ?? null,
       riskAutoClose: positionPreview?.temporaryAutoClose.displayAutoClosePrice ?? null,
+      lossToStopOut: previewRisk.summary.temporary.maxLossBeforeStopOut,
       errors: [],
     };
   }, [
@@ -363,14 +379,20 @@ export function AddLotDrawer({
                   ) : (
                     <>
                       <p className="mt-1 font-semibold text-amber-100">
-                        {fmtCurr(preview.riskAutoClose ?? Number.NaN, instrumentCurrency)} risk
+                        {fmtPrice(preview.riskAutoClose ?? Number.NaN, instrumentCurrency)} risk
                         <span className="mx-2 font-normal text-slate-600">·</span>
                         <span className="font-medium text-slate-300">
-                          {fmtCurr(preview.normalAutoClose ?? Number.NaN, instrumentCurrency)} normal
+                          {fmtPrice(preview.normalAutoClose ?? Number.NaN, instrumentCurrency)} normal
                         </span>
                       </p>
+                      <div className="mt-2 flex items-center justify-between gap-3 rounded border border-white/8 bg-white/[0.025] px-2 py-1.5">
+                        <span className="text-slate-500">Загуба до stop-out</span>
+                        <span className="font-semibold text-rose-100">
+                          ~{fmtCurr(preview.lossToStopOut ?? Number.NaN, accountCurrency)}
+                        </span>
+                      </div>
                       <p className="mt-1 text-[11px] leading-4 text-slate-500">
-                        По-близката цена до текущата е по-важният stop-out ориентир.
+                        Това е приблизителната загуба, която акаунтът може да понесе след добавяне на този lot.
                       </p>
                     </>
                   )}

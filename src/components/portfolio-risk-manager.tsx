@@ -141,7 +141,7 @@ const HELP_CONTENT: Record<HelpTopic, HelpContent> = {
     example: "-€120 Unrealized P/L означава, че equity вече е с €120 по-ниско, ако затвориш на текущите цени.",
   },
   stopOutBuffer: {
-    title: "Stop-out Buffer",
+    title: "Загуба до stop-out",
     what: "Приблизителната загуба, която акаунтът може да понесе преди stop-out зоната.",
     read: "Това е най-практичният буфер: колко още загуба има място да поеме акаунтът преди принудително затваряне.",
     example: "€1,891 buffer означава, че при още около €1,891 загуба акаунтът може да стигне stop-out условията.",
@@ -1325,6 +1325,7 @@ function PositionLotsPanel({
 function PositionsTable({
   positions,
   accountCurrency,
+  stopOutLossAccount,
   onEdit,
   onDelete,
   onAddLot,
@@ -1343,6 +1344,7 @@ function PositionsTable({
 }: {
   positions: PortfolioPositionAnalysis[];
   accountCurrency: string;
+  stopOutLossAccount: number;
   onEdit: (position: SavedPortfolioPosition) => void;
   onDelete: (position: SavedPortfolioPosition) => void;
   onAddLot: (position: SavedPortfolioPosition) => void;
@@ -1539,6 +1541,9 @@ function PositionsTable({
                           <p className="text-xs text-amber-100/80">
                             {formatCurrency(analysis.temporaryAutoClose.displayAutoClosePrice, instrumentCurrency)}
                           </p>
+                          <p className="text-xs text-slate-500">
+                            loss ~{formatCurrency(stopOutLossAccount, accountCurrency)}
+                          </p>
                         </td>
                         <td className="px-3 py-3">
                           <StatusBadge status={analysis.riskBadge} />
@@ -1693,6 +1698,9 @@ function PositionsTable({
                       <p className="mt-0.5 text-slate-200">
                         {formatCurrency(analysis.normalAutoClose.displayAutoClosePrice, instrumentCurrency)} /{" "}
                         {formatCurrency(analysis.temporaryAutoClose.displayAutoClosePrice, instrumentCurrency)}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        loss ~{formatCurrency(stopOutLossAccount, accountCurrency)}
                       </p>
                     </div>
                   </div>
@@ -1918,7 +1926,7 @@ function RiskGaugeSidebar({
           <KpiCard
             helpTopic="stopOutBuffer"
             hint="загуба, която акаунтът може да понесе приблизително"
-            label="Stop-out buffer"
+            label="Загуба до stop-out"
             onToggleHelp={onToggleHelp}
             openHelp={openHelp}
             value={formatCurrency(portfolio.summary.temporary.maxLossBeforeStopOut, accountCurrency)}
@@ -2045,6 +2053,7 @@ function ActionPill({
 function PositionCards({
   positions,
   accountCurrency,
+  stopOutLossAccount,
   openHelp,
   onToggleHelp,
   onEdit,
@@ -2063,6 +2072,7 @@ function PositionCards({
 }: {
   positions: PortfolioPositionAnalysis[];
   accountCurrency: string;
+  stopOutLossAccount: number;
   openHelp: HelpTopic | null;
   onToggleHelp: (topic: HelpTopic) => void;
   onEdit: (position: SavedPortfolioPosition) => void;
@@ -2201,6 +2211,9 @@ function PositionCards({
                           instrumentCurrency,
                         )}
                       </p>
+                      <p className="text-xs text-slate-500">
+                        loss ~{formatCurrency(stopOutLossAccount, accountCurrency)}
+                      </p>
                     </td>
                     <td className="px-3 py-4">
                       <StatusBadge status={analysis.riskBadge} />
@@ -2317,6 +2330,9 @@ function PositionCards({
                       analysis.temporaryAutoClose.displayAutoClosePrice,
                       instrumentCurrency,
                     )}
+                  </p>
+                  <p className="text-slate-500">
+                    loss ~{formatCurrency(stopOutLossAccount, accountCurrency)}
                   </p>
                 </div>
               </div>
@@ -2875,7 +2891,7 @@ export function PortfolioRiskManager() {
               />
               <SummaryCell
                 helpTopic="stopOutBuffer"
-                label="Stop-out buffer"
+                label="Загуба до stop-out"
                 helpAlign="right"
                 onToggleHelp={toggleHelp}
                 openHelp={openHelp}
@@ -3059,6 +3075,7 @@ export function PortfolioRiskManager() {
                       openHelp={openHelp}
                       positions={savedPortfolio.positions}
                       savingLotId={savingLotId}
+                      stopOutLossAccount={savedPortfolio.summary.temporary.maxLossBeforeStopOut}
                     />
 
                     {positionEditorOpen ? (
@@ -3417,6 +3434,7 @@ export function PortfolioRiskManager() {
             openHelp={openHelp}
             positions={savedPortfolio?.positions ?? []}
             savingLotId={savingLotId}
+            stopOutLossAccount={savedPortfolio?.summary.temporary.maxLossBeforeStopOut ?? Number.NaN}
           />
 
           <ToolPanel
