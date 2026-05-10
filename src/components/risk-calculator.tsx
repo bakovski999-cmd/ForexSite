@@ -170,11 +170,11 @@ function SideControl({
   onChange: (value: PositionSide) => void;
 }) {
   return (
-    <div className="grid gap-2 rounded-[22px] border border-white/8 bg-white/[0.035] p-2 sm:grid-cols-2">
+    <div className="grid gap-2 rounded-xl border border-white/8 bg-white/[0.03] p-1.5 sm:grid-cols-2">
       {(["buy", "sell"] as const).map((side) => (
         <button
           className={cn(
-            "rounded-2xl px-4 py-3 text-left transition",
+            "rounded-lg px-3 py-2.5 text-left transition",
             value === side
               ? "border border-amber-200/35 bg-amber-300/16 text-amber-50"
               : "border border-transparent text-slate-300 hover:bg-white/[0.05]",
@@ -184,7 +184,7 @@ function SideControl({
           type="button"
         >
           <span className="block text-sm font-semibold">{sideLabel(side)}</span>
-          <span className="mt-1 block text-xs leading-5 text-slate-400">
+          <span className="mt-1 block text-xs leading-4 text-slate-400">
             {side === "buy"
               ? "Печелиш при покачване, рискът е спад."
               : "Печелиш при спад, рискът е покачване."}
@@ -222,11 +222,11 @@ function MarginModeControl({
   ];
 
   return (
-    <div className="grid gap-2 rounded-[22px] border border-white/8 bg-white/[0.035] p-2 lg:grid-cols-3">
+    <div className="grid gap-2 rounded-xl border border-white/8 bg-white/[0.03] p-1.5 lg:grid-cols-3">
       {options.map((option) => (
         <button
           className={cn(
-            "rounded-2xl px-4 py-3 text-left transition",
+            "rounded-lg px-3 py-2.5 text-left transition",
             value === option.value
               ? "border border-amber-200/35 bg-amber-300/16 text-amber-50"
               : "border border-transparent text-slate-300 hover:bg-white/[0.05]",
@@ -243,7 +243,7 @@ function MarginModeControl({
               </span>
             ) : null}
           </span>
-          <span className="mt-1 block text-xs leading-5 text-slate-400">{option.text}</span>
+          <span className="mt-1 block text-xs leading-4 text-slate-400">{option.text}</span>
         </button>
       ))}
     </div>
@@ -258,6 +258,7 @@ function Field({
   placeholder,
   error,
   type = "text",
+  compact = false,
 }: {
   label: string;
   value: string;
@@ -266,13 +267,22 @@ function Field({
   placeholder?: string;
   error?: string;
   type?: "text" | "number";
+  compact?: boolean;
 }) {
   return (
-    <label className="block rounded-[22px] border border-white/8 bg-white/[0.035] p-4">
-      <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-400">{label}</span>
+    <label
+      className={cn(
+        "block border border-white/8 bg-white/[0.03]",
+        compact ? "rounded-xl p-3" : "rounded-[22px] p-4",
+      )}
+    >
+      <span className="text-[11px] font-medium uppercase tracking-[0.11em] text-slate-400">
+        {label}
+      </span>
       <input
         className={cn(
-          "mt-3 h-12 w-full rounded-2xl border bg-slate-950/45 px-4 text-base font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-amber-300/60 focus:ring-2 focus:ring-amber-300/15",
+          "w-full border bg-slate-950/45 font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-amber-300/60 focus:ring-2 focus:ring-amber-300/15",
+          compact ? "mt-2 h-10 rounded-lg px-3 text-sm" : "mt-3 h-12 rounded-2xl px-4 text-base",
           error ? "border-rose-300/40" : "border-white/10",
         )}
         inputMode="decimal"
@@ -282,8 +292,16 @@ function Field({
         type={type}
         value={value}
       />
-      {error ? <span className="mt-2 block text-sm text-rose-200">{error}</span> : null}
-      {hint && !error ? <span className="mt-2 block text-sm text-slate-400">{hint}</span> : null}
+      {error ? (
+        <span className={cn("mt-2 block text-rose-200", compact ? "text-xs" : "text-sm")}>
+          {error}
+        </span>
+      ) : null}
+      {hint && !error ? (
+        <span className={cn("mt-2 block text-slate-400", compact ? "text-xs leading-5" : "text-sm")}>
+          {hint}
+        </span>
+      ) : null}
     </label>
   );
 }
@@ -293,25 +311,32 @@ function ResultCard({
   value,
   hint,
   tone = "slate",
+  compact = false,
 }: {
   label: string;
   value: string;
   hint: string;
   tone?: "gold" | "green" | "red" | "slate";
+  compact?: boolean;
 }) {
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-[24px] border p-5 ring-1",
+        "relative overflow-hidden border ring-1",
+        compact ? "rounded-xl p-4" : "rounded-[24px] p-5",
         tone === "gold" && "border-amber-200/18 bg-amber-300/[0.07] ring-amber-200/10",
         tone === "green" && "border-emerald-200/15 bg-emerald-300/[0.07] ring-emerald-200/10",
         tone === "red" && "border-rose-200/15 bg-rose-300/[0.07] ring-rose-200/10",
         tone === "slate" && "border-white/10 bg-white/[0.04] ring-white/10",
       )}
     >
-      <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-400">{label}</p>
-      <p className="mt-3 text-3xl font-semibold text-white">{value}</p>
-      <p className="mt-2 text-sm leading-6 text-slate-300">{hint}</p>
+      <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-400">{label}</p>
+      <p className={cn("mt-2 font-semibold text-white", compact ? "text-2xl" : "text-3xl")}>
+        {value}
+      </p>
+      <p className={cn("mt-2 text-slate-300", compact ? "text-xs leading-5" : "text-sm leading-6")}>
+        {hint}
+      </p>
     </div>
   );
 }
@@ -319,9 +344,11 @@ function ResultCard({
 function AutoCloseResultCard({
   result,
   currency,
+  compact = false,
 }: {
   result: SuccessfulLeverageRiskResult;
   currency: string;
+  compact?: boolean;
 }) {
   const range = result.stopOutRange;
 
@@ -330,6 +357,7 @@ function AutoCloseResultCard({
       <ResultCard
         hint={`Буферът е ${formatCurrency(result.maxLossPerUnitInstrument, currency)} на акция.`}
         label="Авто затваряне"
+        compact={compact}
         tone="red"
         value={formatCurrency(result.displayAutoClosePrice, currency)}
       />
@@ -340,30 +368,35 @@ function AutoCloseResultCard({
     range.normal.isStopOutRiskActive || range.temporary.isStopOutRiskActive;
 
   return (
-    <div className="relative overflow-hidden rounded-[24px] border border-rose-200/15 bg-rose-300/[0.07] p-5 ring-1 ring-rose-200/10">
-      <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-400">
+    <div
+      className={cn(
+        "relative overflow-hidden border border-rose-200/15 bg-rose-300/[0.07] ring-1 ring-rose-200/10",
+        compact ? "rounded-xl p-4" : "rounded-[24px] p-5",
+      )}
+    >
+      <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-slate-400">
         Auto затваряне
       </p>
-      <p className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
+      <p className={cn("mt-2 font-semibold text-white", compact ? "text-2xl" : "text-2xl sm:text-3xl")}>
         {formatCurrency(range.normal.displayAutoClosePrice, currency)}{" "}
         <span className="text-slate-500">—</span>{" "}
         {formatCurrency(range.temporary.displayAutoClosePrice, currency)}
       </p>
-      <div className="mt-4 grid gap-2 text-sm leading-6 text-slate-300">
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/8 bg-slate-950/25 px-3 py-2">
+      <div className="mt-3 grid gap-2 text-xs leading-5 text-slate-300">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/8 bg-slate-950/25 px-3 py-2">
           <span>Реален маржин</span>
           <span className="font-semibold text-rose-100">
             {formatCurrency(range.normal.displayAutoClosePrice, currency)}
           </span>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/8 bg-slate-950/25 px-3 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/8 bg-slate-950/25 px-3 py-2">
           <span>Временен leverage 1:{formatNumber(range.temporary.leverage)}</span>
           <span className="font-semibold text-rose-100">
             {formatCurrency(range.temporary.displayAutoClosePrice, currency)}
           </span>
         </div>
       </div>
-      <div className="mt-4 space-y-1 text-sm leading-6 text-slate-300">
+      <div className="mt-3 space-y-1 text-xs leading-5 text-slate-300">
         <p>
           Буфер при реален маржин:{" "}
           <span className="font-semibold text-slate-100">
@@ -380,7 +413,7 @@ function AutoCloseResultCard({
         </p>
       </div>
       {hasActiveStopOutRisk ? (
-        <p className="mt-3 rounded-2xl border border-rose-200/20 bg-rose-300/10 px-3 py-2 text-sm leading-6 text-rose-100">
+        <p className="mt-3 rounded-lg border border-rose-200/20 bg-rose-300/10 px-3 py-2 text-xs leading-5 text-rose-100">
           Акаунтът вече е под изисквания маржин / има риск от stop-out по въведените данни.
         </p>
       ) : null}
@@ -415,7 +448,7 @@ function PriceRiskLine({
         ];
 
   return (
-    <div className="rounded-[24px] border border-white/10 bg-slate-950/30 p-5">
+    <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
       <div className="grid gap-3 text-sm sm:grid-cols-3">
         {columns.map((column) => (
           <div key={column.label}>
@@ -430,7 +463,7 @@ function PriceRiskLine({
       </div>
       <div
         className={cn(
-          "mt-5 h-3 overflow-hidden rounded-full",
+          "mt-4 h-2.5 overflow-hidden rounded-full",
           side === "buy"
             ? "bg-gradient-to-r from-rose-300/80 via-amber-200/85 to-emerald-300/80"
             : "bg-gradient-to-r from-emerald-300/80 via-amber-200/85 to-rose-300/80",
@@ -447,7 +480,7 @@ function PriceRiskLine({
 
 function DirectionNote({ side }: { side: PositionSide }) {
   return (
-    <div className="rounded-[22px] border border-white/8 bg-white/[0.035] p-4 text-sm leading-6 text-slate-300">
+    <div className="rounded-xl border border-white/8 bg-white/[0.03] p-3 text-sm leading-6 text-slate-300">
       {side === "buy" ? (
         <p>
           <span className="font-semibold text-emerald-100">BUY</span> означава, че купуваш акцията
@@ -523,11 +556,11 @@ function BrokerDataChecklist() {
   ];
 
   return (
-    <div className="rounded-[22px] border border-white/8 bg-white/[0.035] p-4 text-sm leading-6 text-slate-300">
+    <div className="rounded-xl border border-white/8 bg-white/[0.03] p-3 text-xs leading-5 text-slate-300">
       <p className="font-semibold text-slate-100">За най-точна сметка вземи тези данни от брокера:</p>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {items.map((item) => (
-          <div className="rounded-2xl border border-white/8 bg-slate-950/25 px-3 py-2" key={item}>
+          <div className="rounded-lg border border-white/8 bg-slate-950/25 px-3 py-2" key={item}>
             {item}
           </div>
         ))}
@@ -990,31 +1023,32 @@ export function RiskCalculator() {
       <CalculatorTabNav onChange={setActiveCalculator} value={activeCalculator} />
 
       <div className={cn(activeCalculator !== "risk" && "hidden")}>
-        <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-          <section className="rounded-[28px] border border-white/10 bg-[#10192d]/88 p-6 shadow-[0_30px_90px_rgba(5,8,20,0.45)]">
+        <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <section className="rounded-2xl border border-white/10 bg-[#10192d]/88 p-4 shadow-[0_18px_55px_rgba(5,8,20,0.34)]">
             <div className="flex items-center gap-3">
-              <div className="flex size-11 items-center justify-center rounded-2xl bg-amber-300/18 text-amber-100">
-                <Calculator className="size-5" />
+              <div className="flex size-9 items-center justify-center rounded-xl bg-amber-300/16 text-amber-100">
+                <Calculator className="size-4" />
               </div>
               <div>
-                <p className="text-xs font-medium uppercase tracking-[0.14em] text-amber-200/75">
+                <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-amber-200/75">
                   Входни данни
                 </p>
-                <h2 className="mt-1 text-xl font-semibold text-white">Параметри на позицията</h2>
+                <h2 className="mt-1 text-lg font-semibold text-white">Параметри на позицията</h2>
               </div>
             </div>
 
-            <div className="mt-6 grid gap-4">
+            <div className="mt-4 grid gap-3">
               <SideControl onChange={setSide} value={side} />
               <DirectionNote side={side} />
 
               <div
                 className={cn(
-                  "grid gap-4",
+                  "grid gap-3",
                   marginMode === "real_broker_margin" ? "lg:grid-cols-3" : "sm:grid-cols-2",
                 )}
               >
                 <Field
+                  compact
                   error={errors.accountBalance}
                   hint="Balance от платформата."
                   label="Баланс"
@@ -1025,6 +1059,7 @@ export function RiskCalculator() {
                 {marginMode === "real_broker_margin" ? (
                   <>
                     <Field
+                      compact
                       error={errors.equity}
                       hint="Ако е празно, смята от balance + текущ P/L."
                       label="Equity"
@@ -1033,6 +1068,7 @@ export function RiskCalculator() {
                       value={equity}
                     />
                     <Field
+                      compact
                       error={errors.usedMargin}
                       hint="Въведи реалния Margin / Used Margin, който брокерът показва за позицията."
                       label="Margin / Used Margin от брокера"
@@ -1044,54 +1080,58 @@ export function RiskCalculator() {
                 ) : null}
               </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field
-                error={errors.entryPrice}
-                label="Цена на вход"
-                onChange={setEntryPrice}
-                type="number"
-                value={entryPrice}
-              />
-              <Field
-                error={errors.quantity}
-                label="Брой акции"
-                onChange={setShares}
-                type="number"
-                value={shares}
-              />
-              <Field
-                error={errors.currentPrice}
-                hint="За по-точен stop-out от текущия пазар."
-                label="Текуща цена"
-                onChange={setCurrentPrice}
-                type="number"
-                value={currentPrice}
-              />
-              <Field
-                error={errors.plannedExitPrice}
-                label="Планирана цена на изход"
-                onChange={setExitPrice}
-                type="number"
-                value={exitPrice}
-              />
-            </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field
+                  compact
+                  error={errors.entryPrice}
+                  label="Цена на вход"
+                  onChange={setEntryPrice}
+                  type="number"
+                  value={entryPrice}
+                />
+                <Field
+                  compact
+                  error={errors.quantity}
+                  label="Брой акции"
+                  onChange={setShares}
+                  type="number"
+                  value={shares}
+                />
+                <Field
+                  compact
+                  error={errors.currentPrice}
+                  hint="За по-точен stop-out от текущия пазар."
+                  label="Текуща цена"
+                  onChange={setCurrentPrice}
+                  type="number"
+                  value={currentPrice}
+                />
+                <Field
+                  compact
+                  error={errors.plannedExitPrice}
+                  label="Планирана цена на изход"
+                  onChange={setExitPrice}
+                  type="number"
+                  value={exitPrice}
+                />
+              </div>
 
-            <div className="rounded-[24px] border border-white/8 bg-white/[0.035]">
+              <div className="rounded-xl border border-white/8 bg-white/[0.03]">
               <button
                 aria-expanded={showAdvancedInputs}
-                className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left"
+                className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left"
                 onClick={() => setShowAdvancedInputs((current) => !current)}
                 type="button"
               >
                 <span className="flex items-center gap-3">
-                  <span className="flex size-10 items-center justify-center rounded-2xl bg-amber-300/14 text-amber-100">
+                  <span className="flex size-8 items-center justify-center rounded-lg bg-amber-300/14 text-amber-100">
                     <SlidersHorizontal className="size-4" />
                   </span>
                   <span>
                     <span className="block text-sm font-semibold text-white">
                       Допълнителни настройки
                     </span>
-                    <span className="mt-1 block text-xs leading-5 text-slate-400">
+                    <span className="mt-0.5 block text-xs leading-4 text-slate-400">
                       Валути, FX курс, leverage режим, stop-out и примерни стойности.
                     </span>
                   </span>
@@ -1105,23 +1145,25 @@ export function RiskCalculator() {
               </button>
 
               {showAdvancedInputs ? (
-                <div className="grid gap-4 border-t border-white/8 p-4">
+                <div className="grid gap-3 border-t border-white/8 p-3">
                   <MarginModeControl onChange={setMarginMode} value={marginMode} />
-                  <div className="rounded-[22px] border border-amber-200/18 bg-amber-300/[0.08] p-4 text-sm leading-6 text-amber-50">
+                  <div className="rounded-xl border border-amber-200/18 bg-amber-300/[0.08] p-3 text-xs leading-5 text-amber-50">
                     Account leverage не винаги важи за всеки инструмент. При акции, CFD акции,
                     ETF-и, индекси или други продукти с отделна спецификация брокерът може да
                     използва друг маржин. Ако виждаш реален Margin/Used Margin в платформата,
                     използвай <span className="font-semibold">Реален маржин от брокера</span>.
                   </div>
 
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     <Field
+                      compact
                       hint="Например EUR."
                       label="Валута на акаунта"
                       onChange={setAccountCurrency}
                       value={accountCurrency}
                     />
                     <Field
+                      compact
                       hint="Например USD, ако акцията/CFD инструментът се котира в долари."
                       label="Валута на инструмента"
                       onChange={setInstrumentCurrency}
@@ -1129,6 +1171,7 @@ export function RiskCalculator() {
                     />
                   </div>
                   <Field
+                    compact
                     error={errors.fxRateInstrumentToAccount}
                     hint={`Колко ${accountCurrencyCode} е 1 ${instrumentCurrencyCode}. Например USD към EUR: 0.85.`}
                     label={`FX rate ${instrumentCurrencyCode} към ${accountCurrencyCode}`}
@@ -1139,6 +1182,7 @@ export function RiskCalculator() {
 
                   {marginMode === "account_leverage" ? (
                     <Field
+                      compact
                       error={accountLeverageError}
                       hint="Ползвай го само ако инструментът следва account leverage."
                       label="Account leverage"
@@ -1149,6 +1193,7 @@ export function RiskCalculator() {
                   ) : null}
                   {marginMode === "fixed_leverage" ? (
                     <Field
+                      compact
                       error={fixedLeverageError}
                       hint="Въведи продуктовия leverage или го сметни от Margin %. Например 5% margin = 1:20."
                       label="Фиксиран ливъридж / продуктови leverage"
@@ -1160,6 +1205,7 @@ export function RiskCalculator() {
                   {marginMode === "real_broker_margin" ? (
                     <>
                       <Field
+                        compact
                         error={temporaryLeverageError}
                         hint="Предпазен сценарий при брокер, който временно намалява leverage-а около market open/close. Ако не знаеш точната стойност, остави 1:5."
                         label="Временен leverage прозорец"
@@ -1167,7 +1213,7 @@ export function RiskCalculator() {
                         placeholder="1:5"
                         value={temporaryLeverageInput}
                       />
-                      <div className="rounded-[22px] border border-amber-200/18 bg-amber-300/[0.08] p-4 text-sm leading-6 text-amber-50">
+                      <div className="rounded-xl border border-amber-200/18 bg-amber-300/[0.08] p-3 text-xs leading-5 text-amber-50">
                         Някои брокери временно намаляват leverage-а около open/close. Ако твоят
                         брокер има такова правило, въведи временния leverage. Ако не знаеш, остави{" "}
                         <span className="font-semibold">1:5</span> като предпазен сценарий.
@@ -1175,6 +1221,7 @@ export function RiskCalculator() {
                     </>
                   ) : null}
                   <Field
+                    compact
                     error={errors.stopOutLevelPercent}
                     hint="Въведи ръчно, защото може да се различава според акаунт/entity. Пример: 20."
                     label="Stop-out level %"
@@ -1185,21 +1232,21 @@ export function RiskCalculator() {
                   <BrokerDataChecklist />
                   <div className="grid gap-2 sm:grid-cols-3">
                     <button
-                      className="rounded-2xl border border-emerald-200/20 bg-emerald-300/10 px-4 py-3 text-left text-sm font-semibold text-emerald-50 transition hover:bg-emerald-300/15"
+                      className="rounded-xl border border-emerald-200/20 bg-emerald-300/10 px-3 py-2.5 text-left text-xs font-semibold text-emerald-50 transition hover:bg-emerald-300/15"
                       onClick={() => applyGenericExample("real")}
                       type="button"
                     >
                       Пример: реален маржин от платформа
                     </button>
                     <button
-                      className="rounded-2xl border border-amber-200/20 bg-amber-300/10 px-4 py-3 text-left text-sm font-semibold text-amber-50 transition hover:bg-amber-300/15"
+                      className="rounded-xl border border-amber-200/20 bg-amber-300/10 px-3 py-2.5 text-left text-xs font-semibold text-amber-50 transition hover:bg-amber-300/15"
                       onClick={() => applyGenericExample("fixed-20")}
                       type="button"
                     >
                       Пример: продукт 1:20
                     </button>
                     <button
-                      className="rounded-2xl border border-rose-200/20 bg-rose-300/10 px-4 py-3 text-left text-sm font-semibold text-rose-50 transition hover:bg-rose-300/15"
+                      className="rounded-xl border border-rose-200/20 bg-rose-300/10 px-3 py-2.5 text-left text-xs font-semibold text-rose-50 transition hover:bg-rose-300/15"
                       onClick={() => applyGenericExample("fixed-5")}
                       type="button"
                     >
@@ -1208,35 +1255,37 @@ export function RiskCalculator() {
                   </div>
                 </div>
               ) : null}
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <section className="rounded-[28px] border border-white/10 bg-[#10192d]/88 p-6 shadow-[0_30px_90px_rgba(5,8,20,0.45)]">
+        <section className="rounded-2xl border border-white/10 bg-[#10192d]/88 p-4 shadow-[0_18px_55px_rgba(5,8,20,0.34)]">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-amber-200/75">
+              <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-amber-200/75">
                 Резултат
               </p>
-              <h2 className="mt-1 text-xl font-semibold text-white">Риск и очакван резултат</h2>
+              <h2 className="mt-1 text-lg font-semibold text-white">Риск и очакван резултат</h2>
             </div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-300">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm text-slate-300">
               <Info className="size-4 text-amber-200" />
               {sideLabel(side)} · {marginModeLabel(marginMode)}
             </div>
           </div>
 
           {result.ok ? (
-            <div className="mt-6 space-y-5">
-              <div className="grid gap-4 lg:grid-cols-3">
-                <AutoCloseResultCard result={result} currency={instrumentCurrencyCode} />
+            <div className="mt-4 space-y-4">
+              <div className="grid gap-3 lg:grid-cols-3">
+                <AutoCloseResultCard compact result={result} currency={instrumentCurrencyCode} />
                 <ResultCard
+                  compact
                   hint={`Ефективен ливъридж около 1:${formatNumber(result.effectiveLeverage)}.`}
                   label="Нужен маржин"
                   tone={result.positionAllowed ? "gold" : "red"}
                   value={formatCurrency(result.requiredMargin, accountCurrencyCode)}
                 />
                 <ResultCard
+                  compact
                   hint={`Резултат спрямо balance: ${result.returnPercentOnBalance.toFixed(1)}%.`}
                   label={result.grossProfitAccount >= 0 ? "Очаквана печалба" : "Очаквана загуба"}
                   tone={result.grossProfitAccount >= 0 ? "green" : "red"}
@@ -1245,7 +1294,7 @@ export function RiskCalculator() {
               </div>
 
               {!result.positionAllowed ? (
-                <div className="flex gap-3 rounded-[22px] border border-rose-200/20 bg-rose-300/[0.08] p-4 text-sm leading-6 text-rose-100">
+                <div className="flex gap-3 rounded-xl border border-rose-200/20 bg-rose-300/[0.08] p-3 text-sm leading-6 text-rose-100">
                   <AlertTriangle className="mt-0.5 size-5 shrink-0" />
                   <p>
                     Този обем изисква {formatCurrency(result.requiredMargin, accountCurrencyCode)}{" "}
@@ -1263,10 +1312,10 @@ export function RiskCalculator() {
                 side={side}
               />
 
-              <div className="rounded-[24px] border border-amber-200/15 bg-amber-300/[0.08] p-5">
+              <div className="rounded-xl border border-amber-200/15 bg-amber-300/[0.08] p-4">
                 <div className="flex items-start gap-3">
-                  <ShieldAlert className="mt-1 size-5 shrink-0 text-amber-200" />
-                  <div className="space-y-3 text-base leading-7 text-slate-100">
+                  <ShieldAlert className="mt-0.5 size-4 shrink-0 text-amber-200" />
+                  <div className="space-y-2 text-sm leading-6 text-slate-100">
                     <p>
                       Ако цената {side === "buy" ? "падне" : "се качи"} до{" "}
                       <span className="font-semibold text-rose-100">
@@ -1320,7 +1369,7 @@ export function RiskCalculator() {
               </div>
 
               <div className="grid gap-3 text-sm text-slate-300 sm:grid-cols-3">
-                <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
+                <div className="rounded-xl border border-white/8 bg-white/[0.03] p-3">
                   <p className="text-slate-400">Position value</p>
                   <p className="mt-1 font-semibold text-white">
                     {formatCurrency(result.positionValueInstrument, instrumentCurrencyCode)}
@@ -1329,14 +1378,14 @@ export function RiskCalculator() {
                     {formatCurrency(result.positionValueAccount, accountCurrencyCode)}
                   </p>
                 </div>
-                <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
+                <div className="rounded-xl border border-white/8 bg-white/[0.03] p-3">
                   <p className="text-slate-400">Free margin</p>
                   <p className="mt-1 font-semibold text-white">
                     {formatCurrency(result.freeMargin, accountCurrencyCode)}
                   </p>
                   <p className="text-xs text-slate-500">Margin level {result.marginLevel.toFixed(1)}%</p>
                 </div>
-                <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
+                <div className="rounded-xl border border-white/8 bg-white/[0.03] p-3">
                   <p className="text-slate-400">Stop-out equity</p>
                   <p className="mt-1 font-semibold text-white">
                     {formatCurrency(result.stopOutEquity, accountCurrencyCode)}
@@ -1345,7 +1394,7 @@ export function RiskCalculator() {
                     Max loss {formatCurrency(result.maxLossAccount, accountCurrencyCode)}
                   </p>
                 </div>
-                <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
+                <div className="rounded-xl border border-white/8 bg-white/[0.03] p-3">
                   <p className="text-slate-400">Buffer per share</p>
                   <p className="mt-1 font-semibold text-white">
                     {formatCurrency(result.maxLossPerUnitInstrument, instrumentCurrencyCode)}
@@ -1354,7 +1403,7 @@ export function RiskCalculator() {
                     {formatCurrency(result.maxLossPerUnitAccount, accountCurrencyCode)} на акция
                   </p>
                 </div>
-                <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
+                <div className="rounded-xl border border-white/8 bg-white/[0.03] p-3">
                   <p className="text-slate-400">Expected profit</p>
                   <p className="mt-1 font-semibold text-white">
                     {formatCurrency(result.grossProfitInstrument, instrumentCurrencyCode)}
@@ -1363,7 +1412,7 @@ export function RiskCalculator() {
                     {formatCurrency(result.grossProfitAccount, accountCurrencyCode)}
                   </p>
                 </div>
-                <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
+                <div className="rounded-xl border border-white/8 bg-white/[0.03] p-3">
                   <p className="text-slate-400">Текущ P/L</p>
                   <p className="mt-1 font-semibold text-white">
                     {result.currentProfitInstrument === undefined
@@ -1378,7 +1427,7 @@ export function RiskCalculator() {
                 </div>
               </div>
 
-              <p className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4 text-sm leading-6 text-slate-400">
+              <p className="rounded-xl border border-white/8 bg-white/[0.03] p-3 text-xs leading-5 text-slate-400">
                 Най-точният режим е Реален маржин от брокера, защото използва маржина, който
                 платформата вече е изчислила за конкретния инструмент, акаунт и валута.
                 Калкулаторът е универсален: не приема правила на конкретен брокер, а смята по
@@ -1388,12 +1437,12 @@ export function RiskCalculator() {
               </p>
             </div>
           ) : (
-            <div className="mt-6 rounded-[24px] border border-rose-200/20 bg-rose-300/[0.08] p-5 text-sm leading-6 text-rose-100">
+            <div className="mt-4 rounded-xl border border-rose-200/20 bg-rose-300/[0.08] p-4 text-sm leading-6 text-rose-100">
               Попълни всички полета с валидни положителни стойности, за да видиш риска и очаквания
               резултат.
             </div>
           )}
-        </section>
+          </section>
         </div>
       </div>
 
