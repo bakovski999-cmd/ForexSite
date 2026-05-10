@@ -3729,6 +3729,8 @@ export function PortfolioRiskManager() {
           onClose={() => setAddLotTarget(null)}
           onSaved={handleDrawerSaved}
           position={addLotTarget}
+          positions={positions}
+          profile={profile}
         />
       ) : null}
 

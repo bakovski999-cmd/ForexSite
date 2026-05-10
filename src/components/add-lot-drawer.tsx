@@ -3,7 +3,12 @@
 import { Loader2, Plus, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import type { SavedPortfolioPosition } from "@/lib/portfolio-risk";
+import {
+  calculatePortfolioRisk,
+  type AccountRiskProfile,
+  type SavedPortfolioLot,
+  type SavedPortfolioPosition,
+} from "@/lib/portfolio-risk";
 
 type AddLotForm = {
   entryPrice: string;
@@ -37,21 +42,38 @@ function fmtCurr(value: number, currency: string): string {
   }
 }
 
+function buildBaseLot(position: SavedPortfolioPosition): SavedPortfolioLot {
+  return {
+    id: `preview-base-lot:${position.id}`,
+    savedPositionId: position.id,
+    entryPrice: position.entryPrice,
+    quantity: position.quantity,
+    plannedExitPrice: null,
+    sharesToSell: null,
+    notes: "Начална позиция",
+    displayOrder: 0,
+  };
+}
+
 export function AddLotDrawer({
   position,
+  profile,
+  positions,
   fxRate,
   accountCurrency,
   onClose,
   onSaved,
 }: {
   position: SavedPortfolioPosition;
+  profile: AccountRiskProfile;
+  positions: SavedPortfolioPosition[];
   fxRate: number;
   accountCurrency: string;
   onClose: () => void;
   onSaved: (positions: SavedPortfolioPosition[]) => void;
 }) {
   const instrumentCurrency = position.instrumentCurrency;
-  const existingLots = position.lots ?? [];
+  const existingLots = useMemo(() => position.lots ?? [], [position.lots]);
   const currentTotalShares = position.quantity;
   const currentAvgEntry = position.entryPrice;
 
@@ -81,9 +103,64 @@ export function AddLotDrawer({
     const newAvgEntry = totalCostInstrument / newTotalShares;
     const costInstrument = ep * qty;
     const costAccount = Number.isFinite(fxRate) && fxRate > 0 ? costInstrument / fxRate : costInstrument;
+    const plannedExit = parseNum(form.plannedExitPrice);
+    const baseLots = existingLots.length > 0 ? existingLots : [buildBaseLot(position)];
+    const draftLot: SavedPortfolioLot = {
+      id: `preview-lot:${position.id}`,
+      savedPositionId: position.id,
+      entryPrice: ep,
+      quantity: qty,
+      plannedExitPrice: Number.isFinite(plannedExit) && plannedExit > 0 ? plannedExit : null,
+      sharesToSell: null,
+      notes: form.notes.trim() || null,
+      displayOrder: baseLots.length,
+    };
+    const previewPosition: SavedPortfolioPosition = {
+      ...position,
+      lots: [...baseLots, draftLot],
+    };
+    const hasPosition = positions.some((item) => item.id === position.id);
+    const previewPositions = hasPosition
+      ? positions.map((item) => (item.id === position.id ? previewPosition : item))
+      : [...positions, previewPosition];
+    const previewRisk = calculatePortfolioRisk(profile, previewPositions);
 
-    return { newTotalShares, newAvgEntry, costInstrument, costAccount };
-  }, [form.entryPrice, form.quantity, currentTotalShares, currentAvgEntry, fxRate]);
+    if (!previewRisk.ok) {
+      return {
+        newTotalShares,
+        newAvgEntry,
+        costInstrument,
+        costAccount,
+        normalAutoClose: null,
+        riskAutoClose: null,
+        errors: previewRisk.errors,
+      };
+    }
+
+    const positionPreview = previewRisk.positions.find((item) => item.position.id === position.id);
+
+    return {
+      newTotalShares,
+      newAvgEntry,
+      costInstrument,
+      costAccount,
+      normalAutoClose: positionPreview?.normalAutoClose.displayAutoClosePrice ?? null,
+      riskAutoClose: positionPreview?.temporaryAutoClose.displayAutoClosePrice ?? null,
+      errors: [],
+    };
+  }, [
+    form.entryPrice,
+    form.notes,
+    form.plannedExitPrice,
+    form.quantity,
+    currentTotalShares,
+    currentAvgEntry,
+    fxRate,
+    existingLots,
+    position,
+    positions,
+    profile,
+  ]);
 
   async function handleSave() {
     const ep = parseNum(form.entryPrice);
@@ -278,6 +355,25 @@ export function AddLotDrawer({
                       </span>
                     ) : null}
                   </p>
+                </div>
+                <div className="col-span-2 rounded-md border border-white/10 bg-slate-950/35 px-3 py-2">
+                  <p className="text-slate-500">Auto-close след добавяне</p>
+                  {preview.errors.length > 0 ? (
+                    <p className="mt-1 leading-5 text-rose-100">{preview.errors.join(" ")}</p>
+                  ) : (
+                    <>
+                      <p className="mt-1 font-semibold text-amber-100">
+                        {fmtCurr(preview.riskAutoClose ?? Number.NaN, instrumentCurrency)} risk
+                        <span className="mx-2 font-normal text-slate-600">·</span>
+                        <span className="font-medium text-slate-300">
+                          {fmtCurr(preview.normalAutoClose ?? Number.NaN, instrumentCurrency)} normal
+                        </span>
+                      </p>
+                      <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                        По-близката цена до текущата е по-важният stop-out ориентир.
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
