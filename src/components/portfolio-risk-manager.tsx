@@ -29,6 +29,7 @@ import {
   getPositionKey,
   type AccountRiskProfile,
   type PortfolioDirection,
+  type PortfolioAutoCloseRange,
   type PortfolioPositionAnalysis,
   type PortfolioRiskResult,
   type PortfolioStressResult,
@@ -232,6 +233,96 @@ function formatPercent(value: number) {
   }
 
   return `${formatNumber(value, 1)}%`;
+}
+
+function formatCurrencyRange(range: PortfolioAutoCloseRange, currency = "USD") {
+  if (!Number.isFinite(range.min) || !Number.isFinite(range.max)) {
+    return "няма позиции";
+  }
+
+  if (Math.abs(range.max - range.min) < 0.005) {
+    return formatCurrency(range.min, currency);
+  }
+
+  return `${formatCurrency(range.min, currency)} - ${formatCurrency(range.max, currency)}`;
+}
+
+function getPositionFxRate(analysis: PortfolioPositionAnalysis) {
+  if (analysis.positionValueInstrument > 0) {
+    return analysis.positionValueAccount / analysis.positionValueInstrument;
+  }
+
+  return 1;
+}
+
+function getLotFormProfit(
+  direction: PortfolioDirection,
+  form: LotForm,
+  fxRateInstrumentToAccount: number,
+) {
+  const entryPrice = parseAmount(form.entryPrice);
+  const quantity = parseAmount(form.quantity);
+  const plannedExitPrice = parseOptionalAmount(form.plannedExitPrice);
+  const sharesToSell = parseOptionalAmount(form.sharesToSell) ?? quantity;
+
+  if (
+    !Number.isFinite(entryPrice) ||
+    entryPrice <= 0 ||
+    !Number.isFinite(quantity) ||
+    quantity <= 0 ||
+    plannedExitPrice == null ||
+    plannedExitPrice < 0 ||
+    !Number.isFinite(sharesToSell) ||
+    sharesToSell <= 0
+  ) {
+    return null;
+  }
+
+  const effectiveSharesToSell = Math.min(sharesToSell, quantity);
+  const profitInstrument =
+    direction === "buy"
+      ? (plannedExitPrice - entryPrice) * effectiveSharesToSell
+      : (entryPrice - plannedExitPrice) * effectiveSharesToSell;
+
+  return {
+    profitInstrument,
+    profitAccount: profitInstrument * fxRateInstrumentToAccount,
+  };
+}
+
+function getLotFormStopLoss(
+  direction: PortfolioDirection,
+  form: LotForm,
+  bufferPerShareInstrument: number,
+  fxRateInstrumentToAccount: number,
+) {
+  const entryPrice = parseAmount(form.entryPrice);
+  const quantity = parseAmount(form.quantity);
+
+  if (
+    !Number.isFinite(entryPrice) ||
+    entryPrice <= 0 ||
+    !Number.isFinite(quantity) ||
+    quantity <= 0 ||
+    !Number.isFinite(bufferPerShareInstrument)
+  ) {
+    return null;
+  }
+
+  const autoClosePrice =
+    direction === "buy"
+      ? Math.max(0, entryPrice - bufferPerShareInstrument)
+      : Math.max(0, entryPrice + bufferPerShareInstrument);
+  const lossInstrument =
+    direction === "buy"
+      ? Math.max((entryPrice - autoClosePrice) * quantity, 0)
+      : Math.max((autoClosePrice - entryPrice) * quantity, 0);
+
+  return {
+    autoClosePrice,
+    lossInstrument,
+    lossAccount: lossInstrument * fxRateInstrumentToAccount,
+  };
 }
 
 function parseAmount(value: string, fallback = Number.NaN) {
@@ -1107,6 +1198,7 @@ function PositionLotsPanel({
   const position = analysis.position;
   const instrumentCurrency = position.instrumentCurrency;
   const lots = position.lots ?? [];
+  const fxRateInstrumentToAccount = getPositionFxRate(analysis);
   const newFormKey = getNewLotFormKey(position.id);
   const newForm =
     lotForms[newFormKey] ??
@@ -1114,6 +1206,13 @@ function PositionLotsPanel({
       ...position,
       entryPrice: analysis.basePrice,
     });
+  const newLotProfit = getLotFormProfit(position.direction, newForm, fxRateInstrumentToAccount);
+  const newLotStopLoss = getLotFormStopLoss(
+    position.direction,
+    newForm,
+    analysis.temporaryAutoClose.bufferPerShareInstrument,
+    fxRateInstrumentToAccount,
+  );
   const plannedSummary = analysis.plannedExitSummary;
 
   return (
@@ -1174,7 +1273,13 @@ function PositionLotsPanel({
             const formKey = getLotFormKey(position.id, lot.id);
             const form = lotForms[formKey] ?? lotToForm(lot);
             const lotAnalysis = analysis.lotAnalyses.find((item) => item.lot.id === lot.id);
-            const plannedProfit = lotAnalysis?.plannedProfitAccount;
+            const liveProfit = getLotFormProfit(
+              position.direction,
+              form,
+              fxRateInstrumentToAccount,
+            );
+            const plannedProfitAccount = liveProfit?.profitAccount ?? null;
+            const plannedProfitInstrument = liveProfit?.profitInstrument ?? null;
 
             const lotName =
               lot.notes === "Начална позиция" ? "Начална позиция" : `Покупка ${index + 1}`;
@@ -1218,21 +1323,31 @@ function PositionLotsPanel({
                     value={form.notes}
                   />
                   <div className="flex items-end justify-between gap-2 md:justify-end">
-                    <div className="pb-1 text-xs">
+                    <div className="min-w-28 pb-1 text-xs">
                       <p className="text-slate-500">Печалба</p>
                       <p
                         className={cn(
                           "font-semibold",
-                          plannedProfit == null
+                          plannedProfitAccount == null
                             ? "text-slate-400"
-                            : plannedProfit < 0
+                            : plannedProfitAccount < 0
                               ? "text-rose-100"
                               : "text-emerald-100",
                         )}
                       >
-                        {plannedProfit == null
+                        {plannedProfitAccount == null
                           ? "—"
-                          : formatCurrency(plannedProfit, accountCurrency)}
+                          : `${formatCurrency(
+                              plannedProfitAccount,
+                              accountCurrency,
+                            )} · ${formatCurrency(
+                              plannedProfitInstrument ?? Number.NaN,
+                              instrumentCurrency,
+                            )}`}
+                      </p>
+                      <p className="mt-1 text-slate-500">Загуба до stop-out</p>
+                      <p className="font-semibold text-rose-100">
+                        {formatCurrency(lotAnalysis?.lossToRiskStopAccount ?? Number.NaN, accountCurrency)}
                       </p>
                     </div>
                     <IconButton
@@ -1301,7 +1416,33 @@ function PositionLotsPanel({
             onChange={(value) => onLotFormChange(newFormKey, "notes", value)}
             value={newForm.notes}
           />
-          <div className="flex items-end">
+          <div className="flex items-end justify-between gap-2 md:justify-end">
+            <div className="min-w-28 pb-1 text-xs">
+              <p className="text-slate-500">Печалба</p>
+              <p
+                className={cn(
+                  "font-semibold",
+                  newLotProfit == null
+                    ? "text-slate-400"
+                    : newLotProfit.profitAccount < 0
+                      ? "text-rose-100"
+                      : "text-emerald-100",
+                )}
+              >
+                {newLotProfit == null
+                  ? "—"
+                  : `${formatCurrency(newLotProfit.profitAccount, accountCurrency)} · ${formatCurrency(
+                      newLotProfit.profitInstrument,
+                      instrumentCurrency,
+                    )}`}
+              </p>
+              <p className="mt-1 text-slate-500">Загуба до stop-out</p>
+              <p className="font-semibold text-rose-100">
+                {newLotStopLoss == null
+                  ? "—"
+                  : formatCurrency(newLotStopLoss.lossAccount, accountCurrency)}
+              </p>
+            </div>
             <button
               className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-emerald-200/20 bg-emerald-300/10 px-3 text-sm font-semibold text-emerald-50 transition hover:bg-emerald-300/15 disabled:cursor-not-allowed disabled:opacity-50 md:w-auto"
               disabled={savingLotId === newFormKey}
@@ -1325,7 +1466,6 @@ function PositionLotsPanel({
 function PositionsTable({
   positions,
   accountCurrency,
-  stopOutLossAccount,
   onEdit,
   onDelete,
   onAddLot,
@@ -1344,7 +1484,6 @@ function PositionsTable({
 }: {
   positions: PortfolioPositionAnalysis[];
   accountCurrency: string;
-  stopOutLossAccount: number;
   onEdit: (position: SavedPortfolioPosition) => void;
   onDelete: (position: SavedPortfolioPosition) => void;
   onAddLot: (position: SavedPortfolioPosition) => void;
@@ -1537,12 +1676,12 @@ function PositionsTable({
                           </p>
                         </td>
                         <td className="px-3 py-3 text-right">
-                          <p>{formatCurrency(analysis.normalAutoClose.displayAutoClosePrice, instrumentCurrency)}</p>
+                          <p>{formatCurrencyRange(analysis.autoCloseRangeNormal, instrumentCurrency)}</p>
                           <p className="text-xs text-amber-100/80">
-                            {formatCurrency(analysis.temporaryAutoClose.displayAutoClosePrice, instrumentCurrency)}
+                            {formatCurrencyRange(analysis.autoCloseRangeRisk, instrumentCurrency)}
                           </p>
                           <p className="text-xs text-slate-500">
-                            loss ~{formatCurrency(stopOutLossAccount, accountCurrency)}
+                            loss ~{formatCurrency(analysis.totalLossToRiskStopAccount, accountCurrency)}
                           </p>
                         </td>
                         <td className="px-3 py-3">
@@ -1696,11 +1835,11 @@ function PositionsTable({
                     <div>
                       <p className="text-slate-500">Auto-close N/R</p>
                       <p className="mt-0.5 text-slate-200">
-                        {formatCurrency(analysis.normalAutoClose.displayAutoClosePrice, instrumentCurrency)} /{" "}
-                        {formatCurrency(analysis.temporaryAutoClose.displayAutoClosePrice, instrumentCurrency)}
+                        {formatCurrencyRange(analysis.autoCloseRangeNormal, instrumentCurrency)} /{" "}
+                        {formatCurrencyRange(analysis.autoCloseRangeRisk, instrumentCurrency)}
                       </p>
                       <p className="text-[11px] text-slate-500">
-                        loss ~{formatCurrency(stopOutLossAccount, accountCurrency)}
+                        loss ~{formatCurrency(analysis.totalLossToRiskStopAccount, accountCurrency)}
                       </p>
                     </div>
                   </div>
@@ -2053,7 +2192,6 @@ function ActionPill({
 function PositionCards({
   positions,
   accountCurrency,
-  stopOutLossAccount,
   openHelp,
   onToggleHelp,
   onEdit,
@@ -2072,7 +2210,6 @@ function PositionCards({
 }: {
   positions: PortfolioPositionAnalysis[];
   accountCurrency: string;
-  stopOutLossAccount: number;
   openHelp: HelpTopic | null;
   onToggleHelp: (topic: HelpTopic) => void;
   onEdit: (position: SavedPortfolioPosition) => void;
@@ -2206,13 +2343,10 @@ function PositionCards({
                     </td>
                     <td className="px-3 py-4 text-right">
                       <p className="font-bold text-rose-300">
-                        {formatCurrency(
-                          analysis.temporaryAutoClose.displayAutoClosePrice,
-                          instrumentCurrency,
-                        )}
+                        {formatCurrencyRange(analysis.autoCloseRangeRisk, instrumentCurrency)}
                       </p>
                       <p className="text-xs text-slate-500">
-                        loss ~{formatCurrency(stopOutLossAccount, accountCurrency)}
+                        loss ~{formatCurrency(analysis.totalLossToRiskStopAccount, accountCurrency)}
                       </p>
                     </td>
                     <td className="px-3 py-4">
@@ -2326,13 +2460,10 @@ function PositionCards({
                 <div>
                   <p className="text-slate-500">Auto-close</p>
                   <p className="font-semibold text-rose-300">
-                    {formatCurrency(
-                      analysis.temporaryAutoClose.displayAutoClosePrice,
-                      instrumentCurrency,
-                    )}
+                    {formatCurrencyRange(analysis.autoCloseRangeRisk, instrumentCurrency)}
                   </p>
                   <p className="text-slate-500">
-                    loss ~{formatCurrency(stopOutLossAccount, accountCurrency)}
+                    loss ~{formatCurrency(analysis.totalLossToRiskStopAccount, accountCurrency)}
                   </p>
                 </div>
               </div>
@@ -3075,7 +3206,6 @@ export function PortfolioRiskManager() {
                       openHelp={openHelp}
                       positions={savedPortfolio.positions}
                       savingLotId={savingLotId}
-                      stopOutLossAccount={savedPortfolio.summary.temporary.maxLossBeforeStopOut}
                     />
 
                     {positionEditorOpen ? (
@@ -3434,7 +3564,6 @@ export function PortfolioRiskManager() {
             openHelp={openHelp}
             positions={savedPortfolio?.positions ?? []}
             savingLotId={savingLotId}
-            stopOutLossAccount={savedPortfolio?.summary.temporary.maxLossBeforeStopOut ?? Number.NaN}
           />
 
           <ToolPanel

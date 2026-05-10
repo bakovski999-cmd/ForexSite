@@ -94,7 +94,7 @@ describe("portfolio risk manager calculations", () => {
   });
 
   test("planned profit respects SELL direction and blank shares-to-sell means whole lot", () => {
-    const result = calculatePortfolioRisk(profile, [
+    const result = calculatePortfolioRisk({ ...profile, balance: 100 }, [
       {
         ...sofiPosition,
         direction: "sell",
@@ -118,6 +118,92 @@ describe("portfolio risk manager calculations", () => {
     expect(result.positions[0].lotAnalyses[0].effectiveSharesToSell).toBe(4);
     expect(result.positions[0].plannedExitSummary?.totalPlannedProfitInstrument).toBeCloseTo(40);
     expect(result.positions[0].plannedExitSummary?.totalPlannedProfitAccount).toBeCloseTo(34);
+  });
+
+  test("calculates BUY per-lot stop losses and auto-close ranges", () => {
+    const result = calculatePortfolioRisk({ ...profile, balance: 100 }, [
+      {
+        ...sofiPosition,
+        currentPrice: 16,
+        lots: [
+          {
+            id: "lot-1",
+            entryPrice: 16,
+            quantity: 6,
+          },
+          {
+            id: "lot-2",
+            entryPrice: 12,
+            quantity: 4,
+          },
+        ],
+      },
+    ]);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    const analysis = result.positions[0];
+    const firstLot = analysis.lotAnalyses[0];
+    const secondLot = analysis.lotAnalyses[1];
+    const totalLotLoss = analysis.lotAnalyses.reduce(
+      (sum, lot) => sum + lot.lossToRiskStopAccount,
+      0,
+    );
+
+    expect(firstLot.riskAutoClosePrice).toBeGreaterThan(secondLot.riskAutoClosePrice);
+    expect(analysis.autoCloseRangeRisk.min).toBeCloseTo(secondLot.riskAutoClosePrice);
+    expect(analysis.autoCloseRangeRisk.max).toBeCloseTo(firstLot.riskAutoClosePrice);
+    expect(firstLot.lossToRiskStopAccount).toBeGreaterThan(0);
+    expect(secondLot.lossToRiskStopAccount).toBeGreaterThan(0);
+    expect(analysis.totalLossToRiskStopAccount).toBeCloseTo(totalLotLoss);
+  });
+
+  test("calculates SELL per-lot stop loss direction", () => {
+    const result = calculatePortfolioRisk(profile, [
+      {
+        ...sofiPosition,
+        direction: "sell",
+        currentPrice: 30,
+        lots: [
+          {
+            id: "short-lot",
+            entryPrice: 30,
+            quantity: 4,
+          },
+        ],
+      },
+    ]);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    const lot = result.positions[0].lotAnalyses[0];
+
+    expect(lot.riskAutoClosePrice).toBeGreaterThan(lot.lot.entryPrice);
+    expect(lot.lossToRiskStopInstrument).toBeGreaterThan(0);
+    expect(result.positions[0].totalLossToRiskStopAccount).toBeCloseTo(
+      lot.lossToRiskStopAccount,
+    );
+  });
+
+  test("clamps per-lot stop loss to zero when auto-close is not a loss", () => {
+    const result = calculatePortfolioRisk({ ...profile, balance: 0 }, [sofiPosition]);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.positions[0].lotAnalyses).toHaveLength(0);
+    expect(result.positions[0].totalLossToRiskStopAccount).toBe(0);
   });
 
   test("rejects lots where planned shares to sell exceed lot quantity", () => {

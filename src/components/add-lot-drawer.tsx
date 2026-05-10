@@ -116,7 +116,7 @@ export function AddLotDrawer({
     const totalCostInstrument = currentAvgEntry * currentTotalShares + ep * qty;
     const newAvgEntry = totalCostInstrument / newTotalShares;
     const costInstrument = ep * qty;
-    const costAccount = Number.isFinite(fxRate) && fxRate > 0 ? costInstrument / fxRate : costInstrument;
+    const costAccount = Number.isFinite(fxRate) && fxRate > 0 ? costInstrument * fxRate : costInstrument;
     const plannedExit = parseNum(form.plannedExitPrice);
     const baseLots = existingLots.length > 0 ? existingLots : [buildBaseLot(position)];
     const draftLot: SavedPortfolioLot = {
@@ -147,21 +147,24 @@ export function AddLotDrawer({
         costAccount,
         normalAutoClose: null,
         riskAutoClose: null,
-        lossToStopOut: null,
+        newLotLossToStopOut: null,
+        positionLossToStopOut: null,
         errors: previewRisk.errors,
       };
     }
 
     const positionPreview = previewRisk.positions.find((item) => item.position.id === position.id);
+    const draftLotAnalysis = positionPreview?.lotAnalyses.find((item) => item.lot.id === draftLot.id);
 
     return {
       newTotalShares,
       newAvgEntry,
       costInstrument,
       costAccount,
-      normalAutoClose: positionPreview?.normalAutoClose.displayAutoClosePrice ?? null,
-      riskAutoClose: positionPreview?.temporaryAutoClose.displayAutoClosePrice ?? null,
-      lossToStopOut: previewRisk.summary.temporary.maxLossBeforeStopOut,
+      normalAutoClose: draftLotAnalysis?.normalAutoClosePrice ?? null,
+      riskAutoClose: draftLotAnalysis?.riskAutoClosePrice ?? null,
+      newLotLossToStopOut: draftLotAnalysis?.lossToRiskStopAccount ?? null,
+      positionLossToStopOut: positionPreview?.totalLossToRiskStopAccount ?? null,
       errors: [],
     };
   }, [
@@ -386,13 +389,19 @@ export function AddLotDrawer({
                         </span>
                       </p>
                       <div className="mt-2 flex items-center justify-between gap-3 rounded border border-white/8 bg-white/[0.025] px-2 py-1.5">
-                        <span className="text-slate-500">Загуба до stop-out</span>
+                        <span className="text-slate-500">Загуба от тази покупка</span>
                         <span className="font-semibold text-rose-100">
-                          ~{fmtCurr(preview.lossToStopOut ?? Number.NaN, accountCurrency)}
+                          ~{fmtCurr(preview.newLotLossToStopOut ?? Number.NaN, accountCurrency)}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 flex items-center justify-between gap-3 rounded border border-white/8 bg-white/[0.025] px-2 py-1.5">
+                        <span className="text-slate-500">Общо за позицията</span>
+                        <span className="font-semibold text-slate-100">
+                          ~{fmtCurr(preview.positionLossToStopOut ?? Number.NaN, accountCurrency)}
                         </span>
                       </div>
                       <p className="mt-1 text-[11px] leading-4 text-slate-500">
-                        Това е приблизителната загуба, която акаунтът може да понесе след добавяне на този lot.
+                        Първата сума е само за новия lot до risk auto-close. Общата сума е сборът за всички lots в тази позиция.
                       </p>
                     </>
                   )}

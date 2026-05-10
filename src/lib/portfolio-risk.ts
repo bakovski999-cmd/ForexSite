@@ -78,10 +78,21 @@ export type PortfolioLotAnalysis = {
   lot: SavedPortfolioLot;
   effectiveSharesToSell: number;
   costBasisInstrument: number;
+  normalAutoClosePrice: number;
+  riskAutoClosePrice: number;
+  lossToNormalStopInstrument: number;
+  lossToNormalStopAccount: number;
+  lossToRiskStopInstrument: number;
+  lossToRiskStopAccount: number;
   plannedSaleValueInstrument: number | null;
   plannedProfitInstrument: number | null;
   plannedProfitAccount: number | null;
   plannedReturnPercent: number | null;
+};
+
+export type PortfolioAutoCloseRange = {
+  min: number;
+  max: number;
 };
 
 export type PortfolioPlannedExitSummary = {
@@ -105,6 +116,10 @@ export type PortfolioPositionAnalysis = {
   unrealizedPnLAccount: number;
   normalAutoClose: IndividualStopOut;
   temporaryAutoClose: IndividualStopOut;
+  autoCloseRangeNormal: PortfolioAutoCloseRange;
+  autoCloseRangeRisk: PortfolioAutoCloseRange;
+  totalLossToNormalStopAccount: number;
+  totalLossToRiskStopAccount: number;
   allocationPercent: number;
   riskBadge: "safe" | "moderate" | "high" | "critical";
   warnings: string[];
@@ -246,6 +261,12 @@ function buildLotAnalyses(
       lot,
       effectiveSharesToSell,
       costBasisInstrument,
+      normalAutoClosePrice: Number.NaN,
+      riskAutoClosePrice: Number.NaN,
+      lossToNormalStopInstrument: 0,
+      lossToNormalStopAccount: 0,
+      lossToRiskStopInstrument: 0,
+      lossToRiskStopAccount: 0,
       plannedSaleValueInstrument,
       plannedProfitInstrument,
       plannedProfitAccount,
@@ -315,6 +336,66 @@ function aggregatePositionLots(position: SavedPortfolioPosition) {
       quantity,
       lots,
     },
+  };
+}
+
+function getEffectiveRiskLots(position: SavedPortfolioPosition) {
+  const lots = getSortedLots(position);
+
+  if (lots.length > 0) {
+    return lots;
+  }
+
+  return [
+    {
+      id: `position-lot:${position.id}`,
+      savedPositionId: position.id,
+      entryPrice: position.entryPrice,
+      quantity: position.quantity,
+      plannedExitPrice: null,
+      sharesToSell: null,
+      notes: "Позиция",
+      displayOrder: 0,
+      createdAt: position.createdAt,
+      updatedAt: position.updatedAt,
+    } satisfies SavedPortfolioLot,
+  ];
+}
+
+function calculateLotAutoClosePrice(
+  direction: PortfolioDirection,
+  entryPrice: number,
+  bufferPerShareInstrument: number,
+) {
+  return direction === "buy"
+    ? entryPrice - bufferPerShareInstrument
+    : entryPrice + bufferPerShareInstrument;
+}
+
+function calculateLotStopLossInstrument(
+  direction: PortfolioDirection,
+  entryPrice: number,
+  autoClosePrice: number,
+  quantity: number,
+) {
+  const loss =
+    direction === "buy"
+      ? (entryPrice - autoClosePrice) * quantity
+      : (autoClosePrice - entryPrice) * quantity;
+
+  return Math.max(loss, 0);
+}
+
+function buildRange(values: number[]): PortfolioAutoCloseRange {
+  const finiteValues = values.filter((value) => Number.isFinite(value));
+
+  if (finiteValues.length === 0) {
+    return { min: Number.NaN, max: Number.NaN };
+  }
+
+  return {
+    min: Math.min(...finiteValues),
+    max: Math.max(...finiteValues),
   };
 }
 
@@ -576,6 +657,73 @@ export function calculatePortfolioRisk(
   const positions: PortfolioPositionAnalysis[] = baseAnalyses.map((position) => {
     const normalAutoClose = buildIndividualStopOut(position, normal);
     const temporaryAutoClose = buildIndividualStopOut(position, temporary);
+    const effectiveRiskLots = getEffectiveRiskLots(position.position);
+    const riskLotAnalyses = effectiveRiskLots.map((lot) => {
+      const normalAutoClosePrice = Math.max(
+        0,
+        calculateLotAutoClosePrice(
+          position.position.direction,
+          lot.entryPrice,
+          normalAutoClose.bufferPerShareInstrument,
+        ),
+      );
+      const riskAutoClosePrice = Math.max(
+        0,
+        calculateLotAutoClosePrice(
+          position.position.direction,
+          lot.entryPrice,
+          temporaryAutoClose.bufferPerShareInstrument,
+        ),
+      );
+      const lossToNormalStopInstrument = calculateLotStopLossInstrument(
+        position.position.direction,
+        lot.entryPrice,
+        normalAutoClosePrice,
+        lot.quantity,
+      );
+      const lossToRiskStopInstrument = calculateLotStopLossInstrument(
+        position.position.direction,
+        lot.entryPrice,
+        riskAutoClosePrice,
+        lot.quantity,
+      );
+
+      return {
+        lot,
+        normalAutoClosePrice,
+        riskAutoClosePrice,
+        lossToNormalStopInstrument,
+        lossToNormalStopAccount: lossToNormalStopInstrument * profile.fxRateInstrumentToAccount,
+        lossToRiskStopInstrument,
+        lossToRiskStopAccount: lossToRiskStopInstrument * profile.fxRateInstrumentToAccount,
+      };
+    });
+    const riskLotAnalysesById = new Map(riskLotAnalyses.map((item) => [item.lot.id, item]));
+    const lotAnalyses = position.lotAnalyses.map((lotAnalysis) => {
+      const riskLotAnalysis = riskLotAnalysesById.get(lotAnalysis.lot.id);
+
+      if (!riskLotAnalysis) {
+        return lotAnalysis;
+      }
+
+      return {
+        ...lotAnalysis,
+        normalAutoClosePrice: riskLotAnalysis.normalAutoClosePrice,
+        riskAutoClosePrice: riskLotAnalysis.riskAutoClosePrice,
+        lossToNormalStopInstrument: riskLotAnalysis.lossToNormalStopInstrument,
+        lossToNormalStopAccount: riskLotAnalysis.lossToNormalStopAccount,
+        lossToRiskStopInstrument: riskLotAnalysis.lossToRiskStopInstrument,
+        lossToRiskStopAccount: riskLotAnalysis.lossToRiskStopAccount,
+      };
+    });
+    const totalLossToNormalStopAccount = riskLotAnalyses.reduce(
+      (sum, item) => sum + item.lossToNormalStopAccount,
+      0,
+    );
+    const totalLossToRiskStopAccount = riskLotAnalyses.reduce(
+      (sum, item) => sum + item.lossToRiskStopAccount,
+      0,
+    );
     const autoCloseDistancePct =
       position.basePrice > 0
         ? Math.min(
@@ -602,8 +750,13 @@ export function calculatePortfolioRisk(
 
     return {
       ...position,
+      lotAnalyses,
       normalAutoClose,
       temporaryAutoClose,
+      autoCloseRangeNormal: buildRange(riskLotAnalyses.map((item) => item.normalAutoClosePrice)),
+      autoCloseRangeRisk: buildRange(riskLotAnalyses.map((item) => item.riskAutoClosePrice)),
+      totalLossToNormalStopAccount,
+      totalLossToRiskStopAccount,
       allocationPercent:
         totalPositionValueAccount > 0
           ? (position.positionValueAccount / totalPositionValueAccount) * 100
