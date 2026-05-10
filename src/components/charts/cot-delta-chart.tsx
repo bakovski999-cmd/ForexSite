@@ -54,9 +54,9 @@ function getTooltipPosition(point: number[], _params: unknown, _dom: unknown, _r
 
 function buildCotDeltaOption(rows: CotPositionRow[]): EChartsOption {
   const labelByDate = new Map(rows.map((row) => [row.reportDate.slice(5), row]));
-  const startValue = Math.max(0, rows.length - 12);
 
   return {
+    animation: false,
     tooltip: {
       trigger: "item",
       triggerOn: "mousemove|click",
@@ -98,7 +98,7 @@ function buildCotDeltaOption(rows: CotPositionRow[]): EChartsOption {
         ].join("<br/>");
       },
     },
-    grid: { left: 44, right: 22, top: 34, bottom: 72, containLabel: true },
+    grid: { left: 44, right: 22, top: 34, bottom: 36, containLabel: true },
     xAxis: {
       type: "category",
       data: rows.map((row) => row.reportDate.slice(5)),
@@ -114,27 +114,6 @@ function buildCotDeltaOption(rows: CotPositionRow[]): EChartsOption {
       },
       splitLine: { lineStyle: { color: "rgba(255,255,255,0.08)" } },
     },
-    dataZoom: [
-      {
-        type: "inside",
-        startValue,
-        endValue: rows.length - 1,
-        zoomOnMouseWheel: true,
-        moveOnMouseMove: true,
-      },
-      {
-        type: "slider",
-        startValue,
-        endValue: rows.length - 1,
-        height: 18,
-        bottom: 20,
-        borderColor: "rgba(255,255,255,0.08)",
-        fillerColor: "rgba(249,206,103,0.18)",
-        handleStyle: { color: "#f9ce67" },
-        moveHandleStyle: { color: "#f9ce67" },
-        textStyle: { color: "#94a3b8" },
-      },
-    ],
     series: [
       {
         name: "Net промяна",
