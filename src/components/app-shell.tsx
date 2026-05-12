@@ -43,10 +43,18 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const isValuationWorkspace = pathname === "/valuation";
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(255,214,102,0.18),_transparent_26%),linear-gradient(180deg,_#0a1020_0%,_#07101e_36%,_#050911_100%)] text-white">
-      <div className="mx-auto flex min-h-screen w-full max-w-[1500px] flex-col px-4 pb-8 pt-6 sm:px-6 lg:px-8">
+      <div
+        className={cn(
+          "mx-auto flex min-h-screen w-full flex-col px-4 pb-8 pt-6 sm:px-6 lg:px-8",
+          isValuationWorkspace ? "max-w-[1900px]" : "max-w-[1500px]",
+        )}
+        data-layout={isValuationWorkspace ? "valuation-wide" : "default"}
+        data-testid="dashboard-shell-frame"
+      >
         <header className="rounded-[30px] border border-white/10 bg-white/[0.03] px-5 py-5 shadow-[0_35px_120px_rgba(5,8,20,0.55)] backdrop-blur">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
             <div>

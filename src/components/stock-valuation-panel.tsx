@@ -411,7 +411,7 @@ export function StockValuationPanel() {
     result.signal === "BUY" ? "good" : result.signal === "SELL" ? "bad" : "neutral";
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_330px]">
+    <div className="grid gap-5" data-layout="valuation-workspace-wide">
       <section className="min-w-0 rounded-[26px] border border-white/10 bg-slate-950/40 shadow-[0_30px_100px_rgba(0,0,0,0.28)]">
         <div className="border-b border-white/10 p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -427,7 +427,7 @@ export function StockValuationPanel() {
               </p>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-[160px_minmax(180px,1fr)_auto] lg:min-w-[620px]">
+            <div className="grid gap-3 sm:grid-cols-[160px_minmax(180px,1fr)_auto] lg:min-w-[620px] xl:min-w-[720px]">
               <label className="grid gap-2 text-sm text-slate-400">
                 <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   Ticker
@@ -488,7 +488,7 @@ export function StockValuationPanel() {
           <MetricCard label="Signal" value={result.signal} tone={signalTone} />
         </div>
 
-        <div className="grid gap-4 border-y border-white/10 p-5 lg:grid-cols-2">
+        <div className="grid gap-4 border-y border-white/10 p-5 xl:grid-cols-[minmax(320px,0.55fr)_minmax(720px,1fr)]">
           <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:grid-cols-2">
             <div className="grid gap-3">
               <NumericField
@@ -517,7 +517,7 @@ export function StockValuationPanel() {
                 Total {formatPercent(result.finalWeightTotal, 0)}
               </p>
             </div>
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-[repeat(4,minmax(180px,1fr))]">
               {modelTabs.map((tab) => (
                 <CompactWeightField
                   key={tab.key}
@@ -531,7 +531,7 @@ export function StockValuationPanel() {
         </div>
 
         <div className="p-5">
-          <div className="flex flex-wrap gap-2">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             {modelTabs.map((tab) => {
               const modelFairValue = formatCurrency(
                 result.models[tab.key].weightedFairValue,
@@ -662,7 +662,7 @@ export function StockValuationPanel() {
           </button>
         </div>
 
-        <div className="mt-4 grid gap-3">
+        <div className="mt-4 grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
           {savedAnalyses.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-slate-400">
               Няма запазени анализи или текущата сесия е demo. Изчисленията работят, но save
@@ -746,8 +746,8 @@ function ScenarioEditor({
 
   return (
     <div
-      className="grid gap-2 rounded-2xl border border-white/10 bg-white/[0.025] p-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(120px,1fr)_76px_minmax(104px,1fr)_minmax(94px,1fr)_86px_94px_94px_82px_minmax(112px,1fr)] xl:items-end"
-      data-layout="compact-scenario-row"
+      className="grid gap-2 rounded-2xl border border-white/10 bg-white/[0.025] p-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(150px,1.2fr)_minmax(84px,0.55fr)_minmax(130px,1fr)_minmax(120px,0.9fr)_minmax(104px,0.78fr)_minmax(120px,0.86fr)_minmax(120px,0.86fr)_minmax(96px,0.68fr)_minmax(150px,1.05fr)] xl:items-end 2xl:grid-cols-[minmax(170px,1.3fr)_minmax(92px,0.55fr)_minmax(160px,1.05fr)_minmax(140px,0.9fr)_minmax(120px,0.78fr)_minmax(140px,0.86fr)_minmax(140px,0.86fr)_minmax(110px,0.68fr)_minmax(170px,1.05fr)]"
+      data-layout="valuation-scenario-wide-row"
       data-testid="valuation-scenario-row"
     >
       <div className="min-w-0 self-center">

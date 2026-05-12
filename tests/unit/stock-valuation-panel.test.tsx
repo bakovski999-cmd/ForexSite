@@ -96,6 +96,8 @@ describe("StockValuationPanel", () => {
     expect(screen.getByRole("button", { name: /DCF Multiple ·/ })).toBeVisible();
     expect(screen.getAllByTestId("valuation-scenario-row")).toHaveLength(3);
     expect(screen.getByLabelText("DCF 10 years final weight")).toBeVisible();
+    expect(container.querySelector('[data-layout="valuation-workspace-wide"]')).toBeInTheDocument();
+    expect(container.querySelectorAll('[data-layout="valuation-scenario-wide-row"]')).toHaveLength(3);
     expect(container.querySelector(".overflow-x-auto")).not.toBeInTheDocument();
   });
 
