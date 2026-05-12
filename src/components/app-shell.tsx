@@ -2,6 +2,7 @@
 
 import {
   BarChart3,
+  BadgeDollarSign,
   Calculator,
   CalendarDays,
   Newspaper,
@@ -27,6 +28,7 @@ const navigation = [
   { href: "/macro", label: "Макро", icon: TrendingUp },
   { href: "/signal-lab", label: "Сигнал", icon: Waypoints },
   { href: "/risk-calculator", label: "Риск калкулатор", icon: Calculator },
+  { href: "/valuation", label: "Справедлива цена", icon: BadgeDollarSign },
 ];
 
 export function AppShell({
@@ -74,7 +76,7 @@ export function AppShell({
             </div>
           </div>
 
-          <nav className="mt-5 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-7">
+          <nav className="mt-5 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
             {navigation.map((item) => {
               const active = pathname === item.href;
               const Icon = item.icon;

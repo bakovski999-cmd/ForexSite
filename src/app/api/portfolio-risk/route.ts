@@ -89,6 +89,10 @@ function readPosition(payload: unknown) {
 
   return {
     id: typeof position.id === "string" ? position.id : undefined,
+    scenarioSource:
+      position.scenarioSource === "legacy" || position.scenarioSource === "manual_plan"
+        ? position.scenarioSource
+        : "manual_plan",
     symbol: String(position.symbol ?? "").trim().toUpperCase(),
     assetName: position.assetName ? String(position.assetName) : null,
     direction: toDirection(position.direction),

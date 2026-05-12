@@ -12,6 +12,58 @@ comment on table public.gold_dashboard_snapshots is
 
 create extension if not exists pgcrypto;
 
+create table if not exists public.mt5_connectors (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null,
+  name text not null default 'MT5 акаунт',
+  token_hash text not null unique,
+  token_preview text not null,
+  last_seen_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists mt5_connectors_user_id_idx
+  on public.mt5_connectors (user_id, created_at desc);
+
+comment on table public.mt5_connectors is
+  'Stores per-user MT5 connector tokens. Plain secrets are never stored.';
+
+create table if not exists public.mt5_sync_snapshots (
+  id bigint generated always as identity primary key,
+  connector_id uuid references public.mt5_connectors(id) on delete set null,
+  user_id text,
+  connection_key text not null,
+  account_login text not null,
+  server text not null,
+  received_at timestamptz not null default now(),
+  payload jsonb not null
+);
+
+alter table public.mt5_sync_snapshots
+  add column if not exists connector_id uuid references public.mt5_connectors(id) on delete set null;
+
+alter table public.mt5_sync_snapshots
+  add column if not exists user_id text;
+
+create index if not exists mt5_sync_snapshots_received_at_idx
+  on public.mt5_sync_snapshots (received_at desc);
+
+create index if not exists mt5_sync_snapshots_connection_key_idx
+  on public.mt5_sync_snapshots (connection_key, received_at desc);
+
+create index if not exists mt5_sync_snapshots_user_id_idx
+  on public.mt5_sync_snapshots (user_id, received_at desc);
+
+create index if not exists mt5_sync_snapshots_connector_id_idx
+  on public.mt5_sync_snapshots (connector_id, received_at desc);
+
+comment on table public.mt5_sync_snapshots is
+  'Stores every MT5 Expert Advisor account and trade snapshot received by the private live connector.';
+
+alter table public.mt5_connectors enable row level security;
+alter table public.mt5_sync_snapshots enable row level security;
+
 create table if not exists public.account_risk_profiles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -56,10 +108,21 @@ create table if not exists public.saved_positions (
   instrument_currency text not null default 'USD',
   normal_fixed_leverage numeric check (normal_fixed_leverage > 0),
   temporary_fixed_leverage numeric check (temporary_fixed_leverage > 0),
+  scenario_source text check (scenario_source is null or scenario_source in ('manual_plan', 'legacy')),
   notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.saved_positions
+  add column if not exists scenario_source text;
+
+alter table public.saved_positions
+  drop constraint if exists saved_positions_scenario_source_check;
+
+alter table public.saved_positions
+  add constraint saved_positions_scenario_source_check
+  check (scenario_source is null or scenario_source in ('manual_plan', 'legacy'));
 
 create index if not exists saved_positions_user_id_idx
   on public.saved_positions (user_id);
@@ -263,5 +326,67 @@ drop policy if exists "Users can delete own sales"
   on public.saved_position_sales;
 create policy "Users can delete own sales"
 on public.saved_position_sales
+for delete
+using (auth.uid() = user_id);
+
+-- stock_valuation_analyses: saved fair value calculations
+create table if not exists public.stock_valuation_analyses (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  ticker text not null,
+  company_name text,
+  title text not null,
+  latest_fair_value numeric,
+  current_price numeric,
+  payload jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists stock_valuation_analyses_user_id_idx
+  on public.stock_valuation_analyses (user_id);
+
+create index if not exists stock_valuation_analyses_user_ticker_idx
+  on public.stock_valuation_analyses (user_id, ticker);
+
+comment on table public.stock_valuation_analyses is
+  'Stores per-user saved fair value calculations and editable model assumptions.';
+
+drop trigger if exists stock_valuation_analyses_set_updated_at
+  on public.stock_valuation_analyses;
+
+create trigger stock_valuation_analyses_set_updated_at
+before update on public.stock_valuation_analyses
+for each row
+execute function public.set_updated_at();
+
+alter table public.stock_valuation_analyses enable row level security;
+
+drop policy if exists "Users can read own stock valuations"
+  on public.stock_valuation_analyses;
+create policy "Users can read own stock valuations"
+on public.stock_valuation_analyses
+for select
+using (auth.uid() = user_id);
+
+drop policy if exists "Users can insert own stock valuations"
+  on public.stock_valuation_analyses;
+create policy "Users can insert own stock valuations"
+on public.stock_valuation_analyses
+for insert
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can update own stock valuations"
+  on public.stock_valuation_analyses;
+create policy "Users can update own stock valuations"
+on public.stock_valuation_analyses
+for update
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can delete own stock valuations"
+  on public.stock_valuation_analyses;
+create policy "Users can delete own stock valuations"
+on public.stock_valuation_analyses
 for delete
 using (auth.uid() = user_id);

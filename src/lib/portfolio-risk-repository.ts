@@ -6,6 +6,7 @@ import {
   getDefaultAccountRiskProfile,
   type AccountRiskProfile,
   type PortfolioRiskData,
+  type PortfolioScenarioSource,
   type SavedPortfolioLot,
   type SavedPortfolioPosition,
 } from "@/lib/portfolio-risk";
@@ -31,6 +32,7 @@ type SavedPositionRow = {
   id: string;
   user_id: string;
   account_risk_profile_id: string;
+  scenario_source?: string | null;
   symbol: string;
   asset_name: string | null;
   direction: "buy" | "sell";
@@ -113,6 +115,10 @@ function getServiceClient() {
       persistSession: false,
     },
   });
+}
+
+function normalizeScenarioSource(value: unknown): PortfolioScenarioSource | null {
+  return value === "manual_plan" || value === "legacy" ? value : null;
 }
 
 function sanitizeLotFromMetadata(value: unknown, positionId: string): SavedPortfolioLot | null {
@@ -224,6 +230,7 @@ function splitNotesMetadata(notes: string | null, positionId: string) {
       userNotes: rawNotes.trim() || null,
       fallbackLots: [] as SavedPortfolioLot[],
       fallbackSales: [] as FallbackSavedPositionSale[],
+      fallbackScenarioSource: null as PortfolioScenarioSource | null,
     };
   }
 
@@ -235,6 +242,7 @@ function splitNotesMetadata(notes: string | null, positionId: string) {
       userNotes: rawNotes.trim() || null,
       fallbackLots: [] as SavedPortfolioLot[],
       fallbackSales: [] as FallbackSavedPositionSale[],
+      fallbackScenarioSource: null as PortfolioScenarioSource | null,
     };
   }
 
@@ -252,7 +260,11 @@ function splitNotesMetadata(notes: string | null, positionId: string) {
       decodedJson = encodedJson;
     }
 
-    const metadata = JSON.parse(decodedJson) as { lots?: unknown[]; sales?: unknown[] };
+    const metadata = JSON.parse(decodedJson) as {
+      lots?: unknown[];
+      sales?: unknown[];
+      scenarioSource?: unknown;
+    };
     const fallbackLots = Array.isArray(metadata.lots)
       ? metadata.lots
           .map((lot) => sanitizeLotFromMetadata(lot, positionId))
@@ -264,12 +276,18 @@ function splitNotesMetadata(notes: string | null, positionId: string) {
           .filter((sale): sale is FallbackSavedPositionSale => Boolean(sale))
       : [];
 
-    return { userNotes, fallbackLots, fallbackSales };
+    return {
+      userNotes,
+      fallbackLots,
+      fallbackSales,
+      fallbackScenarioSource: normalizeScenarioSource(metadata.scenarioSource),
+    };
   } catch {
     return {
       userNotes,
       fallbackLots: [] as SavedPortfolioLot[],
       fallbackSales: [] as FallbackSavedPositionSale[],
+      fallbackScenarioSource: null as PortfolioScenarioSource | null,
     };
   }
 }
@@ -309,20 +327,31 @@ function buildNotesWithFallbackMetadata(
   userNotes: string | null | undefined,
   lots: SavedPortfolioLot[],
   sales: FallbackSavedPositionSale[] = [],
+  scenarioSource?: PortfolioScenarioSource | null,
 ) {
   const cleanNotes = userNotes?.trim() ?? "";
+  const normalizedScenarioSource = normalizeScenarioSource(scenarioSource);
 
-  if (lots.length === 0 && sales.length === 0) {
+  if (lots.length === 0 && sales.length === 0 && !normalizedScenarioSource) {
     return cleanNotes || null;
   }
 
-  const metadata = encodeURIComponent(
-    JSON.stringify({
-      version: 1,
-      lots: lots.map(serializeLotForMetadata),
-      sales: sales.map(serializeSaleForMetadata),
-    }),
-  );
+  const metadataPayload: {
+    version: number;
+    lots: ReturnType<typeof serializeLotForMetadata>[];
+    sales: ReturnType<typeof serializeSaleForMetadata>[];
+    scenarioSource?: PortfolioScenarioSource;
+  } = {
+    version: 1,
+    lots: lots.map(serializeLotForMetadata),
+    sales: sales.map(serializeSaleForMetadata),
+  };
+
+  if (normalizedScenarioSource) {
+    metadataPayload.scenarioSource = normalizedScenarioSource;
+  }
+
+  const metadata = encodeURIComponent(JSON.stringify(metadataPayload));
   const marker = `${notesLotsMarkerStart}${metadata}${notesLotsMarkerEnd}`;
 
   return [cleanNotes, marker].filter(Boolean).join("\n");
@@ -348,13 +377,18 @@ function mapProfile(row: AccountRiskProfileRow): AccountRiskProfile {
 }
 
 function mapPosition(row: SavedPositionRow): SavedPortfolioPosition {
-  const { userNotes, fallbackLots } = splitNotesMetadata(row.notes, row.id);
+  const { userNotes, fallbackLots, fallbackScenarioSource } = splitNotesMetadata(
+    row.notes,
+    row.id,
+  );
   const lots = ensureBaseFallbackLot(row, fallbackLots);
+  const scenarioSource = normalizeScenarioSource(row.scenario_source) ?? fallbackScenarioSource;
 
   return {
     id: row.id,
     userId: row.user_id,
     accountRiskProfileId: row.account_risk_profile_id,
+    scenarioSource,
     symbol: row.symbol,
     assetName: row.asset_name,
     direction: row.direction,
@@ -455,6 +489,10 @@ function positionToRow(
   return {
     user_id: userId,
     account_risk_profile_id: accountRiskProfileId,
+    scenario_source:
+      position.scenarioSource === "manual_plan" || position.scenarioSource === "legacy"
+        ? position.scenarioSource
+        : null,
     symbol: position.symbol.trim().toUpperCase(),
     asset_name: position.assetName?.trim() || null,
     direction: position.direction,
@@ -465,6 +503,25 @@ function positionToRow(
     normal_fixed_leverage: position.normalFixedLeverage ?? null,
     temporary_fixed_leverage: position.temporaryFixedLeverage ?? null,
     notes: position.notes?.trim() || null,
+  };
+}
+
+function positionToRowWithoutScenarioSource(
+  userId: string,
+  accountRiskProfileId: string,
+  position: SavedPositionPayload,
+  lots: SavedPortfolioLot[] = [],
+  sales: FallbackSavedPositionSale[] = [],
+) {
+  const { scenario_source: _scenarioSource, ...row } = positionToRow(
+    userId,
+    accountRiskProfileId,
+    position,
+  );
+
+  return {
+    ...row,
+    notes: buildNotesWithFallbackMetadata(position.notes, lots, sales, _scenarioSource),
   };
 }
 
@@ -542,10 +599,20 @@ async function saveFallbackLotsToPositionNotes(
   row: SavedPositionRow,
   lots: SavedPortfolioLot[],
 ) {
-  const { userNotes, fallbackSales } = splitNotesMetadata(row.notes, row.id);
+  const { userNotes, fallbackSales, fallbackScenarioSource } = splitNotesMetadata(
+    row.notes,
+    row.id,
+  );
   const { error } = await client
     .from("saved_positions")
-    .update({ notes: buildNotesWithFallbackMetadata(userNotes, lots, fallbackSales) })
+    .update({
+      notes: buildNotesWithFallbackMetadata(
+        userNotes,
+        lots,
+        fallbackSales,
+        fallbackScenarioSource,
+      ),
+    })
     .eq("id", row.id)
     .eq("user_id", userId);
 
@@ -561,10 +628,12 @@ async function saveFallbackMetadataToPositionNotes(
   lots: SavedPortfolioLot[],
   sales: FallbackSavedPositionSale[],
 ) {
-  const { userNotes } = splitNotesMetadata(row.notes, row.id);
+  const { userNotes, fallbackScenarioSource } = splitNotesMetadata(row.notes, row.id);
   const { error } = await client
     .from("saved_positions")
-    .update({ notes: buildNotesWithFallbackMetadata(userNotes, lots, sales) })
+    .update({
+      notes: buildNotesWithFallbackMetadata(userNotes, lots, sales, fallbackScenarioSource),
+    })
     .eq("id", row.id)
     .eq("user_id", userId);
 
@@ -768,6 +837,18 @@ function isMissingSalesTableError(error: unknown) {
   );
 }
 
+function isMissingScenarioSourceColumnError(error: unknown) {
+  const text = getDatabaseErrorText(error).toLowerCase();
+
+  return (
+    text.includes("scenario_source") &&
+    (text.includes("schema cache") ||
+      text.includes("column") ||
+      text.includes("pgrst204") ||
+      text.includes("42703"))
+  );
+}
+
 export async function loadPortfolioRiskData(userId: string): Promise<PortfolioRiskData> {
   const client = getServiceClient();
   const { data: profileRow, error: profileError } = await client
@@ -894,6 +975,20 @@ export async function createSavedPosition(
     .single();
 
   if (error) {
+    if (isMissingScenarioSourceColumnError(error)) {
+      const fallbackResponse = await client
+        .from("saved_positions")
+        .insert(positionToRowWithoutScenarioSource(userId, accountRiskProfileId, position))
+        .select("*")
+        .single();
+
+      if (fallbackResponse.error) {
+        throw fallbackResponse.error;
+      }
+
+      return mapPosition(fallbackResponse.data as SavedPositionRow);
+    }
+
     throw error;
   }
 
@@ -922,6 +1017,31 @@ export async function updateSavedPosition(
     .single();
 
   if (error) {
+    if (isMissingScenarioSourceColumnError(error)) {
+      const fallbackResponse = await client
+        .from("saved_positions")
+        .update(
+          positionToRowWithoutScenarioSource(
+            userId,
+            accountRiskProfileId,
+            position,
+            fallbackLots,
+            fallbackSales,
+          ),
+        )
+        .eq("id", position.id)
+        .eq("user_id", userId)
+        .eq("account_risk_profile_id", accountRiskProfileId)
+        .select("*")
+        .single();
+
+      if (fallbackResponse.error) {
+        throw fallbackResponse.error;
+      }
+
+      return mapPosition(fallbackResponse.data as SavedPositionRow);
+    }
+
     throw error;
   }
 

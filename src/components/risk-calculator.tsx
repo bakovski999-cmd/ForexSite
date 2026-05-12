@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Activity,
   AlertTriangle,
   BriefcaseBusiness,
   Calculator,
@@ -15,6 +16,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { Mt5LivePanel } from "@/components/mt5-live-panel";
 import { PortfolioRiskManager } from "@/components/portfolio-risk-manager";
 import {
   calculateAccumulatedPosition,
@@ -28,7 +30,8 @@ import {
 import { cn } from "@/lib/utils";
 
 type SuccessfulLeverageRiskResult = Extract<LeverageRiskResult, { ok: true }>;
-type CalculatorTab = "risk" | "partial-sales" | "accumulation" | "portfolio";
+type CalculatorTab = "risk" | "partial-sales" | "accumulation" | "mt5-live" | "portfolio";
+type PortfolioRiskMode = "manual" | "live";
 
 const numberFormatter = new Intl.NumberFormat("bg-BG", {
   maximumFractionDigits: 2,
@@ -113,6 +116,12 @@ function CalculatorTabNav({
       title: "Осредняване",
       text: "Средна цена и целева печалба",
       icon: Layers3,
+    },
+    {
+      value: "mt5-live",
+      title: "MT5 Live",
+      text: "Live акаунт и сделки",
+      icon: Activity,
     },
     {
       value: "portfolio",
@@ -909,6 +918,7 @@ function AccumulationPanel() {
 
 export function RiskCalculator() {
   const [activeCalculator, setActiveCalculator] = useState<CalculatorTab>("risk");
+  const [portfolioRiskMode, setPortfolioRiskMode] = useState<PortfolioRiskMode>("manual");
   const [showAdvancedInputs, setShowAdvancedInputs] = useState(false);
   const [marginMode, setMarginMode] = useState<MarginMode>("real_broker_margin");
   const [side, setSide] = useState<PositionSide>("buy");
@@ -1452,8 +1462,21 @@ export function RiskCalculator() {
       <div className={cn(activeCalculator !== "accumulation" && "hidden")}>
         <AccumulationPanel />
       </div>
+      <div className={cn(activeCalculator !== "mt5-live" && "hidden")}>
+        <Mt5LivePanel
+          onOpenLiveAnalysis={() => {
+            setPortfolioRiskMode("live");
+            setActiveCalculator("portfolio");
+          }}
+        />
+      </div>
+
       <div className={cn(activeCalculator !== "portfolio" && "hidden")}>
-        <PortfolioRiskManager />
+        <PortfolioRiskManager
+          mode={portfolioRiskMode}
+          onModeChange={setPortfolioRiskMode}
+          onOpenMt5Setup={() => setActiveCalculator("mt5-live")}
+        />
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createClient } from "@supabase/supabase-js";
 import {
   applySaleToLots,
+  createSavedPosition,
   createSavedPositionLot,
   deleteSavedPositionLot,
   loadPortfolioRiskData,
@@ -45,7 +46,16 @@ function encodeFallbackLots(lots: unknown[], sales: unknown[] = []) {
   )} -->`;
 }
 
-function createPositionRow(notes: string | null = null) {
+function encodeFallbackMetadata(metadata: Record<string, unknown>) {
+  return `<!-- portfolio-risk-lots:${encodeURIComponent(
+    JSON.stringify({ version: 1, ...metadata }),
+  )} -->`;
+}
+
+function createPositionRow(
+  notes: string | null = null,
+  overrides: Record<string, unknown> = {},
+) {
   return {
     id: "position-1",
     user_id: "user-1",
@@ -62,12 +72,14 @@ function createPositionRow(notes: string | null = null) {
     notes,
     created_at: "2026-05-08T00:00:00.000Z",
     updated_at: "2026-05-08T00:00:00.000Z",
+    ...overrides,
   };
 }
 
 type MockState = {
   positionRows: ReturnType<typeof createPositionRow>[];
   lotsTableMissing: boolean;
+  scenarioSourceColumnMissing?: boolean;
   salesTableMissing: boolean;
   lotRows: Array<{
     id: string;
@@ -93,6 +105,10 @@ function createPortfolioRiskClientMock(state: MockState) {
     code: "PGRST205",
     message: "Could not find the table 'public.saved_position_sales' in the schema cache",
   };
+  const missingScenarioSourceError = {
+    code: "PGRST204",
+    message: "Could not find the 'scenario_source' column of 'saved_positions' in the schema cache",
+  };
 
   function makeQuery(table: string) {
     let operation: "select" | "insert" | "update" | "delete" = "select";
@@ -106,9 +122,46 @@ function createPortfolioRiskClientMock(state: MockState) {
       }
 
       if (table === "saved_positions") {
+        if (
+          state.scenarioSourceColumnMissing &&
+          ((operation === "insert" && insertPayload && "scenario_source" in insertPayload) ||
+            (operation === "update" && updatePayload && "scenario_source" in updatePayload))
+        ) {
+          return { data: null, error: missingScenarioSourceError };
+        }
+
         if (operation === "delete") {
           state.positionRows = [];
           return { data: null, error: null };
+        }
+
+        if (operation === "insert" && insertPayload) {
+          const positionOverrides: Record<string, unknown> = {
+            id: `position-${state.positionRows.length + 1}`,
+            user_id: insertPayload.user_id,
+            account_risk_profile_id: insertPayload.account_risk_profile_id,
+            symbol: insertPayload.symbol,
+            asset_name: insertPayload.asset_name,
+            direction: insertPayload.direction,
+            entry_price: insertPayload.entry_price,
+            current_price: insertPayload.current_price,
+            quantity: insertPayload.quantity,
+            instrument_currency: insertPayload.instrument_currency,
+            normal_fixed_leverage: insertPayload.normal_fixed_leverage,
+            temporary_fixed_leverage: insertPayload.temporary_fixed_leverage,
+          };
+
+          if ("scenario_source" in insertPayload) {
+            positionOverrides.scenario_source = insertPayload.scenario_source;
+          }
+
+          const row = createPositionRow(
+            (insertPayload.notes as string | null) ?? null,
+            positionOverrides,
+          );
+          state.positionRows = [...state.positionRows, row];
+
+          return { data: row, error: null };
         }
 
         if (operation === "update" && updatePayload) {
@@ -245,6 +298,65 @@ describe("portfolio risk repository", () => {
         notes: "fallback lot",
       }),
     ]);
+  });
+
+  test("creates manual plan positions through notes metadata when scenario_source is not migrated", async () => {
+    const state: MockState = {
+      lotsTableMissing: false,
+      salesTableMissing: true,
+      scenarioSourceColumnMissing: true,
+      lotRows: [],
+      positionRows: [],
+    };
+    vi.mocked(createClient).mockReturnValue(createPortfolioRiskClientMock(state) as never);
+
+    const created = await createSavedPosition("user-1", "profile-1", {
+      scenarioSource: "manual_plan",
+      symbol: "META",
+      assetName: null,
+      direction: "buy",
+      entryPrice: 609.59,
+      currentPrice: null,
+      quantity: 2,
+      instrumentCurrency: "USD",
+      normalFixedLeverage: null,
+      temporaryFixedLeverage: null,
+      notes: null,
+    });
+    const data = await loadPortfolioRiskData("user-1");
+
+    expect(created.scenarioSource).toBe("manual_plan");
+    expect(state.positionRows[0]).not.toHaveProperty("scenario_source");
+    expect(state.positionRows[0].notes).toContain("portfolio-risk-lots");
+    expect(data.positions[0]).toMatchObject({
+      scenarioSource: "manual_plan",
+      symbol: "META",
+      notes: null,
+    });
+  });
+
+  test("loads manual plan source from notes metadata when the column is absent", async () => {
+    const state: MockState = {
+      lotsTableMissing: false,
+      salesTableMissing: true,
+      scenarioSourceColumnMissing: true,
+      lotRows: [],
+      positionRows: [
+        createPositionRow(
+          `Human note\n${encodeFallbackMetadata({
+            scenarioSource: "manual_plan",
+            lots: [],
+            sales: [],
+          })}`,
+        ),
+      ],
+    };
+    vi.mocked(createClient).mockReturnValue(createPortfolioRiskClientMock(state) as never);
+
+    const data = await loadPortfolioRiskData("user-1");
+
+    expect(data.positions[0].scenarioSource).toBe("manual_plan");
+    expect(data.positions[0].notes).toBe("Human note");
   });
 
   test("creates, updates and deletes fallback lots in saved position notes", async () => {

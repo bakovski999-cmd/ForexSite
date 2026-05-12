@@ -48,6 +48,12 @@ test("demo login opens the dashboard and navigates core views", async ({ page })
   await page.getByRole("link", { name: "Сигнал" }).click();
   await expect(page.getByText("Как е сметната посоката и къде тежат факторите.")).toBeVisible();
 
+  await page.getByRole("link", { name: "Справедлива цена" }).click();
+  await expect(page.getByRole("heading", { name: "Справедлива цена" }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Авто попълване" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "DCF 10 years" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Запазени анализи" })).toBeVisible();
+
   await page.getByRole("link", { name: "Риск калкулатор" }).click();
   await expect(
     page.getByText("Провери риска по реалните данни от твоя брокер."),
@@ -55,6 +61,7 @@ test("demo login opens the dashboard and navigates core views", async ({ page })
   await expect(page.getByRole("button", { name: /Входни данни \/ Резултат/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Продажба на части/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Осредняване/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /MT5 Live/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Портфолио риск/ })).toBeVisible();
   await expect(page.getByText("Ако цената падне до")).toBeVisible();
   await expect(page.getByText("печалбата ще е")).toBeVisible();
@@ -73,9 +80,14 @@ test("demo login opens the dashboard and navigates core views", async ({ page })
   await expect(page.getByRole("heading", { name: "Натрупване / осредняване" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Колко акции мога да взема?" })).toHaveCount(0);
 
+  await page.getByRole("button", { name: /MT5 Live/ }).click();
+  await expect(page.getByRole("heading", { name: "MT5 Live" })).toBeVisible();
+  await expect(page.getByText("MT5 offline")).toBeVisible();
+  await expect(page.getByText("Няма получен MT5 snapshot.")).toBeVisible();
+
   await page.getByRole("button", { name: /Портфолио риск/ }).click();
-  await expect(page.getByRole("heading", { name: "Настройки на акаунта" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Добави позиция" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Обобщение на акаунта" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Стрес тест" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Portfolio Risk" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Нова позиция/ })).toBeVisible();
+  await expect(page.getByText("Account snapshot")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Stress test" })).toBeVisible();
 });

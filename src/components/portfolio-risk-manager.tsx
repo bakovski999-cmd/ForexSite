@@ -4,7 +4,6 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
-  BriefcaseBusiness,
   ChevronDown,
   DollarSign,
   Edit3,
@@ -12,15 +11,25 @@ import {
   Loader2,
   Plus,
   PlusCircle,
+  RefreshCw,
   Save,
+  Server,
   Trash2,
+  Wifi,
+  WifiOff,
   X,
 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import { AddLotDrawer } from "@/components/add-lot-drawer";
 import { SellPositionDrawer } from "@/components/sell-position-drawer";
+import type { Mt5LatestResponse } from "@/lib/mt5";
+import {
+  buildMt5PortfolioRiskScenario,
+  maskMt5AccountLogin,
+  type Mt5PortfolioRiskScenario,
+} from "@/lib/mt5-portfolio-risk";
 import {
   calculateCustomCrashStress,
   calculatePortfolioRisk,
@@ -83,6 +92,20 @@ type ApiPortfolioResponse = {
   profile?: AccountRiskProfile;
   positions?: SavedPortfolioPosition[];
   lot?: SavedPortfolioLot;
+};
+
+type PortfolioRiskMode = "manual" | "live";
+
+type Mt5LatestState =
+  | { status: "idle"; data: null; error: null }
+  | { status: "loading"; data: null; error: null }
+  | { status: "loaded"; data: Mt5LatestResponse; error: null }
+  | { status: "error"; data: null; error: string };
+
+type PortfolioRiskManagerProps = {
+  mode?: PortfolioRiskMode;
+  onModeChange?: (mode: PortfolioRiskMode) => void;
+  onOpenMt5Setup?: () => void;
 };
 
 type HelpTopic =
@@ -233,6 +256,43 @@ function formatPercent(value: number) {
   }
 
   return `${formatNumber(value, 1)}%`;
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+
+  if (!Number.isFinite(date.getTime())) {
+    return value || "-";
+  }
+
+  return new Intl.DateTimeFormat("bg-BG", {
+    dateStyle: "medium",
+    timeStyle: "medium",
+  }).format(date);
+}
+
+function mt5StatusLabel(status: Mt5LatestResponse["status"]) {
+  if (status === "live") {
+    return "MT5 live";
+  }
+
+  if (status === "stale") {
+    return "MT5 stale";
+  }
+
+  return "MT5 offline";
+}
+
+function mt5StatusTone(status: Mt5LatestResponse["status"]) {
+  if (status === "live") {
+    return "border-emerald-300/30 bg-emerald-300/12 text-emerald-100";
+  }
+
+  if (status === "stale") {
+    return "border-amber-300/30 bg-amber-300/12 text-amber-100";
+  }
+
+  return "border-rose-300/30 bg-rose-300/12 text-rose-100";
 }
 
 function formatCurrencyRange(range: PortfolioAutoCloseRange, currency = "USD") {
@@ -436,6 +496,7 @@ function emptyPositionForm(): PositionForm {
 function formToPosition(form: PositionForm): SavedPortfolioPosition {
   return {
     id: form.id ?? "preview-position",
+    scenarioSource: "manual_plan",
     symbol: form.symbol.trim().toUpperCase(),
     assetName: form.assetName.trim() || null,
     direction: form.direction,
@@ -600,22 +661,6 @@ function getAccountLoadTone(loadPercent: number) {
   }
 
   return "emerald";
-}
-
-function getAccountLoadLabel(loadPercent: number) {
-  if (loadPercent >= 100) {
-    return "критично";
-  }
-
-  if (loadPercent >= 50) {
-    return "тежко натоварване";
-  }
-
-  if (loadPercent >= 20) {
-    return "умерено";
-  }
-
-  return "спокойно";
 }
 
 function getCapacityToLoad(result: Extract<PortfolioRiskResult, { ok: true }>, targetLoadPercent: number) {
@@ -1058,46 +1103,6 @@ function StressResultView({
   );
 }
 
-function ToolPanel({
-  title,
-  description,
-  icon,
-  open,
-  onToggle,
-  children,
-}: {
-  title: string;
-  description: string;
-  icon: ReactNode;
-  open: boolean;
-  onToggle: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-lg border border-white/10 bg-[#0b1322]/70">
-      <button
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-        onClick={onToggle}
-        type="button"
-      >
-        <span className="flex min-w-0 items-center gap-3">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-slate-400">
-            {icon}
-          </span>
-          <span className="min-w-0">
-            <span className="block text-sm font-semibold text-white">{title}</span>
-            <span className="block truncate text-xs text-slate-500">{description}</span>
-          </span>
-        </span>
-        <ChevronDown
-          className={cn("size-4 shrink-0 text-slate-500 transition", open && "rotate-180")}
-        />
-      </button>
-      {open ? <div className="border-t border-white/8 p-4">{children}</div> : null}
-    </section>
-  );
-}
-
 function getAllocationColor(index: number) {
   const colors = [
     "bg-cyan-300/85",
@@ -1500,414 +1505,6 @@ function PositionLotsPanel({
   );
 }
 
-function PositionsTable({
-  positions,
-  accountCurrency,
-  onEdit,
-  onDelete,
-  onAddLot,
-  onSell,
-  deletingId,
-  expandedPositionId,
-  lotForms,
-  savingLotId,
-  deletingLotId,
-  onTogglePosition,
-  onLotFormChange,
-  onSaveLot,
-  onDeleteLot,
-  openHelp,
-  onToggleHelp,
-}: {
-  positions: PortfolioPositionAnalysis[];
-  accountCurrency: string;
-  onEdit: (position: SavedPortfolioPosition) => void;
-  onDelete: (position: SavedPortfolioPosition) => void;
-  onAddLot: (position: SavedPortfolioPosition) => void;
-  onSell: (position: SavedPortfolioPosition) => void;
-  deletingId: string | null;
-  expandedPositionId: string | null;
-  lotForms: Record<string, LotForm>;
-  savingLotId: string | null;
-  deletingLotId: string | null;
-  onTogglePosition: (position: SavedPortfolioPosition) => void;
-  onLotFormChange: (key: string, field: keyof LotForm, value: string) => void;
-  onSaveLot: (position: SavedPortfolioPosition, formKey: string, lot?: SavedPortfolioLot) => void;
-  onDeleteLot: (position: SavedPortfolioPosition, lot: SavedPortfolioLot) => void;
-  openHelp: HelpTopic | null;
-  onToggleHelp: (topic: HelpTopic) => void;
-}) {
-  const tableHelpTopic =
-    openHelp === "margin" || openHelp === "autoClose" || openHelp === "risk" ? openHelp : null;
-
-  return (
-    <section className="relative rounded-lg border border-white/10 bg-[#0b1322]/80">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 px-4 py-3">
-        <div>
-          <h2 className="text-base font-semibold text-white">Позиции</h2>
-          <p className="text-xs text-slate-500">
-            Ръчни цени, margin и stop-out по всяка позиция.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="flex flex-wrap items-center gap-1 lg:hidden">
-            <button
-              className="inline-flex h-7 items-center gap-1 rounded-md border border-white/10 bg-white/[0.03] px-2 text-[11px] font-medium text-slate-300"
-              onClick={() => onToggleHelp("margin")}
-              type="button"
-            >
-              Margin
-              <span
-                className={cn(
-                  "inline-flex size-4 items-center justify-center rounded-full border text-[10px] font-bold leading-none",
-                  openHelp === "margin"
-                    ? "border-amber-200/45 bg-amber-200/15 text-amber-100"
-                    : "border-white/15 bg-white/[0.03] text-slate-400",
-                )}
-              >
-                !
-              </span>
-            </button>
-            <button
-              className="inline-flex h-7 items-center gap-1 rounded-md border border-white/10 bg-white/[0.03] px-2 text-[11px] font-medium text-slate-300"
-              onClick={() => onToggleHelp("autoClose")}
-              type="button"
-            >
-              Auto-close
-              <span
-                className={cn(
-                  "inline-flex size-4 items-center justify-center rounded-full border text-[10px] font-bold leading-none",
-                  openHelp === "autoClose"
-                    ? "border-amber-200/45 bg-amber-200/15 text-amber-100"
-                    : "border-white/15 bg-white/[0.03] text-slate-400",
-                )}
-              >
-                !
-              </span>
-            </button>
-            <button
-              className="inline-flex h-7 items-center gap-1 rounded-md border border-white/10 bg-white/[0.03] px-2 text-[11px] font-medium text-slate-300"
-              onClick={() => onToggleHelp("risk")}
-              type="button"
-            >
-              Risk
-              <span
-                className={cn(
-                  "inline-flex size-4 items-center justify-center rounded-full border text-[10px] font-bold leading-none",
-                  openHelp === "risk"
-                    ? "border-amber-200/45 bg-amber-200/15 text-amber-100"
-                    : "border-white/15 bg-white/[0.03] text-slate-400",
-                )}
-              >
-                !
-              </span>
-            </button>
-          </div>
-          <span className="rounded-md border border-white/10 px-2 py-1 text-xs text-slate-400">
-            {positions.length} позиции
-          </span>
-        </div>
-      </div>
-
-      {tableHelpTopic ? (
-        <HelpPanel
-          className="absolute right-4 top-16 z-50"
-          content={HELP_CONTENT[tableHelpTopic]}
-          onClose={() => onToggleHelp(tableHelpTopic)}
-        />
-      ) : null}
-
-      {positions.length === 0 ? (
-        <div className="px-4 py-8 text-sm leading-6 text-slate-400">
-          Все още няма запазени позиции. Добави първата позиция от панела за позиция.
-        </div>
-      ) : (
-        <>
-          <div className="hidden overflow-x-auto lg:block">
-            <table className="w-full min-w-[980px] text-left text-sm">
-              <thead className="border-b border-white/8 text-[10px] uppercase text-slate-500">
-                <tr>
-                  <th className="px-4 py-2 font-medium">Symbol</th>
-                  <th className="px-3 py-2 font-medium">Side</th>
-                  <th className="px-3 py-2 text-right font-medium">Qty</th>
-                  <th className="px-3 py-2 text-right font-medium">Entry / Current</th>
-                  <th className="px-3 py-2 text-right font-medium">Value</th>
-                  <th className="px-3 py-2 text-right font-medium">
-                    <HelpLabel
-                      align="right"
-                      label="Margin"
-                      onToggleHelp={onToggleHelp}
-                      openHelp={openHelp}
-                      topic="margin"
-                    />
-                  </th>
-                  <th className="px-3 py-2 text-right font-medium">
-                    <HelpLabel
-                      align="right"
-                      label="Auto-close"
-                      onToggleHelp={onToggleHelp}
-                      openHelp={openHelp}
-                      topic="autoClose"
-                    />
-                  </th>
-                  <th className="px-3 py-2 font-medium">
-                    <HelpLabel
-                      label="Risk"
-                      onToggleHelp={onToggleHelp}
-                      openHelp={openHelp}
-                      topic="risk"
-                    />
-                  </th>
-                  <th className="px-4 py-2 text-right font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/8">
-                {positions.map((analysis) => {
-                  const position = analysis.position;
-                  const instrumentCurrency = position.instrumentCurrency;
-                  const isExpanded = expandedPositionId === position.id;
-
-                  return (
-                    <Fragment key={position.id}>
-                      <tr className="align-top text-slate-300">
-                        <td className="px-4 py-3">
-                          <p className="font-semibold text-white">{position.symbol}</p>
-                          {position.assetName ? (
-                            <p className="mt-0.5 max-w-36 truncate text-xs text-slate-500">
-                              {position.assetName}
-                            </p>
-                          ) : null}
-                          {position.lots && position.lots.length > 0 ? (
-                            <p className="mt-1 text-[11px] text-cyan-100/75">
-                              {position.lots.length} покупки · ср. цена
-                            </p>
-                          ) : null}
-                        </td>
-                        <td className="px-3 py-3">
-                          <span className="rounded-md border border-white/10 px-2 py-1 text-xs">
-                            {directionLabel(position.direction)}
-                          </span>
-                        </td>
-                        <td className="px-3 py-3 text-right">
-                          {formatNumber(position.quantity, 2)}
-                        </td>
-                        <td className="px-3 py-3 text-right">
-                          <p>{formatCurrency(position.entryPrice, instrumentCurrency)}</p>
-                          <p className="text-xs text-slate-500">
-                            {position.currentPrice == null
-                              ? "current = entry"
-                              : formatCurrency(analysis.basePrice, instrumentCurrency)}
-                          </p>
-                        </td>
-                        <td className="px-3 py-3 text-right">
-                          <p>{formatCurrency(analysis.positionValueAccount, accountCurrency)}</p>
-                          <p className="text-xs text-slate-500">
-                            {formatCurrency(analysis.positionValueInstrument, instrumentCurrency)} ·{" "}
-                            {formatPercent(analysis.allocationPercent)}
-                          </p>
-                        </td>
-                        <td className="px-3 py-3 text-right">
-                          <p>{formatCurrency(analysis.normalUsedMargin, accountCurrency)}</p>
-                          <p className="text-xs text-amber-100/80">
-                            {formatCurrency(analysis.temporaryUsedMargin, accountCurrency)}
-                          </p>
-                        </td>
-                        <td className="px-3 py-3">
-                          <AutoCloseDisplay
-                            accountCurrency={accountCurrency}
-                            instrumentCurrency={instrumentCurrency}
-                            lossAccount={analysis.totalLossToRiskStopAccount}
-                            range={analysis.autoCloseRangeRisk}
-                          />
-                        </td>
-                        <td className="px-3 py-3">
-                          <StatusBadge status={analysis.riskBadge} />
-                          {analysis.warnings.length > 0 ? (
-                            <p className="mt-1 max-w-36 text-xs leading-5 text-rose-200">
-                              {analysis.warnings.join(" ")}
-                            </p>
-                          ) : null}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex justify-end gap-2">
-                            <IconButton
-                              label={`${isExpanded ? "Скрий" : "Покажи"} покупките за ${position.symbol}`}
-                              onClick={() => onTogglePosition(position)}
-                            >
-                              <ChevronDown
-                                className={cn("size-4 transition", isExpanded && "rotate-180")}
-                              />
-                            </IconButton>
-                            <IconButton label={`Добави лот към ${position.symbol}`} onClick={() => onAddLot(position)}>
-                              <PlusCircle className="size-4" />
-                            </IconButton>
-                            <IconButton label={`Продай от ${position.symbol}`} onClick={() => onSell(position)} tone="green">
-                              <DollarSign className="size-4" />
-                            </IconButton>
-                            <IconButton label={`Редактирай ${position.symbol}`} onClick={() => onEdit(position)}>
-                              <Edit3 className="size-4" />
-                            </IconButton>
-                            <IconButton
-                              disabled={deletingId === position.id}
-                              label={`Изтрий ${position.symbol}`}
-                              onClick={() => onDelete(position)}
-                              tone="red"
-                            >
-                              {deletingId === position.id ? (
-                                <Loader2 className="size-4 animate-spin" />
-                              ) : (
-                                <Trash2 className="size-4" />
-                              )}
-                            </IconButton>
-                          </div>
-                        </td>
-                      </tr>
-                      {isExpanded ? (
-                        <tr>
-                          <td className="px-4 pb-4" colSpan={9}>
-                            <PositionLotsPanel
-                              accountCurrency={accountCurrency}
-                              analysis={analysis}
-                              deletingLotId={deletingLotId}
-                              lotForms={lotForms}
-                              onDeleteLot={onDeleteLot}
-                              onLotFormChange={onLotFormChange}
-                              onSaveLot={onSaveLot}
-                              savingLotId={savingLotId}
-                            />
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="space-y-2 p-3 lg:hidden">
-            {positions.map((analysis) => {
-              const position = analysis.position;
-              const instrumentCurrency = position.instrumentCurrency;
-              const isExpanded = expandedPositionId === position.id;
-
-              return (
-                <article
-                  className="rounded-lg border border-white/8 bg-white/[0.025] p-3"
-                  key={position.id}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-semibold text-white">{position.symbol}</p>
-                        <span className="rounded-md border border-white/10 px-2 py-0.5 text-xs text-slate-300">
-                          {directionLabel(position.direction)}
-                        </span>
-                        <StatusBadge status={analysis.riskBadge} />
-                      </div>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {formatNumber(position.quantity, 2)} shares · entry{" "}
-                        {formatCurrency(position.entryPrice, instrumentCurrency)}
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <IconButton
-                        label={`${isExpanded ? "Скрий" : "Покажи"} лотове за ${position.symbol}`}
-                        onClick={() => onTogglePosition(position)}
-                      >
-                        <ChevronDown
-                          className={cn("size-4 transition", isExpanded && "rotate-180")}
-                        />
-                      </IconButton>
-                      <IconButton label={`Добави лот към ${position.symbol}`} onClick={() => onAddLot(position)}>
-                        <PlusCircle className="size-4" />
-                      </IconButton>
-                      <IconButton label={`Продай от ${position.symbol}`} onClick={() => onSell(position)} tone="green">
-                        <DollarSign className="size-4" />
-                      </IconButton>
-                      <IconButton label={`Редактирай ${position.symbol}`} onClick={() => onEdit(position)}>
-                        <Edit3 className="size-4" />
-                      </IconButton>
-                      <IconButton
-                        disabled={deletingId === position.id}
-                        label={`Изтрий ${position.symbol}`}
-                        onClick={() => onDelete(position)}
-                        tone="red"
-                      >
-                        {deletingId === position.id ? (
-                          <Loader2 className="size-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="size-4" />
-                        )}
-                      </IconButton>
-                    </div>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                    <div>
-                      <p className="text-slate-500">Value</p>
-                      <p className="mt-0.5 text-slate-200">
-                        {formatCurrency(analysis.positionValueAccount, accountCurrency)}
-                      </p>
-                      <p className="text-[11px] text-slate-500">
-                        {formatCurrency(analysis.positionValueInstrument, instrumentCurrency)} ·{" "}
-                        {formatPercent(analysis.allocationPercent)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500">Margin N/R</p>
-                      <p className="mt-0.5 text-slate-200">
-                        {formatCurrency(analysis.normalUsedMargin, accountCurrency)} /{" "}
-                        {formatCurrency(analysis.temporaryUsedMargin, accountCurrency)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500">Current</p>
-                      <p className="mt-0.5 text-slate-200">
-                        {position.currentPrice == null
-                          ? "entry"
-                          : formatCurrency(analysis.basePrice, instrumentCurrency)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-slate-500">Auto-close N/R</p>
-                      <AutoCloseDisplay
-                        accountCurrency={accountCurrency}
-                        align="left"
-                        instrumentCurrency={instrumentCurrency}
-                        lossAccount={analysis.totalLossToRiskStopAccount}
-                        range={analysis.autoCloseRangeRisk}
-                      />
-                    </div>
-                  </div>
-                  {analysis.warnings.length > 0 ? (
-                    <p className="mt-3 text-xs leading-5 text-rose-200">
-                      {analysis.warnings.join(" ")}
-                    </p>
-                  ) : null}
-                  {isExpanded ? (
-                    <div className="mt-3">
-                      <PositionLotsPanel
-                        accountCurrency={accountCurrency}
-                        analysis={analysis}
-                        deletingLotId={deletingLotId}
-                        lotForms={lotForms}
-                        onDeleteLot={onDeleteLot}
-                        onLotFormChange={onLotFormChange}
-                        onSaveLot={onSaveLot}
-                        savingLotId={savingLotId}
-                      />
-                    </div>
-                  ) : null}
-                </article>
-              );
-            })}
-          </div>
-        </>
-      )}
-    </section>
-  );
-}
-
 function RiskMetricRow({
   label,
   value,
@@ -2221,6 +1818,7 @@ function PositionCards({
   accountCurrency,
   openHelp,
   onToggleHelp,
+  readOnly = false,
   onEdit,
   onDelete,
   onAddLot,
@@ -2239,6 +1837,7 @@ function PositionCards({
   accountCurrency: string;
   openHelp: HelpTopic | null;
   onToggleHelp: (topic: HelpTopic) => void;
+  readOnly?: boolean;
   onEdit: (position: SavedPortfolioPosition) => void;
   onDelete: (position: SavedPortfolioPosition) => void;
   onAddLot: (position: SavedPortfolioPosition) => void;
@@ -2256,7 +1855,9 @@ function PositionCards({
   if (positions.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-white/10 bg-white/[0.015] px-4 py-8 text-center text-sm text-slate-400">
-        Все още няма позиции. Използвай “Нова позиция”, за да добавиш първата.
+        {readOnly
+          ? "Няма live позиции в последния MT5 snapshot."
+          : "Все още няма позиции. Използвай “Нова позиция”, за да добавиш първата."}
       </div>
     );
   }
@@ -2274,204 +1875,70 @@ function PositionCards({
         />
       ) : null}
 
-      <div className="hidden overflow-x-auto lg:block">
-        <table className="w-full min-w-[1040px] text-left text-sm">
-          <thead className="border-b border-white/10 text-[11px] uppercase tracking-wide text-slate-500">
-            <tr>
-              <th className="px-4 py-3 font-bold">Symbol</th>
-              <th className="px-3 py-3 font-bold">Side</th>
-              <th className="px-3 py-3 text-right font-bold">Qty</th>
-              <th className="px-3 py-3 text-right font-bold">Value</th>
-              <th className="px-3 py-3 text-right font-bold">
-                <HelpLabel
-                  align="right"
-                  label="Margin"
-                  onToggleHelp={onToggleHelp}
-                  openHelp={openHelp}
-                  topic="margin"
-                />
-              </th>
-              <th className="px-3 py-3 text-right font-bold">
-                <HelpLabel
-                  align="right"
-                  label="Auto-close"
-                  onToggleHelp={onToggleHelp}
-                  openHelp={openHelp}
-                  topic="autoClose"
-                />
-              </th>
-              <th className="px-3 py-3 font-bold">
-                <HelpLabel
-                  label="Risk"
-                  onToggleHelp={onToggleHelp}
-                  openHelp={openHelp}
-                  topic="risk"
-                />
-              </th>
-              <th className="px-4 py-3 text-right font-bold">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/8">
-            {positions.map((analysis) => {
-              const position = analysis.position;
-              const lots = position.lots ?? [];
-              const isExpanded = expandedPositionId === position.id;
-              const instrumentCurrency = position.instrumentCurrency;
-
-              return (
-                <Fragment key={position.id}>
-                  <tr className="align-middle text-slate-300">
-                    <td className="px-4 py-4">
-                      <button
-                        className="group text-left"
-                        onClick={() => onTogglePosition(position)}
-                        type="button"
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className="text-base font-black text-white group-hover:text-cyan-100">
-                            {position.symbol}
-                          </span>
-                          <ChevronDown
-                            className={cn(
-                              "size-4 text-slate-500 transition group-hover:text-slate-200",
-                              isExpanded && "rotate-180",
-                            )}
-                          />
-                        </span>
-                        <span className="mt-1 block text-xs text-slate-500">
-                          {lots.length} {lots.length === 1 ? "лот" : "лота"} ·{" "}
-                          {formatPercent(analysis.allocationPercent)} allocation
-                        </span>
-                      </button>
-                    </td>
-                    <td className="px-3 py-4">
-                      <span className="inline-flex min-w-20 justify-center rounded-md border border-emerald-200/20 bg-emerald-300/10 px-2 py-1 text-xs font-black text-emerald-200">
-                        {directionLabel(position.direction)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-4 text-right font-bold text-white">
-                      {formatNumber(position.quantity, 2)}
-                    </td>
-                    <td className="px-3 py-4 text-right">
-                      <p className="font-bold text-white">
-                        {formatCurrency(analysis.positionValueAccount, accountCurrency)}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {formatCurrency(analysis.positionValueInstrument, instrumentCurrency)}
-                      </p>
-                    </td>
-                    <td className="px-3 py-4 text-right">
-                      <p className="font-bold text-white">
-                        {formatCurrency(analysis.normalUsedMargin, accountCurrency)}
-                      </p>
-                      <p className="text-xs font-semibold text-amber-200">
-                        {formatCurrency(analysis.temporaryUsedMargin, accountCurrency)} risk
-                      </p>
-                    </td>
-                    <td className="px-3 py-4">
-                      <AutoCloseDisplay
-                        accountCurrency={accountCurrency}
-                        instrumentCurrency={instrumentCurrency}
-                        lossAccount={analysis.totalLossToRiskStopAccount}
-                        range={analysis.autoCloseRangeRisk}
-                      />
-                    </td>
-                    <td className="px-3 py-4">
-                      <StatusBadge status={analysis.riskBadge} />
-                    </td>
-                    <td className="px-4 py-4">
-                      <div className="flex justify-end gap-2">
-                        <ActionPill onClick={() => onAddLot(position)} tone="blue">
-                          <PlusCircle className="size-4" />
-                          Лот
-                        </ActionPill>
-                        <ActionPill onClick={() => onSell(position)} tone="green">
-                          <DollarSign className="size-4" />
-                          Продай
-                        </ActionPill>
-                        <IconButton label={`Редактирай ${position.symbol}`} onClick={() => onEdit(position)}>
-                          <Edit3 className="size-4" />
-                        </IconButton>
-                        <IconButton
-                          disabled={deletingId === position.id}
-                          label={`Изтрий ${position.symbol}`}
-                          onClick={() => onDelete(position)}
-                          tone="red"
-                        >
-                          {deletingId === position.id ? (
-                            <Loader2 className="size-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="size-4" />
-                          )}
-                        </IconButton>
-                      </div>
-                    </td>
-                  </tr>
-                  {isExpanded ? (
-                    <tr>
-                      <td className="px-4 pb-4" colSpan={8}>
-                        <PositionLotsPanel
-                          accountCurrency={accountCurrency}
-                          analysis={analysis}
-                          deletingLotId={deletingLotId}
-                          lotForms={lotForms}
-                          onDeleteLot={onDeleteLot}
-                          onLotFormChange={onLotFormChange}
-                          onSaveLot={onSaveLot}
-                          savingLotId={savingLotId}
-                        />
-                      </td>
-                    </tr>
-                  ) : null}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="space-y-2 p-3 lg:hidden">
+      <div className="space-y-3 p-3">
         {positions.map((analysis) => {
           const position = analysis.position;
           const lots = position.lots ?? [];
           const isExpanded = expandedPositionId === position.id;
           const instrumentCurrency = position.instrumentCurrency;
+          const isRealMt5Position = position.id.startsWith("mt5:");
+          const isPlanPosition = position.scenarioSource === "manual_plan";
+          const canMutate = !readOnly && !isRealMt5Position;
 
           return (
             <article
               className="rounded-lg border border-white/10 bg-white/[0.025] p-3"
               key={position.id}
             >
-              <div className="flex items-start justify-between gap-3">
-                <button className="min-w-0 text-left" onClick={() => onTogglePosition(position)} type="button">
-                  <div className="flex flex-wrap items-center gap-2">
+              <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(150px,1.35fr)_minmax(78px,0.55fr)_minmax(78px,0.5fr)_minmax(130px,0.95fr)_minmax(130px,0.95fr)_minmax(190px,1.15fr)_minmax(78px,0.5fr)]">
+                <button
+                  className="min-w-0 text-left"
+                  onClick={() => {
+                    if (canMutate) {
+                      onTogglePosition(position);
+                    }
+                  }}
+                  type="button"
+                >
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <p className="font-black text-white">{position.symbol}</p>
+                    {isRealMt5Position ? (
+                      <span className="rounded-md border border-cyan-200/20 bg-cyan-300/10 px-2 py-0.5 text-[10px] font-bold uppercase text-cyan-100">
+                        Real MT5
+                      </span>
+                    ) : null}
+                    {isPlanPosition ? (
+                      <span className="rounded-md border border-blue-200/20 bg-blue-300/10 px-2 py-0.5 text-[10px] font-bold uppercase text-blue-100">
+                        Plan
+                      </span>
+                    ) : null}
                     <span className="rounded-md border border-emerald-200/20 bg-emerald-300/10 px-2 py-0.5 text-xs font-bold text-emerald-200">
                       {directionLabel(position.direction)}
                     </span>
-                    <StatusBadge status={analysis.riskBadge} />
+                    {canMutate ? (
+                      <ChevronDown className={cn("size-4 transition", isExpanded && "rotate-180")} />
+                    ) : null}
                   </div>
                   <p className="mt-1 text-xs text-slate-500">
                     {lots.length} {lots.length === 1 ? "лот" : "лота"} ·{" "}
-                    {formatPercent(analysis.allocationPercent)} allocation
+                    {formatPercent(analysis.allocationPercent)} allocation · current{" "}
+                    {formatCurrency(analysis.basePrice, instrumentCurrency)}
                   </p>
                 </button>
-                <IconButton
-                  label={`${isExpanded ? "Скрий" : "Покажи"} лотовете за ${position.symbol}`}
-                  onClick={() => onTogglePosition(position)}
-                >
-                  <ChevronDown className={cn("size-4 transition", isExpanded && "rotate-180")} />
-                </IconButton>
-              </div>
 
-              <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
                 <div>
-                  <p className="text-slate-500">Qty</p>
-                  <p className="font-semibold text-white">{formatNumber(position.quantity, 2)}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Side</p>
+                  <span className="mt-1 inline-flex min-w-16 justify-center rounded-md border border-emerald-200/20 bg-emerald-300/10 px-2 py-1 text-xs font-black text-emerald-200">
+                    {directionLabel(position.direction)}
+                  </span>
                 </div>
                 <div>
-                  <p className="text-slate-500">Value</p>
-                  <p className="font-semibold text-white">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Qty</p>
+                  <p className="mt-1 font-semibold text-white">{formatNumber(position.quantity, 2)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Value</p>
+                  <p className="mt-1 font-semibold text-white">
                     {formatCurrency(analysis.positionValueAccount, accountCurrency)}
                   </p>
                   <p className="text-slate-500">
@@ -2479,13 +1946,30 @@ function PositionCards({
                   </p>
                 </div>
                 <div>
-                  <p className="text-slate-500">Margin risk</p>
-                  <p className="font-semibold text-amber-200">
-                    {formatCurrency(analysis.temporaryUsedMargin, accountCurrency)}
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                    <HelpLabel
+                      label="Margin"
+                      onToggleHelp={onToggleHelp}
+                      openHelp={openHelp}
+                      topic="margin"
+                    />
+                  </p>
+                  <p className="mt-1 font-semibold text-white">
+                    {formatCurrency(analysis.normalUsedMargin, accountCurrency)}
+                  </p>
+                  <p className="text-xs font-semibold text-amber-200">
+                    {formatCurrency(analysis.temporaryUsedMargin, accountCurrency)} risk
                   </p>
                 </div>
                 <div>
-                  <p className="text-slate-500">Auto-close</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                    <HelpLabel
+                      label="Auto-close"
+                      onToggleHelp={onToggleHelp}
+                      openHelp={openHelp}
+                      topic="autoClose"
+                    />
+                  </p>
                   <AutoCloseDisplay
                     accountCurrency={accountCurrency}
                     align="left"
@@ -2494,35 +1978,50 @@ function PositionCards({
                     range={analysis.autoCloseRangeRisk}
                   />
                 </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                    <HelpLabel
+                      label="Risk"
+                      onToggleHelp={onToggleHelp}
+                      openHelp={openHelp}
+                      topic="risk"
+                    />
+                  </p>
+                  <div className="mt-1">
+                    <StatusBadge status={analysis.riskBadge} />
+                  </div>
+                </div>
               </div>
 
-              <div className="mt-3 flex flex-wrap gap-2">
-                <ActionPill onClick={() => onAddLot(position)} tone="blue">
-                  <PlusCircle className="size-4" />
-                  Лот
-                </ActionPill>
-                <ActionPill onClick={() => onSell(position)} tone="green">
-                  <DollarSign className="size-4" />
-                  Продай
-                </ActionPill>
-                <IconButton label={`Редактирай ${position.symbol}`} onClick={() => onEdit(position)}>
-                  <Edit3 className="size-4" />
-                </IconButton>
-                <IconButton
-                  disabled={deletingId === position.id}
-                  label={`Изтрий ${position.symbol}`}
-                  onClick={() => onDelete(position)}
-                  tone="red"
-                >
-                  {deletingId === position.id ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="size-4" />
-                  )}
-                </IconButton>
-              </div>
+              {canMutate ? (
+                <div className="mt-3 flex flex-wrap justify-end gap-2 border-t border-white/8 pt-3">
+                  <ActionPill onClick={() => onAddLot(position)} tone="blue">
+                    <PlusCircle className="size-4" />
+                    Лот
+                  </ActionPill>
+                  <ActionPill onClick={() => onSell(position)} tone="green">
+                    <DollarSign className="size-4" />
+                    Продай
+                  </ActionPill>
+                  <IconButton label={`Редактирай ${position.symbol}`} onClick={() => onEdit(position)}>
+                    <Edit3 className="size-4" />
+                  </IconButton>
+                  <IconButton
+                    disabled={deletingId === position.id}
+                    label={`Изтрий ${position.symbol}`}
+                    onClick={() => onDelete(position)}
+                    tone="red"
+                  >
+                    {deletingId === position.id ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="size-4" />
+                    )}
+                  </IconButton>
+                </div>
+              ) : null}
 
-              {isExpanded ? (
+              {isExpanded && canMutate ? (
                 <div className="mt-3">
                   <PositionLotsPanel
                     accountCurrency={accountCurrency}
@@ -2544,7 +2043,53 @@ function PositionCards({
   );
 }
 
-export function PortfolioRiskManager() {
+function LiveMt5ConnectionPrompt({
+  loading,
+  error,
+  onOpenMt5Setup,
+}: {
+  loading: boolean;
+  error: string | null;
+  onOpenMt5Setup?: () => void;
+}) {
+  return (
+    <section className="rounded-xl border border-white/10 bg-[#0b1322]/80 p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="max-w-2xl">
+          <div className="flex items-center gap-2">
+            {loading ? (
+              <Loader2 className="size-5 animate-spin text-slate-300" />
+            ) : (
+              <WifiOff className="size-5 text-rose-100" />
+            )}
+            <h3 className="text-base font-bold text-white">MT5 Live не е свързан</h3>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-slate-400">
+            Пусни MT5 терминала и ForexSiteConnectorEA на една графика. Когато сайтът получи
+            snapshot, тук автоматично ще се появят реалните позиции и live risk анализът.
+          </p>
+          {error ? <p className="mt-3 text-sm text-rose-100">{error}</p> : null}
+        </div>
+        <button
+          className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-300/20 bg-emerald-400/12 px-3 py-2 text-sm font-semibold text-emerald-50 transition hover:bg-emerald-400/18 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={!onOpenMt5Setup}
+          onClick={onOpenMt5Setup}
+          type="button"
+        >
+          <Wifi className="size-4" />
+          Отвори MT5 Live настройките
+        </button>
+      </div>
+    </section>
+  );
+}
+
+export function PortfolioRiskManager({
+  mode,
+  onModeChange,
+  onOpenMt5Setup,
+}: PortfolioRiskManagerProps = {}) {
+  const [internalMode, setInternalMode] = useState<PortfolioRiskMode>("manual");
   const [profileForm, setProfileForm] = useState<ProfileForm>(
     profileToForm(getDefaultAccountRiskProfile()),
   );
@@ -2561,7 +2106,6 @@ export function PortfolioRiskManager() {
   const [uniformDrop, setUniformDrop] = useState("20");
   const [crashPrices, setCrashPrices] = useState<Record<string, string>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [stressOpen, setStressOpen] = useState(false);
   const [openHelp, setOpenHelp] = useState<HelpTopic | null>(null);
   const [activeWorkbenchTab, setActiveWorkbenchTab] = useState<PortfolioWorkbenchTab>("positions");
   const [positionEditorOpen, setPositionEditorOpen] = useState(false);
@@ -2571,36 +2115,109 @@ export function PortfolioRiskManager() {
   const [deletingLotId, setDeletingLotId] = useState<string | null>(null);
   const [addLotTarget, setAddLotTarget] = useState<SavedPortfolioPosition | null>(null);
   const [sellTarget, setSellTarget] = useState<SavedPortfolioPosition | null>(null);
+  const [mt5Latest, setMt5Latest] = useState<Mt5LatestState>({
+    status: "idle",
+    data: null,
+    error: null,
+  });
+  const [mt5Refreshing, setMt5Refreshing] = useState(false);
 
+  const currentMode = mode ?? internalMode;
+  const isLiveMode = currentMode === "live";
   const profile = useMemo(() => formToProfile(profileForm), [profileForm]);
-  const portfolio = useMemo(() => calculatePortfolioRisk(profile, positions), [profile, positions]);
+  const mt5Scenario = useMemo<Mt5PortfolioRiskScenario | null>(() => {
+    const snapshot = mt5Latest.status === "loaded" ? mt5Latest.data.snapshot : null;
+    return buildMt5PortfolioRiskScenario(snapshot, positions, profile);
+  }, [mt5Latest, positions, profile]);
+  const liveMt5Data = mt5Scenario;
+  const manualUsesLiveBaseline = !isLiveMode && Boolean(mt5Scenario);
+  const activeProfile = useMemo(
+    () => (isLiveMode || manualUsesLiveBaseline ? mt5Scenario?.profile ?? profile : profile),
+    [isLiveMode, manualUsesLiveBaseline, mt5Scenario, profile],
+  );
+  const activePositions = useMemo(
+    () => {
+      if (isLiveMode) {
+        return mt5Scenario?.livePositions ?? [];
+      }
+
+      if (manualUsesLiveBaseline) {
+        return mt5Scenario?.combinedScenarioPositions ?? [];
+      }
+
+      return positions;
+    },
+    [isLiveMode, manualUsesLiveBaseline, mt5Scenario, positions],
+  );
+  const activeBrokerOptions = useMemo(
+    () =>
+      mt5Scenario && (isLiveMode || manualUsesLiveBaseline)
+        ? {
+            baselinePositionIds: mt5Scenario.livePositions.map((position) => position.id),
+            brokerBaseline: mt5Scenario.brokerBaseline,
+          }
+        : {},
+    [isLiveMode, manualUsesLiveBaseline, mt5Scenario],
+  );
+  const portfolio = useMemo(
+    () => calculatePortfolioRisk(activeProfile, activePositions, activeBrokerOptions),
+    [activeBrokerOptions, activeProfile, activePositions],
+  );
   const draftPosition = useMemo(() => formToPosition(positionForm), [positionForm]);
   const previewPortfolio = useMemo(() => {
     if (!previewRequested) {
       return null;
     }
 
-    const nextPositions = editingId
-      ? positions.map((position) => (position.id === editingId ? { ...draftPosition, id: editingId } : position))
-      : [...positions, draftPosition];
+    const editablePositions = manualUsesLiveBaseline
+      ? mt5Scenario?.manualPlanPositions ?? []
+      : positions;
+    const nextEditablePositions = editingId
+      ? editablePositions.map((position) =>
+          position.id === editingId ? { ...draftPosition, id: editingId } : position,
+        )
+      : [...editablePositions, draftPosition];
+    const nextPositions = manualUsesLiveBaseline
+      ? [...(mt5Scenario?.livePositions ?? []), ...nextEditablePositions]
+      : nextEditablePositions;
 
-    return calculatePortfolioRisk(profile, nextPositions);
-  }, [draftPosition, editingId, positions, previewRequested, profile]);
+    return calculatePortfolioRisk(activeProfile, nextPositions, activeBrokerOptions);
+  }, [
+    activeBrokerOptions,
+    activeProfile,
+    draftPosition,
+    editingId,
+    manualUsesLiveBaseline,
+    mt5Scenario,
+    positions,
+    previewRequested,
+  ]);
   const uniformStress = useMemo(
-    () => calculateUniformDropStress(profile, positions, parseAmount(uniformDrop, 0)),
-    [positions, profile, uniformDrop],
+    () =>
+      calculateUniformDropStress(
+        activeProfile,
+        activePositions,
+        parseAmount(uniformDrop, 0),
+        activeBrokerOptions,
+      ),
+    [activeBrokerOptions, activePositions, activeProfile, uniformDrop],
   );
   const quickStress20 = useMemo(
-    () => calculateUniformDropStress(profile, positions, 20),
-    [positions, profile],
+    () => calculateUniformDropStress(activeProfile, activePositions, 20, activeBrokerOptions),
+    [activeBrokerOptions, activePositions, activeProfile],
   );
   const customStress = useMemo(() => {
     const parsedCrashPrices = Object.fromEntries(
-      positions.map((position) => [getPositionKey(position), parseAmount(crashPrices[getPositionKey(position)] ?? "", Number.NaN)]),
+      activePositions.map((position) => [getPositionKey(position), parseAmount(crashPrices[getPositionKey(position)] ?? "", Number.NaN)]),
     );
 
-    return calculateCustomCrashStress(profile, positions, parsedCrashPrices);
-  }, [crashPrices, positions, profile]);
+    return calculateCustomCrashStress(
+      activeProfile,
+      activePositions,
+      parsedCrashPrices,
+      activeBrokerOptions,
+    );
+  }, [activeBrokerOptions, activePositions, activeProfile, crashPrices]);
 
   useEffect(() => {
     let isMounted = true;
@@ -2645,6 +2262,59 @@ export function PortfolioRiskManager() {
       isMounted = false;
     };
   }, []);
+
+  const loadMt5Latest = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setMt5Refreshing(true);
+      setMt5Latest((current) =>
+        current.status === "loaded" ? current : { status: "loading", data: null, error: null },
+      );
+    }
+
+    try {
+      const response = await fetch("/api/mt5/latest", { cache: "no-store" });
+      const data = (await response.json()) as Mt5LatestResponse | { ok: false; message?: string };
+
+      if (!response.ok || !data.ok) {
+        throw new Error("message" in data ? data.message : "MT5 latest failed.");
+      }
+
+      setMt5Latest({ status: "loaded", data, error: null });
+    } catch (loadError) {
+      setMt5Latest({
+        status: "error",
+        data: null,
+        error: loadError instanceof Error ? loadError.message : String(loadError),
+      });
+    } finally {
+      if (!options?.silent) {
+        setMt5Refreshing(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => {
+      void loadMt5Latest();
+    }, 0);
+    const interval = window.setInterval(() => {
+      void loadMt5Latest({ silent: true });
+    }, 10000);
+
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(interval);
+    };
+  }, [loadMt5Latest]);
+
+  function changeMode(nextMode: PortfolioRiskMode) {
+    setInternalMode(nextMode);
+    onModeChange?.(nextMode);
+    setSettingsOpen(false);
+    setPositionEditorOpen(false);
+    setEditingId(null);
+    setPreviewRequested(false);
+  }
 
   function updateProfileField(field: keyof ProfileForm, value: string) {
     setProfileForm((current) => ({ ...current, [field]: value }));
@@ -2907,12 +2577,15 @@ export function PortfolioRiskManager() {
   const savedPortfolio = portfolio.ok ? portfolio : null;
   const accountCurrency = savedPortfolio?.summary.accountCurrency ?? profile.accountCurrency;
   const accountLoadPercent = savedPortfolio ? getAccountLoadPercent(savedPortfolio) : 0;
-  const accountLoadMarkerPct = clampPercent(accountLoadPercent);
-  const accountLoadLabelPct = Math.min(92, Math.max(8, accountLoadMarkerPct));
-  const accountLoadTone = getAccountLoadTone(accountLoadPercent);
   const capacityTo50 = savedPortfolio ? getCapacityToLoad(savedPortfolio, 50) : 0;
   const capacityTo100 = savedPortfolio ? getCapacityToLoad(savedPortfolio, 100) : 0;
   const quickStressLoss20 = quickStress20.ok ? quickStress20.totalLossAccount : Number.NaN;
+  const mt5Status = mt5Latest.status === "loaded" ? mt5Latest.data.status : "offline";
+  const liveConnectionLabel = liveMt5Data
+    ? `${liveMt5Data.server} · ${maskMt5AccountLogin(liveMt5Data.accountLogin)}`
+    : "няма live snapshot";
+  const showBrokerMetrics = isLiveMode || manualUsesLiveBaseline;
+  const exactLiveMetrics = isLiveMode ? liveMt5Data?.liveMetrics : null;
 
   function handleDrawerSaved(updatedPositions: SavedPortfolioPosition[]) {
     setPositions(updatedPositions);
@@ -2921,154 +2594,78 @@ export function PortfolioRiskManager() {
 
   return (
     <div className="space-y-4">
-      <section className="hidden rounded-lg border border-white/10 bg-[#0b1322]/80">
-        <div className="flex flex-col gap-4 border-b border-white/8 px-4 py-3 lg:flex-row lg:items-end lg:justify-between">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-base font-semibold text-white">Portfolio Risk</h2>
-              {savedPortfolio ? <StatusBadge status={savedPortfolio.summary.riskStatus} /> : null}
-            </div>
-            <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">
-              Данните са по логнат потребител в Supabase. Цени, FX курс и broker настройки се
-              въвеждат ръчно; няма live връзка с брокер.
-            </p>
-            <div className="mt-3 space-y-2">
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-slate-500">Account load:</span>
-                <span
-                  className={cn(
-                    "font-semibold",
-                    accountLoadTone === "emerald" && "text-emerald-100",
-                    accountLoadTone === "amber" && "text-amber-100",
-                    accountLoadTone === "orange" && "text-orange-100",
-                    accountLoadTone === "rose" && "text-rose-100",
-                  )}
-                >
-                  {formatPercent(accountLoadPercent)}
-                </span>
-                <span className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[11px] text-slate-400">
-                  {getAccountLoadLabel(accountLoadPercent)}
-                </span>
-              </div>
-              <div className="relative pt-6">
-                <span
-                  className="absolute top-0 -translate-x-1/2 rounded-md border border-white/10 bg-slate-950/80 px-2 py-0.5 text-[10px] font-medium text-slate-200"
-                  style={{ left: `${accountLoadLabelPct}%` }}
-                >
-                  Ти си тук
-                </span>
-                <div className="relative h-2 overflow-hidden rounded-full bg-slate-950/55">
-                  <div className="flex h-full">
-                    <span className="h-full basis-[20%] bg-emerald-300/80" />
-                    <span className="h-full basis-[30%] bg-amber-300/85" />
-                    <span className="h-full flex-1 bg-orange-300/85" />
-                  </div>
-                  <span className="absolute right-0 top-0 h-full w-1 bg-rose-300/90" />
-                  <span
-                    className="absolute top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.55)]"
-                    style={{ left: `${accountLoadMarkerPct}%` }}
-                  />
-                </div>
-                <div className="relative mt-1 h-4 text-[10px] text-slate-500">
-                  <span className="absolute left-0">0%</span>
-                  <span className="absolute left-[20%] -translate-x-1/2">20%</span>
-                  <span className="absolute left-1/2 -translate-x-1/2">50%</span>
-                  <span className="absolute right-0">100%</span>
-                </div>
-              </div>
-            </div>
-          </div>
+      <div className="flex flex-col gap-3 rounded-xl border border-white/10 bg-[#0b1322]/80 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="grid grid-cols-2 gap-1 rounded-lg border border-white/10 bg-slate-950/35 p-1">
+          {[
+            ["manual", "Ръчен"],
+            ["live", "Live MT5"],
+          ].map(([nextMode, label]) => {
+            const isActive = currentMode === nextMode;
 
-          <div className="flex flex-wrap items-end gap-2">
-            <Field
-              className="w-36"
-              label="Add funds"
-              onChange={(value) => updateProfileField("addedFundsSimulation", value)}
-              type="number"
-              value={profileForm.addedFundsSimulation}
-            />
-            <button
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 bg-white/[0.04] px-3 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={saving}
-              onClick={() => void saveProfile()}
-              type="button"
-            >
-              {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-              Save
-            </button>
-          </div>
+            return (
+              <button
+                aria-pressed={isActive}
+                className={cn(
+                  "rounded-md px-3 py-2 text-sm font-semibold transition",
+                  isActive
+                    ? "bg-blue-500 text-white shadow-lg shadow-blue-950/25"
+                    : "text-slate-400 hover:bg-white/[0.05] hover:text-slate-100",
+                )}
+                key={nextMode}
+                onClick={() => changeMode(nextMode as PortfolioRiskMode)}
+                type="button"
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
 
-        {savedPortfolio ? (
-          <>
-            <div className="grid divide-y divide-white/8 sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-6">
-              <SummaryCell
-                helpTopic="equity"
-                label="Equity"
-                onToggleHelp={toggleHelp}
-                openHelp={openHelp}
-                value={formatCurrency(savedPortfolio.summary.equity, accountCurrency)}
-              />
-              <SummaryCell
-                helpTopic="freeMargin"
-                label="Free margin"
-                onToggleHelp={toggleHelp}
-                openHelp={openHelp}
-                tone={savedPortfolio.summary.temporary.freeMargin >= 0 ? "green" : "red"}
-                value={formatCurrency(savedPortfolio.summary.temporary.freeMargin, accountCurrency)}
-              />
-              <SummaryCell
-                helpTopic="exposure"
-                label="Exposure"
-                onToggleHelp={toggleHelp}
-                openHelp={openHelp}
-                value={formatCurrency(
-                  savedPortfolio.summary.totalPositionValueAccount,
-                  accountCurrency,
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          {isLiveMode ? (
+            <>
+              <span
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-full border px-3 py-1 font-semibold",
+                  mt5StatusTone(mt5Status),
                 )}
-              />
-              <SummaryCell
-                helpTopic="riskMarginLevel"
-                label="Risk margin level"
-                helpAlign="right"
-                onToggleHelp={toggleHelp}
-                openHelp={openHelp}
-                tone={savedPortfolio.summary.temporary.marginLevel >= 200 ? "green" : "amber"}
-                value={formatPercent(savedPortfolio.summary.temporary.marginLevel)}
-              />
-              <SummaryCell
-                helpTopic="unrealizedPnl"
-                label="Unrealized P/L"
-                helpAlign="right"
-                onToggleHelp={toggleHelp}
-                openHelp={openHelp}
-                tone={savedPortfolio.summary.totalUnrealizedPnLAccount >= 0 ? "green" : "red"}
-                value={formatCurrency(
-                  savedPortfolio.summary.totalUnrealizedPnLAccount,
-                  accountCurrency,
+              >
+                {mt5Status === "live" ? <Wifi className="size-3.5" /> : null}
+                {mt5Status !== "live" ? <WifiOff className="size-3.5" /> : null}
+                {mt5StatusLabel(mt5Status)}
+              </span>
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-slate-300">
+                <Server className="size-3.5" />
+                {liveConnectionLabel}
+              </span>
+              {liveMt5Data ? (
+                <span className="text-slate-500">
+                  Last sync {formatDateTime(liveMt5Data.receivedAt)}
+                </span>
+              ) : null}
+              <button
+                className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-slate-200 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={mt5Refreshing}
+                onClick={() => void loadMt5Latest()}
+                type="button"
+              >
+                {mt5Refreshing ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-3.5" />
                 )}
-              />
-              <SummaryCell
-                helpTopic="stopOutBuffer"
-                label="Загуба до stop-out"
-                helpAlign="right"
-                onToggleHelp={toggleHelp}
-                openHelp={openHelp}
-                tone={savedPortfolio.summary.temporary.maxLossBeforeStopOut >= 0 ? "green" : "red"}
-                value={formatCurrency(
-                  savedPortfolio.summary.temporary.maxLossBeforeStopOut,
-                  accountCurrency,
-                )}
-              />
-            </div>
-            {savedPortfolio.summary.warnings.length > 0 ? (
-              <div className="border-t border-rose-200/15 px-4 py-2 text-xs leading-5 text-rose-100">
-                {savedPortfolio.summary.warnings.join(" ")}
-              </div>
-            ) : null}
-          </>
-        ) : null}
-      </section>
+                Refresh
+              </button>
+            </>
+          ) : (
+            <span>
+              {manualUsesLiveBaseline
+                ? "Ръчният режим използва live MT5 акаунта + запазени планови позиции."
+                : "Ръчният режим използва запазените Portfolio Risk позиции."}
+            </span>
+          )}
+        </div>
+      </div>
 
       {loading ? (
         <div className="rounded-lg border border-white/10 bg-[#0b1322]/80 p-6 text-center text-slate-300">
@@ -3107,7 +2704,15 @@ export function PortfolioRiskManager() {
         </div>
       ) : null}
 
-      {savedPortfolio ? (
+      {isLiveMode && !liveMt5Data ? (
+        <LiveMt5ConnectionPrompt
+          error={mt5Latest.status === "error" ? mt5Latest.error : null}
+          loading={mt5Latest.status === "loading"}
+          onOpenMt5Setup={onOpenMt5Setup}
+        />
+      ) : null}
+
+      {savedPortfolio && (!isLiveMode || liveMt5Data) ? (
         <section className="overflow-hidden rounded-xl border border-white/10 bg-[#0b1322]/80 shadow-2xl shadow-black/20">
           <div className="flex items-center gap-2 border-b border-white/10 bg-white/[0.025] px-4 py-3">
             <span className="size-2.5 rounded-full bg-rose-400" />
@@ -3123,27 +2728,33 @@ export function PortfolioRiskManager() {
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-base font-bold text-white">Portfolio Risk</h2>
                 <span className="text-sm text-slate-500">
-                  {profileForm.brokerName || "Broker"} · {accountCurrency}
+                  {activeProfile.brokerName || "Broker"} · {accountCurrency}
                 </span>
               </div>
               <p className="mt-1 text-xs text-slate-500">
-                Управление на позиции, лотове, продажби и account load.
+                {isLiveMode
+                  ? "Live MT5 read-only анализ. Реални промени по сделките се правят само в MT5."
+                  : manualUsesLiveBaseline
+                    ? "Ръчен what-if план върху реалния MT5 акаунт. Плановите позиции не се пращат към MT5."
+                  : "Управление на позиции, лотове, продажби и account load."}
               </p>
             </div>
-            <button
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-blue-300/20 bg-blue-500 px-4 text-sm font-bold text-white transition hover:bg-blue-400"
-              onClick={() => {
-                setEditingId(null);
-                setPositionForm(emptyPositionForm());
-                setPreviewRequested(false);
-                setPositionEditorOpen(true);
-                setActiveWorkbenchTab("positions");
-              }}
-              type="button"
-            >
-              <Plus className="size-4" />
-              Нова позиция
-            </button>
+            {!isLiveMode ? (
+              <button
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-blue-300/20 bg-blue-500 px-4 text-sm font-bold text-white transition hover:bg-blue-400"
+                onClick={() => {
+                  setEditingId(null);
+                  setPositionForm(emptyPositionForm());
+                  setPreviewRequested(false);
+                  setPositionEditorOpen(true);
+                  setActiveWorkbenchTab("positions");
+                }}
+                type="button"
+              >
+                <Plus className="size-4" />
+                Нова позиция
+              </button>
+            ) : null}
           </div>
 
           <div className="grid gap-3 border-b border-white/10 p-4 sm:grid-cols-2 xl:grid-cols-5">
@@ -3153,25 +2764,38 @@ export function PortfolioRiskManager() {
               label="Equity"
               onToggleHelp={toggleHelp}
               openHelp={openHelp}
-              value={formatCurrency(savedPortfolio.summary.equity, accountCurrency)}
+              value={formatCurrency(
+                exactLiveMetrics?.equity ?? savedPortfolio.summary.equity,
+                accountCurrency,
+              )}
             />
             <KpiCard
               compact
               helpTopic="freeMargin"
               label="Free margin"
-              onToggleHelp={toggleHelp}
-              openHelp={openHelp}
-              tone={savedPortfolio.summary.temporary.freeMargin >= 0 ? "green" : "red"}
-              value={formatCurrency(savedPortfolio.summary.temporary.freeMargin, accountCurrency)}
+                onToggleHelp={toggleHelp}
+                openHelp={openHelp}
+                tone={
+                (exactLiveMetrics?.freeMargin ?? savedPortfolio.summary.temporary.freeMargin) >= 0
+                  ? "green"
+                  : "red"
+              }
+              value={formatCurrency(
+                exactLiveMetrics?.freeMargin ?? savedPortfolio.summary.temporary.freeMargin,
+                accountCurrency,
+              )}
             />
             <KpiCard
               compact
-              helpTopic="exposure"
-              label="Exposure"
+              helpTopic={showBrokerMetrics ? "margin" : "exposure"}
+              label={showBrokerMetrics ? "Margin" : "Exposure"}
               onToggleHelp={toggleHelp}
               openHelp={openHelp}
               value={formatCurrency(
-                savedPortfolio.summary.totalPositionValueAccount,
+                exactLiveMetrics?.margin ??
+                  (showBrokerMetrics
+                    ? savedPortfolio.summary.temporary.usedMargin
+                    : savedPortfolio.summary.totalPositionValueAccount),
                 accountCurrency,
               )}
             />
@@ -3179,11 +2803,17 @@ export function PortfolioRiskManager() {
               compact
               helpAlign="right"
               helpTopic="riskMarginLevel"
-              label="Risk margin level"
+              label={isLiveMode ? "Margin level" : "Risk margin level"}
               onToggleHelp={toggleHelp}
               openHelp={openHelp}
-              tone={savedPortfolio.summary.temporary.marginLevel >= 200 ? "green" : "amber"}
-              value={formatPercent(savedPortfolio.summary.temporary.marginLevel)}
+              tone={
+                (exactLiveMetrics?.marginLevel ?? savedPortfolio.summary.temporary.marginLevel) >= 200
+                  ? "green"
+                  : "amber"
+              }
+              value={formatPercent(
+                exactLiveMetrics?.marginLevel ?? savedPortfolio.summary.temporary.marginLevel,
+              )}
             />
             <KpiCard
               compact
@@ -3192,9 +2822,13 @@ export function PortfolioRiskManager() {
               label="Unrealized P/L"
               onToggleHelp={toggleHelp}
               openHelp={openHelp}
-              tone={savedPortfolio.summary.totalUnrealizedPnLAccount >= 0 ? "green" : "red"}
+              tone={
+                (exactLiveMetrics?.profit ?? savedPortfolio.summary.totalUnrealizedPnLAccount) >= 0
+                  ? "green"
+                  : "red"
+              }
               value={formatCurrency(
-                savedPortfolio.summary.totalUnrealizedPnLAccount,
+                exactLiveMetrics?.profit ?? savedPortfolio.summary.totalUnrealizedPnLAccount,
                 accountCurrency,
               )}
             />
@@ -3233,10 +2867,11 @@ export function PortfolioRiskManager() {
                       onTogglePosition={togglePositionDetails}
                       openHelp={openHelp}
                       positions={savedPortfolio.positions}
+                      readOnly={isLiveMode}
                       savingLotId={savingLotId}
                     />
 
-                    {positionEditorOpen ? (
+                    {positionEditorOpen && !isLiveMode ? (
                       <div className="rounded-lg border border-white/10 bg-slate-950/20 p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -3347,6 +2982,12 @@ export function PortfolioRiskManager() {
                           </button>
                         </div>
 
+                        {error ? (
+                          <div className="mt-3 rounded-md border border-rose-200/20 bg-rose-300/[0.08] px-3 py-2 text-sm leading-6 text-rose-100">
+                            {error}
+                          </div>
+                        ) : null}
+
                         {previewPortfolio ? (
                           <div className="mt-4 grid gap-2 rounded-md border border-white/8 bg-white/[0.018] p-3 text-xs sm:grid-cols-4">
                             {previewPortfolio.ok ? (
@@ -3415,8 +3056,8 @@ export function PortfolioRiskManager() {
                         <InfoHint text="Празно = текуща/входна цена" />
                       </div>
                       <div className="grid gap-3 sm:grid-cols-2">
-                        {positions.length > 0 ? (
-                          positions.map((position) => {
+                        {activePositions.length > 0 ? (
+                          activePositions.map((position) => {
                             const key = getPositionKey(position);
 
                             return (
@@ -3433,7 +3074,9 @@ export function PortfolioRiskManager() {
                           })
                         ) : (
                           <p className="text-sm text-slate-400">
-                            Добави позиции, за да въведеш crash prices.
+                            {isLiveMode
+                              ? "Няма live позиции за custom crash."
+                              : "Добави позиции, за да въведеш crash prices."}
                           </p>
                         )}
                       </div>
@@ -3470,30 +3113,34 @@ export function PortfolioRiskManager() {
                     {label}
                   </button>
                 ))}
-                <button
-                  className={cn(
-                    "rounded-md border px-3 py-2 text-sm font-semibold transition",
-                    settingsOpen
-                      ? "border-amber-200/25 bg-amber-300/10 text-amber-100"
-                      : "border-white/10 bg-white/[0.03] text-slate-400 hover:text-slate-100",
-                  )}
-                  onClick={() => setSettingsOpen((current) => !current)}
-                  type="button"
-                >
-                  Account settings
-                </button>
-                <button
-                  className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-400 hover:text-slate-100"
-                  onClick={() => {
-                    setSettingsOpen(true);
-                  }}
-                  type="button"
-                >
-                  Add funds симулация
-                </button>
+                {!isLiveMode ? (
+                  <>
+                    <button
+                      className={cn(
+                        "rounded-md border px-3 py-2 text-sm font-semibold transition",
+                        settingsOpen
+                          ? "border-amber-200/25 bg-amber-300/10 text-amber-100"
+                          : "border-white/10 bg-white/[0.03] text-slate-400 hover:text-slate-100",
+                      )}
+                      onClick={() => setSettingsOpen((current) => !current)}
+                      type="button"
+                    >
+                      Account settings
+                    </button>
+                    <button
+                      className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-400 hover:text-slate-100"
+                      onClick={() => {
+                        setSettingsOpen(true);
+                      }}
+                      type="button"
+                    >
+                      Add funds симулация
+                    </button>
+                  </>
+                ) : null}
               </div>
 
-              {settingsOpen ? (
+              {settingsOpen && !isLiveMode ? (
                 <div className="border-t border-white/10 p-4">
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     <Field
@@ -3566,336 +3213,6 @@ export function PortfolioRiskManager() {
           </div>
         </section>
       ) : null}
-
-      <div className="hidden">
-        <div className="min-w-0 space-y-4">
-          <PortfolioAllocationChart
-            accountCurrency={accountCurrency}
-            positions={savedPortfolio?.positions ?? []}
-          />
-
-          <PositionsTable
-            accountCurrency={accountCurrency}
-            deletingLotId={deletingLotId}
-            deletingId={deletingId}
-            expandedPositionId={expandedPositionId}
-            lotForms={lotForms}
-            onAddLot={(position) => setAddLotTarget(position)}
-            onDeleteLot={(position, lot) => void deleteLot(position, lot)}
-            onDelete={(position) => void deletePosition(position)}
-            onEdit={startEdit}
-            onLotFormChange={updateLotForm}
-            onSaveLot={(position, formKey, lot) => void saveLot(position, formKey, lot)}
-            onSell={(position) => setSellTarget(position)}
-            onToggleHelp={toggleHelp}
-            onTogglePosition={togglePositionDetails}
-            openHelp={openHelp}
-            positions={savedPortfolio?.positions ?? []}
-            savingLotId={savingLotId}
-          />
-
-          <ToolPanel
-            description={`${profileForm.brokerName || "Broker"} · ${profileForm.accountCurrency || "EUR"}`}
-            icon={<BriefcaseBusiness className="size-4" />}
-            onToggle={() => setSettingsOpen((current) => !current)}
-            open={settingsOpen}
-            title="Настройки на акаунта"
-          >
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              <Field
-                label="Account name"
-                onChange={(value) => updateProfileField("accountName", value)}
-                value={profileForm.accountName}
-              />
-              <Field
-                label="Broker"
-                onChange={(value) => updateProfileField("brokerName", value)}
-                value={profileForm.brokerName}
-              />
-              <Field
-                label="Balance"
-                onChange={(value) => updateProfileField("balance", value)}
-                type="number"
-                value={profileForm.balance}
-              />
-              <Field
-                label="Currency"
-                onChange={(value) => updateProfileField("accountCurrency", value)}
-                value={profileForm.accountCurrency}
-              />
-              <Field
-                label="Stop-out %"
-                onChange={(value) => updateProfileField("stopOutLevelPercent", value)}
-                type="number"
-                value={profileForm.stopOutLevelPercent}
-              />
-              <Field
-                label="Margin call %"
-                onChange={(value) => updateProfileField("marginCallLevelPercent", value)}
-                type="number"
-                value={profileForm.marginCallLevelPercent}
-              />
-              <Field
-                label="Normal leverage"
-                onChange={(value) => updateProfileField("normalFixedLeverage", value)}
-                type="number"
-                value={profileForm.normalFixedLeverage}
-              />
-              <Field
-                label="Risk leverage"
-                onChange={(value) => updateProfileField("temporaryFixedLeverage", value)}
-                type="number"
-                value={profileForm.temporaryFixedLeverage}
-              />
-              <Field
-                hint={`Колко ${profileForm.accountCurrency || "EUR"} е 1 USD.`}
-                label="FX USD"
-                onChange={(value) => updateProfileField("fxRateInstrumentToAccount", value)}
-                type="number"
-                value={profileForm.fxRateInstrumentToAccount}
-              />
-            </div>
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/8 pt-3">
-              <p className="max-w-2xl text-xs leading-5 text-slate-500">
-                Fixed leverage се настройва според продукта. Ако current price е празна, системата
-                използва entry price за планирана позиция.
-              </p>
-              <button
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 bg-white/[0.04] px-3 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={saving}
-                onClick={() => void saveProfile()}
-                type="button"
-              >
-                {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-                Save settings
-              </button>
-            </div>
-          </ToolPanel>
-
-          <ToolPanel
-            description="Uniform drop и custom crash prices"
-            icon={<BarChart3 className="size-4" />}
-            onToggle={() => setStressOpen((current) => !current)}
-            open={stressOpen}
-            title="Стрес тест"
-          >
-            <div className="grid gap-6 xl:grid-cols-2">
-              <div className="space-y-3">
-                <Field
-                  hint="Пример: 10, 20, 30 или 50."
-                  label="Uniform drop %"
-                  onChange={setUniformDrop}
-                  type="number"
-                  value={uniformDrop}
-                />
-                <StressResultView
-                  currency={accountCurrency}
-                  result={uniformStress}
-                  title={`Uniform Drop · ${uniformDrop || 0}%`}
-                />
-              </div>
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-white">Custom crash</p>
-                  <InfoHint text="Празно = текуща/входна цена" />
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {positions.length > 0 ? (
-                    positions.map((position) => {
-                      const key = getPositionKey(position);
-
-                      return (
-                        <Field
-                          key={key}
-                          label={`${position.symbol} crash`}
-                          onChange={(value) =>
-                            setCrashPrices((current) => ({ ...current, [key]: value }))
-                          }
-                          type="number"
-                          value={crashPrices[key] ?? ""}
-                        />
-                      );
-                    })
-                  ) : (
-                    <p className="text-sm text-slate-400">
-                      Добави позиции, за да въведеш crash prices.
-                    </p>
-                  )}
-                </div>
-                <StressResultView
-                  currency={accountCurrency}
-                  result={customStress}
-                  title="Custom Crash"
-                />
-              </div>
-            </div>
-          </ToolPanel>
-        </div>
-
-        <aside className="min-w-0 self-start rounded-lg border border-white/10 bg-[#0b1322]/90 p-4 xl:sticky xl:top-6">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                {editingId ? (
-                  <Edit3 className="size-4 text-slate-400" />
-                ) : (
-                  <Plus className="size-4 text-slate-400" />
-                )}
-                <h2 className="text-base font-semibold text-white">
-                  {editingId ? "Редакция" : "Нова позиция"}
-                </h2>
-              </div>
-              <p className="mt-1 text-xs leading-5 text-slate-500">
-                Добави или редактирай Share/Stock CFD позиция.
-              </p>
-            </div>
-            {editingId ? (
-              <button
-                aria-label="Откажи редакция"
-                className="inline-flex size-8 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-slate-400 transition hover:bg-white/[0.06] hover:text-slate-100"
-                onClick={() => {
-                  setEditingId(null);
-                  setPositionForm(emptyPositionForm());
-                  setPreviewRequested(false);
-                }}
-                title="Откажи редакция"
-                type="button"
-              >
-                <X className="size-4" />
-              </button>
-            ) : null}
-          </div>
-
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-            <Field
-              label="Symbol"
-              onChange={(value) => updatePositionField("symbol", value)}
-              value={positionForm.symbol}
-            />
-            <Field
-              label="Asset name"
-              onChange={(value) => updatePositionField("assetName", value)}
-              value={positionForm.assetName}
-            />
-            <SelectField
-              label="Direction"
-              onChange={(value) => updatePositionField("direction", value)}
-              value={positionForm.direction}
-            >
-              <option value="buy">BUY</option>
-              <option value="sell">SELL</option>
-            </SelectField>
-            <Field
-              label="Currency"
-              onChange={(value) => updatePositionField("instrumentCurrency", value)}
-              value={positionForm.instrumentCurrency}
-            />
-            <Field
-              label="Entry price"
-              onChange={(value) => updatePositionField("entryPrice", value)}
-              type="number"
-              value={positionForm.entryPrice}
-            />
-            <Field
-              hint="Празно за планирана позиция."
-              label="Current price"
-              onChange={(value) => updatePositionField("currentPrice", value)}
-              type="number"
-              value={positionForm.currentPrice}
-            />
-            <Field
-              label="Quantity"
-              onChange={(value) => updatePositionField("quantity", value)}
-              type="number"
-              value={positionForm.quantity}
-            />
-            <Field
-              hint="Празно = account setting."
-              label="Normal leverage"
-              onChange={(value) => updatePositionField("normalFixedLeverage", value)}
-              type="number"
-              value={positionForm.normalFixedLeverage}
-            />
-            <Field
-              hint="Празно = account setting."
-              label="Risk leverage"
-              onChange={(value) => updatePositionField("temporaryFixedLeverage", value)}
-              type="number"
-              value={positionForm.temporaryFixedLeverage}
-            />
-            <Field
-              className="sm:col-span-2 xl:col-span-1"
-              label="Notes"
-              onChange={(value) => updatePositionField("notes", value)}
-              value={positionForm.notes}
-            />
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2 border-t border-white/8 pt-3">
-            <button
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 bg-white/[0.03] px-3 text-sm font-semibold text-slate-100 transition hover:bg-white/[0.06]"
-              onClick={() => setPreviewRequested(true)}
-              type="button"
-            >
-              <Activity className="size-4" />
-              Preview
-            </button>
-            <button
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-amber-200/20 bg-amber-300/10 px-3 text-sm font-semibold text-amber-50 transition hover:bg-amber-300/15 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={saving}
-              onClick={() => void savePosition()}
-              type="button"
-            >
-              {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-              {editingId ? "Update" : "Save"}
-            </button>
-          </div>
-
-          {previewPortfolio ? (
-            <div className="mt-4 border-t border-white/8 pt-3">
-              <p className="text-sm font-semibold text-white">Preview impact</p>
-              {previewPortfolio.ok ? (
-                <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <p className="text-slate-500">Exposure</p>
-                    <p className="mt-0.5 text-slate-200">
-                      {formatCurrency(
-                        previewPortfolio.summary.totalPositionValueAccount,
-                        previewPortfolio.summary.accountCurrency,
-                      )}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-slate-500">Margin risk</p>
-                    <p className="mt-0.5 text-amber-100">
-                      {formatCurrency(
-                        previewPortfolio.summary.temporary.usedMargin,
-                        previewPortfolio.summary.accountCurrency,
-                      )}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-slate-500">Level normal</p>
-                    <p className="mt-0.5 text-slate-200">
-                      {formatPercent(previewPortfolio.summary.normal.marginLevel)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-slate-500">Level risk</p>
-                    <p className="mt-0.5 text-slate-200">
-                      {formatPercent(previewPortfolio.summary.temporary.marginLevel)}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <p className="mt-2 text-sm leading-6 text-rose-100">
-                  {previewPortfolio.errors.join(" ")}
-                </p>
-              )}
-            </div>
-          ) : null}
-        </aside>
-      </div>
 
       {addLotTarget ? (
         <AddLotDrawer

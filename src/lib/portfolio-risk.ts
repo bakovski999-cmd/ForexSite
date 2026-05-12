@@ -1,4 +1,5 @@
 export type PortfolioDirection = "buy" | "sell";
+export type PortfolioScenarioSource = "manual_plan" | "legacy";
 
 export type AccountRiskProfile = {
   id: string | null;
@@ -21,6 +22,7 @@ export type SavedPortfolioPosition = {
   id: string;
   userId?: string;
   accountRiskProfileId?: string | null;
+  scenarioSource?: PortfolioScenarioSource | null;
   symbol: string;
   assetName?: string | null;
   direction: PortfolioDirection;
@@ -64,6 +66,20 @@ export type PortfolioScenarioSummary = {
   stopOutEquity: number;
   maxLossBeforeStopOut: number;
   uniformDropThresholdPercent: number;
+};
+
+export type PortfolioBrokerBaseline = {
+  equity: number;
+  freeMargin: number;
+  margin: number;
+  marginLevel: number;
+  profit: number;
+};
+
+type PortfolioRiskOptions = {
+  addedFundsSimulation?: number;
+  baselinePositionIds?: string[];
+  brokerBaseline?: PortfolioBrokerBaseline;
 };
 
 export type IndividualStopOut = {
@@ -432,7 +448,7 @@ export function getPositionKey(position: Pick<SavedPortfolioPosition, "id" | "sy
 export function calculatePortfolioRisk(
   profileInput: AccountRiskProfile,
   positionsInput: SavedPortfolioPosition[],
-  options: { addedFundsSimulation?: number } = {},
+  options: PortfolioRiskOptions = {},
 ): PortfolioRiskResult {
   const profile = getDefaultAccountRiskProfile(profileInput);
   const errors: string[] = [];
@@ -582,16 +598,37 @@ export function calculatePortfolioRisk(
     (sum, item) => sum + item.positionValueInstrument,
     0,
   );
-  const totalUnrealizedPnLAccount = baseAnalyses.reduce(
+  const baselinePositionIds = new Set(options.baselinePositionIds ?? []);
+  const brokerDeltaAnalyses = options.brokerBaseline
+    ? baseAnalyses.filter((item) => !baselinePositionIds.has(item.position.id))
+    : baseAnalyses;
+  const totalUnrealizedPnLAccountCalculated = baseAnalyses.reduce(
     (sum, item) => sum + item.unrealizedPnLAccount,
     0,
   );
-  const totalNormalUsedMargin = baseAnalyses.reduce((sum, item) => sum + item.normalUsedMargin, 0);
-  const totalTemporaryUsedMargin = baseAnalyses.reduce(
+  const totalDeltaUnrealizedPnLAccount = brokerDeltaAnalyses.reduce(
+    (sum, item) => sum + item.unrealizedPnLAccount,
+    0,
+  );
+  const totalUnrealizedPnLAccount = options.brokerBaseline
+    ? options.brokerBaseline.profit + totalDeltaUnrealizedPnLAccount
+    : totalUnrealizedPnLAccountCalculated;
+  const totalNormalUsedMarginCalculated = baseAnalyses.reduce((sum, item) => sum + item.normalUsedMargin, 0);
+  const totalTemporaryUsedMarginCalculated = baseAnalyses.reduce(
     (sum, item) => sum + item.temporaryUsedMargin,
     0,
   );
-  const equity = simulatedBalance + totalUnrealizedPnLAccount;
+  const totalNormalUsedMargin = options.brokerBaseline
+    ? options.brokerBaseline.margin +
+      brokerDeltaAnalyses.reduce((sum, item) => sum + item.normalUsedMargin, 0)
+    : totalNormalUsedMarginCalculated;
+  const totalTemporaryUsedMargin = options.brokerBaseline
+    ? options.brokerBaseline.margin +
+      brokerDeltaAnalyses.reduce((sum, item) => sum + item.temporaryUsedMargin, 0)
+    : totalTemporaryUsedMarginCalculated;
+  const equity = options.brokerBaseline
+    ? options.brokerBaseline.equity + addedFunds + totalDeltaUnrealizedPnLAccount
+    : simulatedBalance + totalUnrealizedPnLAccount;
 
   const buildScenario = (usedMargin: number): PortfolioScenarioSummary => {
     const stopOutEquity = usedMargin * (profile.stopOutLevelPercent / 100);
@@ -825,6 +862,7 @@ export function calculateUniformDropStress(
   profile: AccountRiskProfile,
   positions: SavedPortfolioPosition[],
   dropPercent: number,
+  options: PortfolioRiskOptions = {},
 ): PortfolioStressResult {
   if (!Number.isFinite(dropPercent) || dropPercent < 0 || dropPercent > 100) {
     return { ok: false, errors: ["Процентът спад трябва да е между 0 и 100."] };
@@ -838,13 +876,14 @@ export function calculateUniformDropStress(
     };
   });
 
-  return calculateStressScenario(profile, positions, stressedPositions);
+  return calculateStressScenario(profile, positions, stressedPositions, options);
 }
 
 export function calculateCustomCrashStress(
   profile: AccountRiskProfile,
   positions: SavedPortfolioPosition[],
   crashPrices: Record<string, number>,
+  options: PortfolioRiskOptions = {},
 ): PortfolioStressResult {
   const stressedPositions = positions.map((position) => {
     const key = getPositionKey(position);
@@ -859,16 +898,17 @@ export function calculateCustomCrashStress(
     };
   });
 
-  return calculateStressScenario(profile, positions, stressedPositions);
+  return calculateStressScenario(profile, positions, stressedPositions, options);
 }
 
 function calculateStressScenario(
   profile: AccountRiskProfile,
   originalPositions: SavedPortfolioPosition[],
   stressedPositions: SavedPortfolioPosition[],
+  options: PortfolioRiskOptions = {},
 ): PortfolioStressResult {
-  const stressed = calculatePortfolioRisk(profile, stressedPositions);
-  const originalBaseline = calculatePortfolioRisk(profile, originalPositions);
+  const stressed = calculatePortfolioRisk(profile, stressedPositions, options);
+  const originalBaseline = calculatePortfolioRisk(profile, originalPositions, options);
 
   if (!stressed.ok) {
     return stressed;

@@ -40,6 +40,9 @@ const envSchema = z.object({
   APP_DEMO_SESSION_SECRET: z.string().min(8).default("gold-intel-demo-session"),
   APP_REFRESH_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(60),
   APP_SYNC_SECRET: optionalString,
+  MT5_CONNECTOR_SECRET: optionalString,
+  MT5_SYNC_LIVE_SECONDS: z.coerce.number().int().positive().default(30),
+  MT5_SYNC_OFFLINE_SECONDS: z.coerce.number().int().positive().default(300),
 });
 
 const parsed = envSchema.safeParse(process.env);

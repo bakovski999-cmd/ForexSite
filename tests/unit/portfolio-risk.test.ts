@@ -332,6 +332,74 @@ describe("portfolio risk manager calculations", () => {
     );
   });
 
+  test("broker baseline keeps live MT5 metrics exact when there are no plan positions", () => {
+    const result = calculatePortfolioRisk(profile, [sofiPosition], {
+      baselinePositionIds: ["sofi"],
+      brokerBaseline: {
+        equity: 1844.94,
+        freeMargin: 1840.79,
+        margin: 4.15,
+        marginLevel: 44456.39,
+        profit: -3.06,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.summary.equity).toBeCloseTo(1844.94);
+    expect(result.summary.normal.usedMargin).toBeCloseTo(4.15);
+    expect(result.summary.temporary.usedMargin).toBeCloseTo(4.15);
+    expect(result.summary.normal.freeMargin).toBeCloseTo(1840.79);
+    expect(result.summary.temporary.freeMargin).toBeCloseTo(1840.79);
+    expect(result.summary.normal.marginLevel).toBeCloseTo(44456.39);
+    expect(result.summary.temporary.marginLevel).toBeCloseTo(44456.39);
+    expect(result.summary.totalUnrealizedPnLAccount).toBeCloseTo(-3.06);
+  });
+
+  test("broker baseline applies add-funds and manual plan deltas over MT5 metrics", () => {
+    const planPosition: SavedPortfolioPosition = {
+      id: "plan-meta",
+      symbol: "META",
+      direction: "buy",
+      entryPrice: 500,
+      currentPrice: 510,
+      quantity: 2,
+      instrumentCurrency: "USD",
+      scenarioSource: "manual_plan",
+    };
+    const result = calculatePortfolioRisk(
+      { ...profile, addedFundsSimulation: 1000 },
+      [sofiPosition, planPosition],
+      {
+        baselinePositionIds: ["sofi"],
+        brokerBaseline: {
+          equity: 1844.94,
+          freeMargin: 1840.79,
+          margin: 4.15,
+          marginLevel: 44456.39,
+          profit: -3.06,
+        },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.summary.equity).toBeCloseTo(2861.94);
+    expect(result.summary.temporary.usedMargin).toBeCloseTo(177.55);
+    expect(result.summary.temporary.freeMargin).toBeCloseTo(2684.39);
+    expect(result.summary.temporary.marginLevel).toBeCloseTo(1611.91, 2);
+    expect(result.summary.totalUnrealizedPnLAccount).toBeCloseTo(13.94);
+    expect(result.positions.find((item) => item.position.id === "plan-meta")).toBeDefined();
+  });
+
   test("uniform drop and custom crash stress tests report survival state", () => {
     const uniform = calculateUniformDropStress(profile, [sofiPosition], 50);
     const crash = calculateCustomCrashStress(profile, [sofiPosition], { sofi: 5 });

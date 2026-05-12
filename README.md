@@ -101,6 +101,45 @@ For Supabase Cron, adapt [cron.sql](/Users/bakovski/ForexSite/supabase/cron.sql)
 
 The dashboard auto-refreshes from the browser every 5 minutes and resets the countdown after a successful manual refresh. Manual dashboard refreshes use `/api/refresh` and respect `APP_REFRESH_COOLDOWN_SECONDS` to avoid burning free API quota.
 
+## MT5 live sync
+
+The app can receive read-only MT5 snapshots from `ForexSiteConnectorEA.mq5`.
+
+Production configuration:
+
+- optional: `MT5_SYNC_LIVE_SECONDS=30`
+- optional: `MT5_SYNC_OFFLINE_SECONDS=300`
+- apply `supabase/schema.sql` if Supabase is the active backend
+- if the Supabase MT5 tables are not applied yet, the connector automatically falls back to a private Supabase Storage bucket named `mt5-sync`
+
+The normal setup is done inside the website:
+
+1. Open `/risk-calculator`.
+2. Open the `MT5 Live` tab.
+3. Click `Свържи MT5 акаунт`.
+4. Download the generated `ForexSiteConnectorEA.mq5` file. The file already contains the user's `EndpointUrl` and one-time `SecretToken`.
+5. In MT5, open `Tools -> Options -> Expert Advisors`.
+6. Enable `Allow WebRequest for listed URL` and add the shown site origin, for example `https://forex-site-chi.vercel.app`.
+7. Open MetaEditor, compile the downloaded EA, then attach it to one chart.
+8. In normal setup, leave the EA inputs as generated and click `OK`. The manual values are still shown in the site for troubleshooting.
+
+`MT5_CONNECTOR_SECRET` remains supported as an owner-level legacy token for direct API tests, but the browser setup wizard creates per-user MT5 tokens and does not require the user to edit Vercel environment variables.
+
+The EA does not open, modify, or close trades. It reads account, open position, and recent deal history data and posts snapshots while MT5 is running. If MT5 is closed, the site keeps the last snapshot and marks the feed stale/offline.
+
+## Stock fair value
+
+The `/valuation` page provides a US stock fair value calculator with four editable models:
+
+- DCF 10 years
+- EV/EBITDA
+- P/E
+- DCF Multiple
+
+The final weighted value defaults to `DCF 40%`, `EV/EBITDA 30%`, `P/E 15%`, and `DCF Multiple 15%`. Autofill uses SEC CompanyFacts, Alpha Vantage, Yahoo chart quotes for current price, and a best-effort Macrotrends fallback. Every autofilled field keeps a source badge, and missing data stays editable instead of blocking the calculation.
+
+Saved analyses are available for real authenticated users. Firebase is preferred when configured; Supabase uses `stock_valuation_analyses` and falls back to a private Supabase Storage bucket named `stock-valuations` if the table is not available yet. Demo mode can calculate but cannot save.
+
 ## API source notes
 
 - CFTC COT files are public and do not need a key.
