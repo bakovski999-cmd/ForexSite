@@ -90,10 +90,12 @@ describe("StockValuationPanel", () => {
     expect(screen.getByRole("heading", { name: "Справедлива цена" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Авто попълване" })).toBeVisible();
     expect(await screen.findByText("Запазени анализи")).toBeVisible();
-    expect(screen.getByRole("button", { name: "DCF 10 years" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "EV/EBITDA" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "P/E" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "DCF Multiple" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /DCF 10 years ·/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /EV\/EBITDA ·/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /P\/E ·/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /DCF Multiple ·/ })).toBeVisible();
+    expect(screen.getAllByTestId("valuation-scenario-row")).toHaveLength(3);
+    expect(screen.getByLabelText("DCF 10 years final weight")).toBeVisible();
     expect(container.querySelector(".overflow-x-auto")).not.toBeInTheDocument();
   });
 
@@ -109,6 +111,8 @@ describe("StockValuationPanel", () => {
 
     await waitFor(() => expect(screen.getByDisplayValue("META")).toBeVisible());
     expect(screen.getByDisplayValue("Meta Platforms")).toBeVisible();
+    expect(screen.getByRole("button", { name: /DCF 10 years · \$/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /EV\/EBITDA · \$/ })).toBeVisible();
     expect(screen.getAllByText("Yahoo").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Alpha Vantage").length).toBeGreaterThan(0);
   });

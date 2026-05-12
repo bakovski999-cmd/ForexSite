@@ -133,21 +133,69 @@ function NumericField({
   );
 }
 
-function PercentField({
+function CompactWeightField({
   label,
   value,
   onChange,
 }: {
   label: string;
-  value: number | null;
+  value: number;
   onChange: (value: number | null) => void;
 }) {
   return (
-    <NumericField
-      label={label}
-      value={value === null ? null : value * 100}
-      onChange={(next) => onChange(next === null ? null : next / 100)}
-    />
+    <label className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2">
+      <span className="truncate text-sm font-semibold text-slate-300">{label}</span>
+      <span className="flex items-center gap-1">
+        <input
+          aria-label={`${label} final weight`}
+          className="h-8 w-16 rounded-lg border border-white/10 bg-slate-950 px-2 text-right text-sm font-semibold text-amber-100 outline-none transition focus:border-amber-300/50"
+          inputMode="decimal"
+          type="number"
+          value={numberInputValue(value * 100)}
+          onChange={(event) => {
+            const next = parseNumberInput(event.target.value);
+            onChange(next === null ? null : next / 100);
+          }}
+        />
+        <span className="text-xs font-semibold text-slate-500">%</span>
+      </span>
+    </label>
+  );
+}
+
+function CompactNumberField({
+  label,
+  value,
+  onChange,
+  percent = false,
+}: {
+  label: string;
+  value: number | null;
+  onChange: (value: number | null) => void;
+  percent?: boolean;
+}) {
+  const displayValue = percent && value !== null ? value * 100 : value;
+
+  return (
+    <label className="min-w-0">
+      <span className="block truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+        {label}
+      </span>
+      <span className="mt-1 flex h-9 items-center rounded-lg border border-white/10 bg-slate-950/70 px-2 transition focus-within:border-amber-300/50">
+        <input
+          aria-label={label}
+          className="h-full min-w-0 flex-1 bg-transparent text-sm font-semibold text-white outline-none"
+          inputMode="decimal"
+          type="number"
+          value={numberInputValue(displayValue)}
+          onChange={(event) => {
+            const next = parseNumberInput(event.target.value);
+            onChange(percent && next !== null ? next / 100 : next);
+          }}
+        />
+        {percent ? <span className="pl-1 text-xs font-semibold text-slate-500">%</span> : null}
+      </span>
+    </label>
   );
 }
 
@@ -460,36 +508,59 @@ export function StockValuationPanel() {
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:grid-cols-4">
-            {modelTabs.map((tab) => (
-              <PercentField
-                key={tab.key}
-                label={tab.label}
-                value={input.finalWeights[tab.key]}
-                onChange={(value) => updateFinalWeight(tab.key, value)}
-              />
-            ))}
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                Final weights
+              </p>
+              <p className="text-xs font-semibold text-slate-400">
+                Total {formatPercent(result.finalWeightTotal, 0)}
+              </p>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              {modelTabs.map((tab) => (
+                <CompactWeightField
+                  key={tab.key}
+                  label={tab.label}
+                  value={input.finalWeights[tab.key]}
+                  onChange={(value) => updateFinalWeight(tab.key, value)}
+                />
+              ))}
+            </div>
           </div>
         </div>
 
         <div className="p-5">
           <div className="flex flex-wrap gap-2">
-            {modelTabs.map((tab) => (
-              <button
-                key={tab.key}
-                aria-pressed={activeModel === tab.key}
-                className={cn(
-                  "rounded-xl border px-4 py-3 text-sm font-semibold transition",
-                  activeModel === tab.key
-                    ? "border-blue-400/40 bg-blue-500 text-white"
-                    : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]",
-                )}
-                type="button"
-                onClick={() => setActiveModel(tab.key)}
-              >
-                {tab.label}
-              </button>
-            ))}
+            {modelTabs.map((tab) => {
+              const modelFairValue = formatCurrency(
+                result.models[tab.key].weightedFairValue,
+                input.currency,
+              );
+              const modelButtonLabel = `${tab.label} · ${modelFairValue}`;
+
+              return (
+                <button
+                  key={tab.key}
+                  aria-label={modelButtonLabel}
+                  aria-pressed={activeModel === tab.key}
+                  className={cn(
+                    "rounded-xl border px-4 py-3 text-sm font-semibold transition",
+                    activeModel === tab.key
+                      ? "border-blue-400/40 bg-blue-500 text-white"
+                      : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]",
+                  )}
+                  type="button"
+                  onClick={() => setActiveModel(tab.key)}
+                >
+                  <span aria-hidden="true">{tab.label}</span>
+                  <span aria-hidden="true" className="text-slate-300">
+                    {" "}
+                    · {modelFairValue}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/40 p-4">
@@ -653,77 +724,107 @@ function ScenarioEditor({
   const dcfScenario = scenario as DcfTenYearsScenario;
   const evScenario = scenario as EvEbitdaScenario;
   const terminalScenario = scenario as TerminalMultipleScenario;
+  const weightedValue =
+    fairValue === null || !Number.isFinite(fairValue) ? null : fairValue * scenario.weight;
+  const primaryMetricLabel = isDcf
+    ? "FCF"
+    : isEvEbitda
+      ? "EBITDA"
+      : modelKey === "pe"
+        ? "EPS"
+        : "FCF/share";
+  const primaryMetricValue = isDcf
+    ? dcfScenario.baseFreeCashFlow
+    : isEvEbitda
+      ? evScenario.baseEbitda
+      : terminalScenario.baseMetricPerShare;
+  const multipleLabel =
+    modelKey === "pe" ? "P/E" : modelKey === "evEbitda" ? "EV/EBITDA" : "P/FCF";
+  const multipleValue = isDcf
+    ? dcfScenario.perpetualGrowth
+    : (scenario as EvEbitdaScenario | TerminalMultipleScenario).terminalMultiple;
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-base font-semibold text-white">{scenario.label}</p>
-          <p className="text-sm text-slate-400">{formatCurrency(fairValue, currency)}</p>
-        </div>
-        <PercentField
-          label="Scenario weight"
-          value={scenario.weight}
-          onChange={(value) => onChange("weight", value)}
-        />
+    <div
+      className="grid gap-2 rounded-2xl border border-white/10 bg-white/[0.025] p-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(120px,1fr)_76px_minmax(104px,1fr)_minmax(94px,1fr)_86px_94px_94px_82px_minmax(112px,1fr)] xl:items-end"
+      data-layout="compact-scenario-row"
+      data-testid="valuation-scenario-row"
+    >
+      <div className="min-w-0 self-center">
+        <p className="truncate text-sm font-semibold text-white">{scenario.label}</p>
+        <p className="mt-1 text-xs text-slate-500">scenario row</p>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {isDcf ? (
-          <NumericField
-            label="Free cash flow"
-            value={dcfScenario.baseFreeCashFlow}
-            onChange={(value) => onChange("baseFreeCashFlow", value)}
-          />
-        ) : null}
-        {isEvEbitda ? (
-          <NumericField
-            label="EBITDA"
-            value={evScenario.baseEbitda}
-            onChange={(value) => onChange("baseEbitda", value)}
-          />
-        ) : null}
-        {!isDcf && !isEvEbitda ? (
-          <NumericField
-            label={modelKey === "pe" ? "EPS" : "FCF per share"}
-            value={terminalScenario.baseMetricPerShare}
-            onChange={(value) => onChange("baseMetricPerShare", value)}
-          />
-        ) : null}
-        {!isDcf ? (
-          <NumericField
-            label={modelKey === "pe" ? "P/E multiple" : modelKey === "evEbitda" ? "EV/EBITDA multiple" : "P/FCF multiple"}
-            value={(scenario as EvEbitdaScenario | TerminalMultipleScenario).terminalMultiple}
-            onChange={(value) => onChange("terminalMultiple", value)}
-          />
-        ) : null}
-        <PercentField
-          label="Discount rate"
-          value={scenario.discountRate}
-          onChange={(value) => onChange("discountRate", value)}
-        />
-        <PercentField
-          label="Growth years 1-5"
-          value={scenario.growthNextFiveYears}
-          onChange={(value) => onChange("growthNextFiveYears", value)}
-        />
-        <PercentField
-          label="Growth years 6-10"
-          value={scenario.growthYearsFiveToTen}
-          onChange={(value) => onChange("growthYearsFiveToTen", value)}
-        />
-        {isDcf ? (
-          <PercentField
-            label="Perpetual growth"
-            value={dcfScenario.perpetualGrowth}
-            onChange={(value) => onChange("perpetualGrowth", value)}
-          />
-        ) : null}
-        <PercentField
-          label="Margin of safety"
-          value={scenario.marginOfSafety}
-          onChange={(value) => onChange("marginOfSafety", value)}
-        />
+      <CompactNumberField
+        label="Weight"
+        percent
+        value={scenario.weight}
+        onChange={(value) => onChange("weight", value)}
+      />
+
+      <CompactNumberField
+        label={primaryMetricLabel}
+        value={primaryMetricValue}
+        onChange={(value) => {
+          if (isDcf) {
+            onChange("baseFreeCashFlow", value);
+            return;
+          }
+
+          if (isEvEbitda) {
+            onChange("baseEbitda", value);
+            return;
+          }
+
+          onChange("baseMetricPerShare", value);
+        }}
+      />
+
+      <CompactNumberField
+        label={isDcf ? "Perpetual" : multipleLabel}
+        percent={isDcf}
+        value={multipleValue}
+        onChange={(value) => onChange(isDcf ? "perpetualGrowth" : "terminalMultiple", value)}
+      />
+
+      <CompactNumberField
+        label="Discount"
+        percent
+        value={scenario.discountRate}
+        onChange={(value) => onChange("discountRate", value)}
+      />
+
+      <CompactNumberField
+        label="Growth 1-5"
+        percent
+        value={scenario.growthNextFiveYears}
+        onChange={(value) => onChange("growthNextFiveYears", value)}
+      />
+
+      <CompactNumberField
+        label="Growth 6-10"
+        percent
+        value={scenario.growthYearsFiveToTen}
+        onChange={(value) => onChange("growthYearsFiveToTen", value)}
+      />
+
+      <CompactNumberField
+        label="Safety"
+        percent
+        value={scenario.marginOfSafety}
+        onChange={(value) => onChange("marginOfSafety", value)}
+      />
+
+      <div className="self-center rounded-xl border border-emerald-300/15 bg-emerald-300/[0.05] px-3 py-2 text-right">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-200/70">
+          Fair value
+        </p>
+        <p className="mt-1 text-sm font-semibold text-emerald-200">
+          {formatCurrency(fairValue, currency)}
+        </p>
+        <p className="mt-0.5 text-[11px] font-medium text-slate-500">
+          {formatCurrency(weightedValue, currency)} weighted
+        </p>
       </div>
     </div>
   );

@@ -51,7 +51,7 @@ test("demo login opens the dashboard and navigates core views", async ({ page })
   await page.getByRole("link", { name: "Справедлива цена" }).click();
   await expect(page.getByRole("heading", { name: "Справедлива цена" }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Авто попълване" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "DCF 10 years" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /DCF 10 years ·/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Запазени анализи" })).toBeVisible();
 
   await page.getByRole("link", { name: "Риск калкулатор" }).click();
