@@ -11,6 +11,7 @@ import {
   Save,
   Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -441,14 +442,14 @@ function historicalMultipleBarOption(summary: HistoricalMultipleSummary): EChart
 }
 
 function historicalMultipleLineOption(summary: HistoricalMultipleSummary): EChartsOption {
-  const rows = [...summary.rows]
-    .filter((row) => row.year !== null && row.multiple !== null)
-    .sort((first, second) => (first.year ?? 0) - (second.year ?? 0));
-  const rowByYear = new Map(rows.map((row) => [String(row.year), row]));
+  const rows = [...summary.seriesPoints]
+    .filter((row) => row.date && row.multiple !== null)
+    .sort((first, second) => first.date.localeCompare(second.date));
+  const rowByDate = new Map(rows.map((row) => [row.date, row]));
 
   return {
     animation: false,
-    grid: { bottom: 28, containLabel: true, left: 34, right: 18, top: 18 },
+    grid: { bottom: 30, containLabel: true, left: 34, right: 18, top: 18 },
     tooltip: {
       appendTo: "body",
       backgroundColor: "#0f1729",
@@ -456,20 +457,21 @@ function historicalMultipleLineOption(summary: HistoricalMultipleSummary): EChar
       confine: true,
       formatter: (params) => {
         const entry = Array.isArray(params) ? params[0] : params;
-        const year = String(entry?.name ?? "");
-        const row = rowByYear.get(year);
+        const date = String(entry?.name ?? "");
+        const row = rowByDate.get(date);
 
         if (!row) {
           return "";
         }
 
         return [
-          `<strong>${year}</strong>`,
+          `<strong>${date}</strong>`,
           `Multiple: ${formatMultiple(row.multiple)}`,
           `${historicalMultipleLabels[summary.key].numerator}: ${formatPlainNumber(row.numerator, 2)}`,
           `${historicalMultipleLabels[summary.key].denominator}: ${formatPlainNumber(row.denominator, 2)}`,
           `Source: ${sourceLabel(row.source)}`,
-          row.asOf ? `As of: ${row.asOf}` : null,
+          row.asOf ? `Fundamentals as of: ${row.asOf}` : null,
+          row.needsReview && row.reviewReason ? `Review: ${row.reviewReason}` : null,
         ]
           .filter(Boolean)
           .join("<br/>");
@@ -481,7 +483,7 @@ function historicalMultipleLineOption(summary: HistoricalMultipleSummary): EChar
       axisLabel: { color: "#94a3b8", fontSize: 11, hideOverlap: true },
       axisLine: { lineStyle: { color: "rgba(255,255,255,0.14)" } },
       axisTick: { show: false },
-      data: rows.map((row) => String(row.year)),
+      data: rows.map((row) => row.date),
       type: "category",
     },
     yAxis: {
@@ -497,73 +499,101 @@ function historicalMultipleLineOption(summary: HistoricalMultipleSummary): EChar
         areaStyle: { color: "rgba(56,189,248,0.12)" },
         data: rows.map((row) => row.multiple),
         lineStyle: { color: "#5eead4", width: 2 },
-        name: "Historical multiple",
-        showSymbol: rows.length <= 12,
-        smooth: true,
-        symbolSize: 7,
+        name: historicalMultipleLabels[summary.key].label,
+        showSymbol: rows.length <= 24,
+        smooth: false,
+        symbolSize: 6,
         type: "line",
       },
     ],
   };
 }
 
-function HistoricalMultiplesPanel({
+function HistoricalMultiplesModal({
   isOpen,
   onApply,
+  onClose,
   onSelectKey,
-  onToggle,
   selectedKey,
   summaries,
   ticker,
 }: {
   isOpen: boolean;
   onApply: (key: HistoricalMultipleKey) => void;
+  onClose: () => void;
   onSelectKey: (key: HistoricalMultipleKey) => void;
-  onToggle: () => void;
   selectedKey: HistoricalMultipleKey;
   summaries: Record<HistoricalMultipleKey, HistoricalMultipleSummary>;
   ticker: string;
 }) {
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
+  if (!isOpen) {
+    return null;
+  }
+
   const summary = summaries[selectedKey];
   const labels = historicalMultipleLabels[selectedKey];
   const visibleRows = summary.rows.slice(0, 8);
-  const hasChartData = summary.rows.some(
-    (row) => row.year !== null && row.multiple !== null,
-  );
+  const hasChartData = summary.seriesPoints.some((row) => row.multiple !== null);
 
   return (
-    <div className="mt-4 rounded-2xl border border-violet-300/15 bg-violet-300/[0.035]">
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-950/78 p-0 backdrop-blur-md sm:items-center sm:p-5">
       <button
-        aria-controls="historical-multiples"
-        aria-expanded={isOpen}
-        className="flex w-full flex-col gap-3 p-4 text-left transition hover:bg-white/[0.03] lg:flex-row lg:items-center lg:justify-between"
+        aria-label="Close historical charts backdrop"
+        className="absolute inset-0 cursor-default"
         type="button"
-        onClick={onToggle}
+        onClick={onClose}
+      />
+      <div
+        aria-label="Historical charts"
+        aria-modal="true"
+        className="relative flex h-full w-full max-w-6xl flex-col overflow-hidden border border-white/10 bg-slate-950 shadow-[0_30px_140px_rgba(0,0,0,0.55)] sm:max-h-[88vh] sm:rounded-3xl"
+        role="dialog"
       >
-        <span className="flex items-start gap-3">
-          <Calculator className="mt-0.5 size-5 text-violet-200" />
-          <span>
-            <span className="block font-semibold text-white">Historical multiples</span>
-            <span className="mt-1 block text-sm text-slate-400">
-              Derived from SEC/Yahoo. Compare with FinanceCharts if needed.
+        <div className="flex flex-col gap-4 border-b border-white/10 p-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <Calculator className="mt-1 size-5 text-violet-200" />
+            <div>
+              <h3 className="text-lg font-semibold text-white">Historical charts</h3>
+              <p className="mt-1 text-sm text-slate-400">
+                Derived from SEC/Yahoo. Compare with FinanceCharts if needed.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-violet-300/20 bg-violet-300/10 px-3 py-1 text-xs font-semibold text-violet-100">
+              {labels.label} avg {formatMultiple(summary.average)}
             </span>
-          </span>
-        </span>
-        <span className="flex flex-wrap items-center gap-3">
-          <span className="rounded-full border border-violet-300/20 bg-violet-300/10 px-3 py-1 text-xs font-semibold text-violet-100">
-            {labels.label} avg {formatMultiple(summary.average)}
-          </span>
-          <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300">
-            Current {formatMultiple(summary.currentMultiple)}
-          </span>
-          <ChevronDown
-            className={cn("size-5 text-slate-400 transition", isOpen && "rotate-180")}
-          />
-        </span>
-      </button>
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300">
+              Current {formatMultiple(summary.currentMultiple)}
+            </span>
+            <button
+              aria-label="Close historical charts"
+              className="inline-flex size-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.08] hover:text-white"
+              type="button"
+              onClick={onClose}
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+        </div>
 
-      {isOpen ? (
-        <div id="historical-multiples" className="border-t border-white/10 p-4">
+        <div className="flex-1 overflow-y-auto p-4">
           <div
             aria-label="Historical multiple metric"
             className="flex flex-wrap gap-2"
@@ -612,31 +642,35 @@ function HistoricalMultiplesPanel({
           </div>
 
           {hasChartData ? (
-            <div className="mt-4 grid gap-4 xl:grid-cols-[0.82fr_1.18fr]">
+            <div className="mt-4 grid gap-4">
+              <div
+                className="rounded-2xl border border-white/10 bg-slate-950/45 p-3"
+                data-testid={`historical-multiple-line-chart-${summary.key}`}
+              >
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-white">
+                    {ticker.toUpperCase()} {labels.label} Ratio Chart
+                  </p>
+                  <p className="text-xs font-medium text-slate-500">monthly 10Y series</p>
+                </div>
+                <BaseChart height={390} option={historicalMultipleLineOption(summary)} />
+              </div>
               <div
                 className="rounded-2xl border border-white/10 bg-slate-950/45 p-3"
                 data-testid={`historical-multiple-bar-chart-${summary.key}`}
               >
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <p className="text-sm font-semibold text-white">Period averages</p>
-                  <p className="text-xs font-medium text-slate-500">Current / 3Y / 5Y / 10Y / 15Y / 20Y</p>
+                  <p className="text-xs font-medium text-slate-500">
+                    Current / TTM / 3Y / 5Y / 10Y / 15Y / 20Y
+                  </p>
                 </div>
-                <BaseChart height={260} option={historicalMultipleBarOption(summary)} />
-              </div>
-              <div
-                className="rounded-2xl border border-white/10 bg-slate-950/45 p-3"
-                data-testid={`historical-multiple-line-chart-${summary.key}`}
-              >
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-white">Historical trend</p>
-                  <p className="text-xs font-medium text-slate-500">hover/click for source data</p>
-                </div>
-                <BaseChart height={260} option={historicalMultipleLineOption(summary)} />
+                <BaseChart height={230} option={historicalMultipleBarOption(summary)} />
               </div>
             </div>
           ) : (
             <div className="mt-4 rounded-xl border border-dashed border-white/10 bg-slate-950/45 p-4 text-sm text-slate-400">
-              Няма достатъчно historical data за графика. Попълни multiple assumptions ръчно.
+              Няма historical chart series за тази метрика. Попълни multiple assumptions ръчно.
             </div>
           )}
 
@@ -690,30 +724,30 @@ function HistoricalMultiplesPanel({
               </div>
             ))}
           </div>
-
-          <div className="mt-4 flex flex-col gap-3 rounded-xl border border-violet-300/15 bg-violet-300/[0.04] p-4 md:flex-row md:items-center md:justify-between">
-            <div className="text-sm leading-6 text-slate-400">
-              <p>Apply maps High to Best, Average to Average, and Low to Worst.</p>
-              <a
-                className="mt-1 inline-flex font-semibold text-sky-200 transition hover:text-sky-100"
-                href={financeChartsBenchmarkUrl(ticker, selectedKey)}
-                rel="noreferrer"
-                target="_blank"
-              >
-                FinanceCharts benchmark
-              </a>
-            </div>
-            <button
-              className="inline-flex min-h-12 items-center justify-center rounded-xl bg-blue-500 px-4 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-              type="button"
-              disabled={!summary.canApply}
-              onClick={() => onApply(selectedKey)}
-            >
-              Apply {labels.label} to scenarios
-            </button>
-          </div>
         </div>
-      ) : null}
+
+        <div className="flex flex-col gap-3 border-t border-white/10 p-4 md:flex-row md:items-center md:justify-between">
+          <div className="text-sm leading-6 text-slate-400">
+            <p>Apply maps High to Best, Average to Average, and Low to Worst.</p>
+            <a
+              className="mt-1 inline-flex font-semibold text-sky-200 transition hover:text-sky-100"
+              href={financeChartsBenchmarkUrl(ticker, selectedKey)}
+              rel="noreferrer"
+              target="_blank"
+            >
+              FinanceCharts benchmark
+            </a>
+          </div>
+          <button
+            className="inline-flex min-h-12 items-center justify-center rounded-xl bg-blue-500 px-4 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+            type="button"
+            disabled={!summary.canApply}
+            onClick={() => onApply(selectedKey)}
+          >
+            Apply {labels.label} to scenarios
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -998,7 +1032,8 @@ export function StockValuationPanel() {
   const [isSaving, setIsSaving] = useState(false);
   const [isSourceBadgesOpen, setIsSourceBadgesOpen] = useState(false);
   const [isHistoricalFcfOpen, setIsHistoricalFcfOpen] = useState(false);
-  const [isHistoricalMultiplesOpen, setIsHistoricalMultiplesOpen] = useState(false);
+  const [isHistoricalMultiplesModalOpen, setIsHistoricalMultiplesModalOpen] =
+    useState(false);
   const [activeHistoricalMultipleKey, setActiveHistoricalMultipleKey] =
     useState<HistoricalMultipleKey>("priceToFreeCashFlow");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -1464,8 +1499,26 @@ export function StockValuationPanel() {
                   Model result: {formatCurrency(activeResult.weightedFairValue, input.currency)}
                 </p>
               </div>
-              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                Scenario weight total {formatPercent(activeResult.scenarioWeightTotal, 0)}
+              <div className="flex flex-wrap items-center gap-2">
+                {activeModel !== "dcf10Years" ? (
+                  <button
+                    className="inline-flex min-h-9 items-center justify-center gap-2 rounded-xl border border-violet-300/20 bg-violet-300/10 px-3 text-xs font-semibold text-violet-100 transition hover:bg-violet-300/15"
+                    type="button"
+                    onClick={() => {
+                      const historicalKey = historicalMultipleKeyForModel(activeModel);
+                      if (historicalKey) {
+                        setActiveHistoricalMultipleKey(historicalKey);
+                      }
+                      setIsHistoricalMultiplesModalOpen(true);
+                    }}
+                  >
+                    <Calculator className="size-4" />
+                    Historical charts
+                  </button>
+                ) : null}
+                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Scenario weight total {formatPercent(activeResult.scenarioWeightTotal, 0)}
+                </div>
               </div>
             </div>
 
@@ -1508,18 +1561,17 @@ export function StockValuationPanel() {
               <FcfPerShareTtmPanel calculation={fcfPerShareTtm} currency={input.currency} />
             ) : null}
 
-            {activeModel !== "dcf10Years" ? (
-              <HistoricalMultiplesPanel
-                isOpen={isHistoricalMultiplesOpen}
-                selectedKey={activeHistoricalMultipleKey}
-                summaries={historicalMultipleSummaries}
-                ticker={input.ticker}
-                onApply={applyHistoricalMultipleByKey}
-                onSelectKey={setActiveHistoricalMultipleKey}
-                onToggle={() => setIsHistoricalMultiplesOpen((current) => !current)}
-              />
-            ) : null}
           </div>
+
+          <HistoricalMultiplesModal
+            isOpen={isHistoricalMultiplesModalOpen}
+            selectedKey={activeHistoricalMultipleKey}
+            summaries={historicalMultipleSummaries}
+            ticker={input.ticker}
+            onApply={applyHistoricalMultipleByKey}
+            onClose={() => setIsHistoricalMultiplesModalOpen(false)}
+            onSelectKey={setActiveHistoricalMultipleKey}
+          />
 
           <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03]">
             <button

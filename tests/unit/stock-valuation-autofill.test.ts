@@ -757,7 +757,7 @@ describe("stock valuation autofill parsers", () => {
           };
         }
 
-        if (url.includes("query1.finance.yahoo.com") && url.includes("interval=1d")) {
+        if (url.includes("query1.finance.yahoo.com") && url.includes("interval=1mo")) {
           return {
             ok: true,
             json: async () => ({
@@ -926,7 +926,7 @@ describe("stock valuation autofill parsers", () => {
           };
         }
 
-        if (url.includes("query1.finance.yahoo.com") && url.includes("interval=1d")) {
+        if (url.includes("query1.finance.yahoo.com") && url.includes("interval=1mo")) {
           return {
             ok: true,
             json: async () => ({
@@ -1073,5 +1073,25 @@ describe("stock valuation autofill parsers", () => {
       denominator: 500,
       multiple: 8.2,
     });
+    expect(result.input.historicalMultipleSeries?.evToEbitda).toEqual([
+      {
+        date: "2024-12-31",
+        year: 2024,
+        numerator: 3_100,
+        denominator: 400,
+        multiple: 7.75,
+        source: "Derived",
+        asOf: "2024-12-31",
+      },
+      {
+        date: "2025-12-31",
+        year: 2025,
+        numerator: 4_100,
+        denominator: 500,
+        multiple: 8.2,
+        source: "Derived",
+        asOf: "2025-12-31",
+      },
+    ]);
   });
 });

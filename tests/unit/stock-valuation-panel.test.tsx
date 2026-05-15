@@ -7,6 +7,7 @@ import {
   buildDefaultStockValuationInput,
   type HistoricalFreeCashFlowRow,
   type HistoricalMultipleRow,
+  type HistoricalMultipleSeriesPoint,
 } from "@/lib/stock-valuation";
 
 vi.mock("@/components/charts/base-chart", () => ({
@@ -125,6 +126,22 @@ const historicalEvEbitdaRows: HistoricalMultipleRow[] = [
   { year: 2023, numerator: 2_000, denominator: -100, multiple: -20, source: "Derived", asOf: "2023-12-31" },
 ];
 
+const historicalPriceToFcfSeries: HistoricalMultipleSeriesPoint[] = [
+  { date: "2024-01-31", year: 2024, numerator: 30, denominator: 2, multiple: 15, source: "Derived", asOf: "2023-12-31" },
+  { date: "2024-02-29", year: 2024, numerator: 24, denominator: 3, multiple: 8, source: "Derived", asOf: "2023-12-31" },
+  { date: "2024-03-31", year: 2024, numerator: 60, denominator: 2, multiple: 30, source: "Derived", asOf: "2023-12-31" },
+];
+
+const historicalPeSeries: HistoricalMultipleSeriesPoint[] = [
+  { date: "2024-01-31", year: 2024, numerator: 30, denominator: 2, multiple: 15, source: "Derived", asOf: "2023-12-31" },
+  { date: "2024-02-29", year: 2024, numerator: 24, denominator: 3, multiple: 8, source: "Derived", asOf: "2023-12-31" },
+];
+
+const historicalEvEbitdaSeries: HistoricalMultipleSeriesPoint[] = [
+  { date: "2024-01-31", year: 2024, numerator: 4_100, denominator: 500, multiple: 8.2, source: "Derived", asOf: "2023-12-31" },
+  { date: "2024-02-29", year: 2024, numerator: 3_100, denominator: 400, multiple: 7.75, source: "Derived", asOf: "2023-12-31" },
+];
+
 const historicalInput = {
   ...buildDefaultStockValuationInput({
     ticker: "HIST",
@@ -162,6 +179,11 @@ const multipleInput = {
     priceToFreeCashFlow: historicalPriceToFcfRows,
     peRatio: historicalPeRows,
     evToEbitda: historicalEvEbitdaRows,
+  },
+  historicalMultipleSeries: {
+    priceToFreeCashFlow: historicalPriceToFcfSeries,
+    peRatio: historicalPeSeries,
+    evToEbitda: historicalEvEbitdaSeries,
   },
 };
 
@@ -747,7 +769,7 @@ describe("StockValuationPanel", () => {
     expect((screen.getAllByLabelText("Growth 6-10")[0] as HTMLInputElement).value).toBe("14");
   });
 
-  test("historical multiple calculators are collapsed by default and apply positive ranges to scenarios", async () => {
+  test("historical charts button opens modal and applies positive ranges to scenarios", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
@@ -786,11 +808,12 @@ describe("StockValuationPanel", () => {
 
     await user.click(screen.getByRole("button", { name: /DCF Multiple ·/ }));
 
-    expect(screen.getByRole("button", { name: /Historical multiples/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Historical charts" })).toBeVisible();
     expect(screen.queryByTestId("historical-multiple-row-priceToFreeCashFlow-0")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Historical multiples/ }));
+    await user.click(screen.getByRole("button", { name: "Historical charts" }));
 
+    expect(screen.getByRole("dialog", { name: /Historical charts/ })).toBeVisible();
     expect(screen.getByRole("tab", { name: "P/FCF" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("historical-multiple-bar-chart-priceToFreeCashFlow")).toBeVisible();
     expect(screen.getByTestId("historical-multiple-line-chart-priceToFreeCashFlow")).toBeVisible();
@@ -812,7 +835,7 @@ describe("StockValuationPanel", () => {
     ).toEqual(["30", "17.67", "8"]);
   });
 
-  test("Historical multiples chart block switches between P/E and EV/EBITDA", async () => {
+  test("Historical charts modal switches between P/E and EV/EBITDA and closes", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
@@ -850,12 +873,15 @@ describe("StockValuationPanel", () => {
     await waitFor(() => expect(screen.getByDisplayValue("INTC")).toBeVisible());
 
     await user.click(screen.getByRole("button", { name: /P\/E ·/ }));
-    await user.click(screen.getByRole("button", { name: /Historical multiples/ }));
+    await user.click(screen.getByRole("button", { name: "Historical charts" }));
     expect(screen.getByRole("tab", { name: "P/E" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("historical-multiple-bar-chart-peRatio")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: /EV\/EBITDA ·/ }));
     expect(screen.getByRole("tab", { name: "EV/EBITDA" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("historical-multiple-line-chart-evToEbitda")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Close historical charts" }));
+    expect(screen.queryByRole("dialog", { name: /Historical charts/ })).not.toBeInTheDocument();
   });
 });

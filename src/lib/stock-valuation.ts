@@ -112,12 +112,24 @@ export type HistoricalMultipleRow = {
   reviewReason?: string;
 };
 
+export type HistoricalMultipleSeriesPoint = {
+  date: string;
+  year: number | null;
+  numerator: number | null;
+  denominator: number | null;
+  multiple: number | null;
+  source?: ValuationSource;
+  asOf?: string;
+  needsReview?: boolean;
+  reviewReason?: string;
+};
+
 export type HistoricalMultipleCalculationRow = HistoricalMultipleRow & {
   usableForApply: boolean;
   ignoredReason: "missing" | "negative-or-zero" | "needs-review" | null;
 };
 
-export type HistoricalMultiplePeriodKey = "3Y" | "5Y" | "10Y" | "15Y" | "20Y";
+export type HistoricalMultiplePeriodKey = "TTM" | "3Y" | "5Y" | "10Y" | "15Y" | "20Y";
 
 export type HistoricalMultiplePeriodAverage = {
   key: HistoricalMultiplePeriodKey;
@@ -130,6 +142,7 @@ export type HistoricalMultiplePeriodAverage = {
 export type HistoricalMultipleSummary = {
   key: HistoricalMultipleKey;
   rows: HistoricalMultipleCalculationRow[];
+  seriesPoints: HistoricalMultipleSeriesPoint[];
   currentMultiple: number | null;
   low: number | null;
   average: number | null;
@@ -149,6 +162,9 @@ export type StockValuationInput = {
   sharesOutstanding: number | null;
   historicalFreeCashFlows?: HistoricalFreeCashFlowRow[];
   historicalMultiples?: Partial<Record<HistoricalMultipleKey, HistoricalMultipleRow[]>>;
+  historicalMultipleSeries?: Partial<
+    Record<HistoricalMultipleKey, HistoricalMultipleSeriesPoint[]>
+  >;
   finalWeights: {
     dcf10Years: number;
     evEbitda: number;
@@ -239,6 +255,9 @@ type DefaultInputOptions = {
   fields?: StockValuationAutofillFields;
   historicalFreeCashFlows?: HistoricalFreeCashFlowRow[];
   historicalMultiples?: Partial<Record<HistoricalMultipleKey, HistoricalMultipleRow[]>>;
+  historicalMultipleSeries?: Partial<
+    Record<HistoricalMultipleKey, HistoricalMultipleSeriesPoint[]>
+  >;
 };
 
 const historicalFreeCashFlowRowCount = 11;
@@ -248,6 +267,7 @@ const historicalMultiplePeriods: Array<{
   key: HistoricalMultiplePeriodKey;
   years: number;
 }> = [
+  { key: "TTM", years: 1 },
   { key: "3Y", years: 3 },
   { key: "5Y", years: 5 },
   { key: "10Y", years: 10 },
@@ -283,6 +303,26 @@ function yearOrNull(value: unknown): number | null {
   }
 
   return value >= 1900 && value <= 2200 ? value : null;
+}
+
+function dateOrNull(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+
+  return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
+}
+
+function yearFromDate(date: string | null) {
+  if (!date) {
+    return null;
+  }
+
+  const year = Number(date.slice(0, 4));
+
+  return Number.isInteger(year) ? yearOrNull(year) : null;
 }
 
 function normalizeHistoricalFreeCashFlowRows(
@@ -344,6 +384,60 @@ function normalizeHistoricalMultiples(
     ),
     peRatio: normalizeHistoricalMultipleRows(historicalMultiples.peRatio),
     evToEbitda: normalizeHistoricalMultipleRows(historicalMultiples.evToEbitda),
+  };
+}
+
+function normalizeHistoricalMultipleSeriesPoints(
+  points: HistoricalMultipleSeriesPoint[] | undefined,
+) {
+  return (points ?? [])
+    .map((point) => {
+      const date = dateOrNull(point.date);
+      const normalized: HistoricalMultipleSeriesPoint = {
+        date: date ?? point.date,
+        year: yearOrNull(point.year) ?? yearFromDate(date),
+        numerator: numberOrNull(point.numerator),
+        denominator: numberOrNull(point.denominator),
+        multiple: numberOrNull(point.multiple),
+        source: point.source,
+        asOf: point.asOf,
+      };
+
+      if (point.needsReview === true) {
+        normalized.needsReview = true;
+        normalized.reviewReason =
+          typeof point.reviewReason === "string" ? point.reviewReason : undefined;
+      }
+
+      return normalized;
+    })
+    .filter(
+      (point) =>
+        dateOrNull(point.date) !== null ||
+        point.numerator !== null ||
+        point.denominator !== null ||
+        point.multiple !== null,
+    )
+    .sort((first, second) => first.date.localeCompare(second.date));
+}
+
+function normalizeHistoricalMultipleSeries(
+  historicalMultipleSeries:
+    | Partial<Record<HistoricalMultipleKey, HistoricalMultipleSeriesPoint[]>>
+    | undefined,
+) {
+  if (!historicalMultipleSeries) {
+    return undefined;
+  }
+
+  return {
+    priceToFreeCashFlow: normalizeHistoricalMultipleSeriesPoints(
+      historicalMultipleSeries.priceToFreeCashFlow,
+    ),
+    peRatio: normalizeHistoricalMultipleSeriesPoints(historicalMultipleSeries.peRatio),
+    evToEbitda: normalizeHistoricalMultipleSeriesPoints(
+      historicalMultipleSeries.evToEbitda,
+    ),
   };
 }
 
@@ -451,6 +545,9 @@ export function buildDefaultStockValuationInput(
       options.historicalFreeCashFlows,
     ),
     historicalMultiples: normalizeHistoricalMultiples(options.historicalMultiples),
+    historicalMultipleSeries: normalizeHistoricalMultipleSeries(
+      options.historicalMultipleSeries,
+    ),
     finalWeights: {
       dcf10Years: 0.4,
       evEbitda: 0.3,
@@ -545,27 +642,49 @@ function average(values: number[]) {
   return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
+type HistoricalMultipleAverageSource = Pick<
+  HistoricalMultipleSeriesPoint,
+  "date" | "multiple" | "year"
+>;
+
+function positiveMultiple(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
 function historicalMultiplePeriodAverages(
-  rows: HistoricalMultipleCalculationRow[],
+  points: HistoricalMultipleAverageSource[],
 ): HistoricalMultiplePeriodAverage[] {
-  const usableRows = rows.filter(
-    (row) => row.usableForApply && row.multiple !== null && row.multiple > 0,
-  );
-  const years = usableRows
-    .map((row) => row.year)
+  const usablePoints = points.filter((point) => positiveMultiple(point.multiple));
+  const datedPoints = usablePoints
+    .map((point) => ({ ...point, timestamp: Date.parse(point.date) }))
+    .filter((point) => Number.isFinite(point.timestamp));
+  const latestTimestamp = datedPoints.length
+    ? Math.max(...datedPoints.map((point) => point.timestamp))
+    : null;
+  const years = usablePoints
+    .map((point) => point.year)
     .filter((year): year is number => year !== null);
   const latestYear = years.length ? Math.max(...years) : null;
 
   return historicalMultiplePeriods.map((period) => {
-    const periodRows =
-      latestYear === null
-        ? usableRows.slice(0, period.years)
-        : usableRows.filter(
-            (row) => row.year !== null && row.year >= latestYear - period.years + 1,
-          );
-    const values = periodRows
-      .map((row) => row.multiple)
-      .filter((value): value is number => value !== null && value > 0);
+    const periodPoints =
+      latestTimestamp !== null
+        ? datedPoints.filter((point) => {
+            const startDate = new Date(latestTimestamp);
+            startDate.setUTCFullYear(startDate.getUTCFullYear() - period.years);
+            startDate.setUTCDate(startDate.getUTCDate() + 1);
+
+            return point.timestamp >= startDate.getTime();
+          })
+        : latestYear === null
+          ? usablePoints.slice(0, period.years)
+          : usablePoints.filter(
+              (point) =>
+                point.year !== null && point.year >= latestYear - period.years + 1,
+            );
+    const values = periodPoints
+      .map((point) => point.multiple)
+      .filter(positiveMultiple);
 
     return {
       key: period.key,
@@ -655,31 +774,85 @@ export function calculateHistoricalMultipleSummary(
       };
     },
   );
-  const usableMultiples = rows
-    .filter((row) => row.usableForApply)
+  const explicitSeriesPoints = normalizeHistoricalMultipleSeriesPoints(
+    input.historicalMultipleSeries?.[key],
+  );
+  const seriesPoints =
+    explicitSeriesPoints.length > 0
+      ? explicitSeriesPoints
+      : rows
+          .filter((row) => row.year !== null || row.asOf || row.multiple !== null)
+          .map(
+            (row): HistoricalMultipleSeriesPoint => ({
+              date: dateOrNull(row.asOf) ?? `${row.year ?? 0}-12-31`,
+              year: row.year,
+              numerator: row.numerator,
+              denominator: row.denominator,
+              multiple: row.multiple,
+              source: row.source,
+              asOf: row.asOf,
+              ...(row.needsReview
+                ? { needsReview: true, reviewReason: row.reviewReason }
+                : {}),
+            }),
+          );
+  const displaySource =
+    explicitSeriesPoints.length > 0
+      ? seriesPoints.filter(
+          (point) =>
+            positiveMultiple(point.multiple) &&
+            (point.denominator === null || point.denominator > 0),
+        )
+      : rows.filter((row) => row.usableForApply);
+  const displayMultiples = displaySource
     .map((row) => row.multiple)
-    .filter((value): value is number => value !== null);
-  const low = usableMultiples.length ? Math.min(...usableMultiples) : null;
-  const high = usableMultiples.length ? Math.max(...usableMultiples) : null;
-  const averageMultiple = average(usableMultiples);
+    .filter(positiveMultiple);
+  const applySource =
+    explicitSeriesPoints.length > 0
+      ? seriesPoints.filter(
+          (point) =>
+            point.needsReview !== true &&
+            positiveMultiple(point.multiple) &&
+            point.denominator !== null &&
+            point.denominator > 0,
+        )
+      : rows.filter((row) => row.usableForApply);
+  const applyMultiples = applySource.map((row) => row.multiple).filter(positiveMultiple);
+  const low = displayMultiples.length ? Math.min(...displayMultiples) : null;
+  const high = displayMultiples.length ? Math.max(...displayMultiples) : null;
+  const averageMultiple = average(displayMultiples);
+  const applyLow = applyMultiples.length ? Math.min(...applyMultiples) : null;
+  const applyHigh = applyMultiples.length ? Math.max(...applyMultiples) : null;
+  const applyAverage = average(applyMultiples);
   const currentMultiple = numberOrNull(input.sources?.[key]?.value);
   const applyValues =
-    low !== null && high !== null && averageMultiple !== null
+    applyLow !== null && applyHigh !== null && applyAverage !== null
       ? {
-          optimistic: high,
-          base: averageMultiple,
-          worst: low,
+          optimistic: applyHigh,
+          base: applyAverage,
+          worst: applyLow,
         }
       : null;
 
   return {
     key,
     rows,
+    seriesPoints,
     currentMultiple,
     low,
     average: averageMultiple,
     high,
-    periodAverages: historicalMultiplePeriodAverages(rows),
+    periodAverages: historicalMultiplePeriodAverages(
+      explicitSeriesPoints.length > 0
+        ? seriesPoints
+        : rows
+            .filter((row) => row.usableForApply)
+            .map((row) => ({
+              date: dateOrNull(row.asOf) ?? `${row.year ?? 0}-12-31`,
+              year: row.year,
+              multiple: row.multiple,
+            })),
+    ),
     canApply: applyValues !== null,
     applyValues,
   };

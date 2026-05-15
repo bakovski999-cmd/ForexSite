@@ -8,6 +8,7 @@ import {
   calculateStockValuation,
   type HistoricalFreeCashFlowRow,
   type HistoricalMultipleRow,
+  type HistoricalMultipleSeriesPoint,
   type StockValuationInput,
 } from "@/lib/stock-valuation";
 
@@ -472,12 +473,84 @@ describe("stock valuation workbook parity", () => {
     expect(summary.rows.at(0)?.year).toBe(2025);
     expect(summary.rows.at(-1)?.year).toBe(2006);
     expect(summary.periodAverages).toEqual([
+      { key: "TTM", label: "TTM", years: 1, average: 1, count: 1 },
       { key: "3Y", label: "3Y", years: 3, average: 2, count: 3 },
       { key: "5Y", label: "5Y", years: 5, average: 3, count: 5 },
       { key: "10Y", label: "10Y", years: 10, average: 5.5, count: 10 },
       { key: "15Y", label: "15Y", years: 15, average: 8, count: 15 },
       { key: "20Y", label: "20Y", years: 20, average: 10.5, count: 20 },
     ]);
+  });
+
+  test("historical multiple summary uses monthly series for charts and keeps review rows out of apply values", () => {
+    const seriesPoints: HistoricalMultipleSeriesPoint[] = [
+      {
+        date: "2024-01-31",
+        year: 2024,
+        numerator: 2_000,
+        denominator: 100,
+        multiple: 20,
+        source: "Derived",
+        asOf: "2023-12-31",
+        needsReview: true,
+        reviewReason: "Annual fundamentals are carried forward for this month.",
+      },
+      {
+        date: "2024-02-29",
+        year: 2024,
+        numerator: 1_600,
+        denominator: 100,
+        multiple: 16,
+        source: "Derived",
+        asOf: "2023-12-31",
+        needsReview: true,
+        reviewReason: "Annual fundamentals are carried forward for this month.",
+      },
+      {
+        date: "2024-03-31",
+        year: 2024,
+        numerator: 1_400,
+        denominator: 100,
+        multiple: 14,
+        source: "Derived",
+        asOf: "2023-12-31",
+      },
+      {
+        date: "2024-04-30",
+        year: 2024,
+        numerator: 1_200,
+        denominator: 0,
+        multiple: null,
+        source: "Derived",
+        asOf: "2023-12-31",
+      },
+    ];
+    const input = buildDefaultStockValuationInput({
+      ticker: "META",
+      fields: {
+        evToEbitda: { value: 13.93, source: "Derived" },
+      },
+      historicalMultipleSeries: {
+        evToEbitda: seriesPoints,
+      },
+    });
+
+    const summary = calculateHistoricalMultipleSummary(input, "evToEbitda");
+
+    expect(summary.seriesPoints).toHaveLength(4);
+    expect(summary.low).toBe(14);
+    expect(summary.average).toBeCloseTo(16.666667, 6);
+    expect(summary.high).toBe(20);
+    expect(summary.canApply).toBe(true);
+    expect(summary.applyValues).toEqual({
+      optimistic: 14,
+      base: 14,
+      worst: 14,
+    });
+    expect(summary.periodAverages.find((period) => period.key === "TTM")).toMatchObject({
+      average: expect.closeTo(16.666667, 6),
+      count: 3,
+    });
   });
 
   test("historical multiple summary disables apply when no positive rows exist", () => {

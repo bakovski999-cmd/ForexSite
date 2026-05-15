@@ -3,6 +3,7 @@ import {
   buildDefaultStockValuationInput,
   type HistoricalFreeCashFlowRow,
   type HistoricalMultipleRow,
+  type HistoricalMultipleSeriesPoint,
   type StockValuationAutofillFields,
   type StockValuationAutofillResult,
   type ValuationField,
@@ -17,6 +18,9 @@ type StockValuationAutofillFieldsWithHistory = StockValuationAutofillFields & {
   historicalFreeCashFlows?: HistoricalFreeCashFlowRow[];
   historicalFinancialMetrics?: HistoricalFinancialMetricRow[];
   historicalMultiples?: Partial<Record<"priceToFreeCashFlow" | "peRatio" | "evToEbitda", HistoricalMultipleRow[]>>;
+  historicalMultipleSeries?: Partial<
+    Record<"priceToFreeCashFlow" | "peRatio" | "evToEbitda", HistoricalMultipleSeriesPoint[]>
+  >;
 };
 
 type HistoricalPriceRow = {
@@ -974,12 +978,12 @@ async function fetchYahooHistoricalPrices(
 
   const minYear = Math.min(...years);
   const maxYear = Math.max(...years);
-  const period1 = dateToUnixSeconds(`${minYear - 1}-01-01`);
+  const period1 = dateToUnixSeconds(`${Math.max(minYear - 1, maxYear - 10)}-01-01`);
   const period2 = dateToUnixSeconds(`${maxYear + 1}-01-15`);
   const payload = await fetchJson(
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
       ticker,
-    )}?period1=${period1}&period2=${period2}&interval=1d&events=history`,
+    )}?period1=${period1}&period2=${period2}&interval=1mo&events=history`,
   );
 
   return mapYahooHistoricalPrices(payload);
@@ -1006,6 +1010,27 @@ function yearEndDate(row: HistoricalFinancialMetricRow) {
     : `${row.year}-12-31`;
 }
 
+function metricRowAtOrBefore(
+  metricRows: HistoricalFinancialMetricRow[],
+  asOf: string,
+) {
+  const asOfMs = Date.parse(`${asOf}T23:59:59.999Z`);
+
+  if (!Number.isFinite(asOfMs)) {
+    return null;
+  }
+
+  return (
+    [...metricRows]
+      .filter((row) => Date.parse(`${yearEndDate(row)}T23:59:59.999Z`) <= asOfMs)
+      .sort(
+        (first, second) =>
+          Date.parse(`${yearEndDate(second)}T00:00:00.000Z`) -
+          Date.parse(`${yearEndDate(first)}T00:00:00.000Z`),
+      )[0] ?? null
+  );
+}
+
 function multipleOrNull(numerator: number | null, denominator: number | null) {
   if (
     numerator === null ||
@@ -1023,10 +1048,18 @@ function multipleOrNull(numerator: number | null, denominator: number | null) {
 function buildHistoricalMultiples(
   metricRows: HistoricalFinancialMetricRow[],
   prices: HistoricalPriceRow[],
-): Partial<Record<"priceToFreeCashFlow" | "peRatio" | "evToEbitda", HistoricalMultipleRow[]>> {
+): {
+  historicalMultiples: Partial<Record<"priceToFreeCashFlow" | "peRatio" | "evToEbitda", HistoricalMultipleRow[]>>;
+  historicalMultipleSeries: Partial<
+    Record<"priceToFreeCashFlow" | "peRatio" | "evToEbitda", HistoricalMultipleSeriesPoint[]>
+  >;
+} {
   const priceToFreeCashFlow: HistoricalMultipleRow[] = [];
   const peRatio: HistoricalMultipleRow[] = [];
   const evToEbitda: HistoricalMultipleRow[] = [];
+  const priceToFreeCashFlowSeries: HistoricalMultipleSeriesPoint[] = [];
+  const peRatioSeries: HistoricalMultipleSeriesPoint[] = [];
+  const evToEbitdaSeries: HistoricalMultipleSeriesPoint[] = [];
 
   for (const metricRow of metricRows) {
     const price = priceAtOrBefore(prices, yearEndDate(metricRow));
@@ -1085,10 +1118,76 @@ function buildHistoricalMultiples(
     }
   }
 
+  for (const price of prices) {
+    const metricRow = metricRowAtOrBefore(metricRows, price.date);
+
+    if (!metricRow) {
+      continue;
+    }
+
+    const sharesOutstanding = metricRow.sharesOutstanding;
+    const fcfPerShare =
+      metricRow.freeCashFlow !== undefined &&
+      sharesOutstanding !== undefined &&
+      sharesOutstanding !== 0
+        ? metricRow.freeCashFlow / sharesOutstanding
+        : null;
+    const reviewFields = metricRow.needsReview
+      ? { needsReview: true, reviewReason: metricRow.reviewReason }
+      : {};
+
+    priceToFreeCashFlowSeries.push({
+      date: price.date,
+      year: Number(price.date.slice(0, 4)),
+      numerator: price.close,
+      denominator: fcfPerShare,
+      multiple: multipleOrNull(price.close, fcfPerShare),
+      source: "Derived",
+      asOf: yearEndDate(metricRow),
+      ...reviewFields,
+    });
+
+    peRatioSeries.push({
+      date: price.date,
+      year: Number(price.date.slice(0, 4)),
+      numerator: price.close,
+      denominator: metricRow.eps ?? null,
+      multiple: multipleOrNull(price.close, metricRow.eps ?? null),
+      source: "Derived",
+      asOf: yearEndDate(metricRow),
+      ...reviewFields,
+    });
+
+    if (sharesOutstanding !== undefined && metricRow.ebitda !== undefined) {
+      const enterpriseValue =
+        price.close * sharesOutstanding +
+        (metricRow.totalDebt ?? 0) -
+        (metricRow.cashAndCashEquivalents ?? 0);
+
+      evToEbitdaSeries.push({
+        date: price.date,
+        year: Number(price.date.slice(0, 4)),
+        numerator: enterpriseValue,
+        denominator: metricRow.ebitda,
+        multiple: multipleOrNull(enterpriseValue, metricRow.ebitda),
+        source: "Derived",
+        asOf: yearEndDate(metricRow),
+        ...reviewFields,
+      });
+    }
+  }
+
   return {
-    priceToFreeCashFlow,
-    peRatio,
-    evToEbitda,
+    historicalMultiples: {
+      priceToFreeCashFlow,
+      peRatio,
+      evToEbitda,
+    },
+    historicalMultipleSeries: {
+      priceToFreeCashFlow: priceToFreeCashFlowSeries,
+      peRatio: peRatioSeries,
+      evToEbitda: evToEbitdaSeries,
+    },
   };
 }
 
@@ -1450,12 +1549,19 @@ export async function fetchValuationAutofill(
   let historicalMultiples =
     secFields.historicalMultiples ??
     ({} as Partial<Record<"priceToFreeCashFlow" | "peRatio" | "evToEbitda", HistoricalMultipleRow[]>>);
+  let historicalMultipleSeries =
+    secFields.historicalMultipleSeries ??
+    ({} as Partial<
+      Record<"priceToFreeCashFlow" | "peRatio" | "evToEbitda", HistoricalMultipleSeriesPoint[]>
+    >);
   if (secFields.historicalFinancialMetrics?.length) {
     try {
-      historicalMultiples = buildHistoricalMultiples(
+      const historicalMultipleData = buildHistoricalMultiples(
         secFields.historicalFinancialMetrics,
         await fetchYahooHistoricalPrices(ticker, secFields.historicalFinancialMetrics),
       );
+      historicalMultiples = historicalMultipleData.historicalMultiples;
+      historicalMultipleSeries = historicalMultipleData.historicalMultipleSeries;
     } catch (error) {
       warnings.push(
         `Yahoo historical prices unavailable: ${
@@ -1537,6 +1643,7 @@ export async function fetchValuationAutofill(
     fields,
     historicalFreeCashFlows,
     historicalMultiples,
+    historicalMultipleSeries,
   });
 
   return {
