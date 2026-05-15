@@ -1,10 +1,10 @@
 @AGENTS.md
 
-## graphify
+## Local knowledge graph
 
-This project has a graphify knowledge graph at graphify-out/.
+This project may have a local graphify knowledge graph at `graphify-out/`.
 
 Rules:
-- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
-- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, run `python3 -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"` to keep the graph current
+- Treat graphify output as optional local tooling, not source-of-truth project code.
+- Prefer `docs/PROJECT_MAP.md`, `docs/WORKFLOW.md`, tests, and current source files for implementation decisions.
+- Do not commit `graphify-out/`.
