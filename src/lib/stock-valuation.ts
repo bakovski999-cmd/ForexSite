@@ -1,18 +1,39 @@
 export type ValuationSource =
   | "SEC"
+  | "SEC TTM"
+  | "SEC FY"
+  | "SEC IFRS"
+  | "SEC IFRS + FX"
   | "Alpha Vantage"
   | "Macrotrends"
+  | "IBKR"
   | "Yahoo"
+  | "Yahoo TTM"
+  | "Yahoo TTM + FX"
   | "Manual"
   | "Derived";
 
 export type ValuationSignal = "BUY" | "SELL" | "NEUTRAL";
+
+export type ValuationOriginalValue = {
+  value: number;
+  currency: string;
+  unit?: "total" | "perShare";
+};
+
+export type ValuationFxConversion = {
+  from: string;
+  to: string;
+  rate: number;
+};
 
 export type ValuationField<T = number> = {
   value: T | null;
   source: ValuationSource;
   asOf?: string;
   needsManualInput?: boolean;
+  original?: ValuationOriginalValue;
+  fx?: ValuationFxConversion;
 };
 
 export type ValuationScenarioId = "optimistic" | "base" | "worst";
@@ -53,6 +74,71 @@ export type EvEbitdaScenario = {
   marginOfSafety: number | null;
 };
 
+export type HistoricalFreeCashFlowRow = {
+  year: number | null;
+  freeCashFlow: number | null;
+  source?: ValuationSource;
+  asOf?: string;
+};
+
+export type HistoricalFreeCashFlowCalculationRow = HistoricalFreeCashFlowRow & {
+  label: string;
+  slot: number;
+  growthLabel: string | null;
+  growthPercent: number | null;
+};
+
+export type HistoricalFreeCashFlowAverageCalculation = {
+  rows: HistoricalFreeCashFlowCalculationRow[];
+  averageFreeCashFlow: number | null;
+  averageGrowthPercent: number | null;
+  isPartialHistory: boolean;
+  missingRows: number;
+};
+
+export type HistoricalMultipleKey =
+  | "priceToFreeCashFlow"
+  | "peRatio"
+  | "evToEbitda";
+
+export type HistoricalMultipleRow = {
+  year: number | null;
+  numerator: number | null;
+  denominator: number | null;
+  multiple: number | null;
+  source?: ValuationSource;
+  asOf?: string;
+  needsReview?: boolean;
+  reviewReason?: string;
+};
+
+export type HistoricalMultipleCalculationRow = HistoricalMultipleRow & {
+  usableForApply: boolean;
+  ignoredReason: "missing" | "negative-or-zero" | "needs-review" | null;
+};
+
+export type HistoricalMultiplePeriodKey = "3Y" | "5Y" | "10Y" | "15Y" | "20Y";
+
+export type HistoricalMultiplePeriodAverage = {
+  key: HistoricalMultiplePeriodKey;
+  label: string;
+  years: number;
+  average: number | null;
+  count: number;
+};
+
+export type HistoricalMultipleSummary = {
+  key: HistoricalMultipleKey;
+  rows: HistoricalMultipleCalculationRow[];
+  currentMultiple: number | null;
+  low: number | null;
+  average: number | null;
+  high: number | null;
+  periodAverages: HistoricalMultiplePeriodAverage[];
+  canApply: boolean;
+  applyValues: Record<ValuationScenarioId, number> | null;
+};
+
 export type StockValuationInput = {
   ticker: string;
   companyName: string;
@@ -61,6 +147,8 @@ export type StockValuationInput = {
   analysisDate?: string;
   currentPrice: number | null;
   sharesOutstanding: number | null;
+  historicalFreeCashFlows?: HistoricalFreeCashFlowRow[];
+  historicalMultiples?: Partial<Record<HistoricalMultipleKey, HistoricalMultipleRow[]>>;
   finalWeights: {
     dcf10Years: number;
     evEbitda: number;
@@ -113,6 +201,12 @@ export type StockValuationResult = {
   };
 };
 
+export type FcfPerShareTtmCalculation = {
+  freeCashFlow: number | null;
+  sharesOutstanding: number | null;
+  fcfPerShare: number | null;
+};
+
 export type StockValuationAutofillFields = Partial<{
   companyName: ValuationField<string>;
   currentPrice: ValuationField;
@@ -143,7 +237,23 @@ type DefaultInputOptions = {
   sharesOutstanding?: number | null;
   currency?: string;
   fields?: StockValuationAutofillFields;
+  historicalFreeCashFlows?: HistoricalFreeCashFlowRow[];
+  historicalMultiples?: Partial<Record<HistoricalMultipleKey, HistoricalMultipleRow[]>>;
 };
+
+const historicalFreeCashFlowRowCount = 11;
+const historicalMultipleRowCount = 20;
+
+const historicalMultiplePeriods: Array<{
+  key: HistoricalMultiplePeriodKey;
+  years: number;
+}> = [
+  { key: "3Y", years: 3 },
+  { key: "5Y", years: 5 },
+  { key: "10Y", years: 10 },
+  { key: "15Y", years: 15 },
+  { key: "20Y", years: 20 },
+];
 
 const scenarioLabels: Record<ValuationScenarioId, string> = {
   optimistic: "Best",
@@ -165,6 +275,76 @@ function numberOrNull(value: unknown): number | null {
   }
 
   return null;
+}
+
+function yearOrNull(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    return null;
+  }
+
+  return value >= 1900 && value <= 2200 ? value : null;
+}
+
+function normalizeHistoricalFreeCashFlowRows(
+  rows: HistoricalFreeCashFlowRow[] | undefined,
+) {
+  return (rows ?? [])
+    .map((row) => ({
+      year: yearOrNull(row.year),
+      freeCashFlow: numberOrNull(row.freeCashFlow),
+      source: row.source,
+      asOf: row.asOf,
+    }))
+    .filter((row) => row.year !== null || row.freeCashFlow !== null)
+    .sort((first, second) => (second.year ?? -Infinity) - (first.year ?? -Infinity))
+    .slice(0, historicalFreeCashFlowRowCount);
+}
+
+function normalizeHistoricalMultipleRows(rows: HistoricalMultipleRow[] | undefined) {
+  return (rows ?? [])
+    .map((row) => {
+      const normalized: HistoricalMultipleRow = {
+        year: yearOrNull(row.year),
+        numerator: numberOrNull(row.numerator),
+        denominator: numberOrNull(row.denominator),
+        multiple: numberOrNull(row.multiple),
+        source: row.source,
+        asOf: row.asOf,
+      };
+
+      if (row.needsReview === true) {
+        normalized.needsReview = true;
+        normalized.reviewReason =
+          typeof row.reviewReason === "string" ? row.reviewReason : undefined;
+      }
+
+      return normalized;
+    })
+    .filter(
+      (row) =>
+        row.year !== null ||
+        row.numerator !== null ||
+        row.denominator !== null ||
+        row.multiple !== null,
+    )
+    .sort((first, second) => (second.year ?? -Infinity) - (first.year ?? -Infinity))
+    .slice(0, historicalMultipleRowCount);
+}
+
+function normalizeHistoricalMultiples(
+  historicalMultiples: Partial<Record<HistoricalMultipleKey, HistoricalMultipleRow[]>> | undefined,
+) {
+  if (!historicalMultiples) {
+    return undefined;
+  }
+
+  return {
+    priceToFreeCashFlow: normalizeHistoricalMultipleRows(
+      historicalMultiples.priceToFreeCashFlow,
+    ),
+    peRatio: normalizeHistoricalMultipleRows(historicalMultiples.peRatio),
+    evToEbitda: normalizeHistoricalMultipleRows(historicalMultiples.evToEbitda),
+  };
 }
 
 function sourceValue(fields: StockValuationAutofillFields | undefined, key: keyof StockValuationAutofillFields) {
@@ -255,16 +435,6 @@ export function buildDefaultStockValuationInput(
   const currency = options.currency || stringSourceValue(fields, "currency") || "USD";
   const freeCashFlow = sourceValue(fields, "freeCashFlow");
   const eps = sourceValue(fields, "eps");
-  const currentPriceValue = numberOrNull(currentPrice);
-  const peRatio =
-    sourceValue(fields, "peRatio") ??
-    (currentPriceValue !== null && eps && eps !== 0 ? currentPriceValue / eps : null);
-  const priceToFreeCashFlow =
-    sourceValue(fields, "priceToFreeCashFlow") ??
-    (currentPriceValue !== null && freeCashFlow && sharesOutstanding
-      ? currentPriceValue / (freeCashFlow / sharesOutstanding)
-      : null);
-  const evToEbitda = sourceValue(fields, "evToEbitda");
   const fcfPerShare =
     freeCashFlow !== null && sharesOutstanding && sharesOutstanding !== 0
       ? freeCashFlow / sharesOutstanding
@@ -277,6 +447,10 @@ export function buildDefaultStockValuationInput(
     analysisDate: todayIsoDate(),
     currentPrice,
     sharesOutstanding,
+    historicalFreeCashFlows: normalizeHistoricalFreeCashFlowRows(
+      options.historicalFreeCashFlows,
+    ),
+    historicalMultiples: normalizeHistoricalMultiples(options.historicalMultiples),
     finalWeights: {
       dcf10Years: 0.4,
       evEbitda: 0.3,
@@ -294,16 +468,16 @@ export function buildDefaultStockValuationInput(
       },
       evEbitda: {
         scenarios: [
-          evEbitdaScenario("optimistic", 0.25, 0.19, 0.14, evToEbitda ?? 18, fields),
-          evEbitdaScenario("base", 0.5, 0.15, 0.1, evToEbitda ?? 14, fields),
-          evEbitdaScenario("worst", 0.25, 0.1, 0.05, evToEbitda ?? 11, fields),
+          evEbitdaScenario("optimistic", 0.25, 0.19, 0.14, 18, fields),
+          evEbitdaScenario("base", 0.5, 0.15, 0.1, 14, fields),
+          evEbitdaScenario("worst", 0.25, 0.1, 0.05, 11, fields),
         ],
       },
       pe: {
         scenarios: [
-          terminalMultipleScenario("optimistic", 0.2, 0.2, 0.15, peRatio ?? 29, eps),
-          terminalMultipleScenario("base", 0.5, 0.15, 0.1, peRatio ?? 24, eps),
-          terminalMultipleScenario("worst", 0.3, 0.1, 0.05, peRatio ?? 18, eps),
+          terminalMultipleScenario("optimistic", 0.2, 0.2, 0.15, 29, eps),
+          terminalMultipleScenario("base", 0.5, 0.15, 0.1, 24, eps),
+          terminalMultipleScenario("worst", 0.3, 0.1, 0.05, 18, eps),
         ],
       },
       dcfMultiple: {
@@ -313,7 +487,7 @@ export function buildDefaultStockValuationInput(
             0.25,
             0.2,
             0.15,
-            priceToFreeCashFlow ?? 31,
+            31,
             fcfPerShare,
           ),
           terminalMultipleScenario(
@@ -321,7 +495,7 @@ export function buildDefaultStockValuationInput(
             0.5,
             0.15,
             0.1,
-            priceToFreeCashFlow ?? 28,
+            28,
             fcfPerShare,
           ),
           terminalMultipleScenario(
@@ -329,12 +503,185 @@ export function buildDefaultStockValuationInput(
             0.25,
             0.1,
             0.05,
-            priceToFreeCashFlow ?? 24,
+            24,
             fcfPerShare,
           ),
         ],
       },
     },
+  };
+}
+
+export function calculateFcfPerShareTtm(
+  input: StockValuationInput,
+): FcfPerShareTtmCalculation {
+  const dcfScenarios = input.models.dcf10Years.scenarios;
+  const averageScenario = dcfScenarios.find((scenario) => scenario.id === "base");
+  const averageFcf = numberOrNull(averageScenario?.baseFreeCashFlow);
+  const firstScenarioFcf =
+    dcfScenarios
+      .map((scenario) => numberOrNull(scenario.baseFreeCashFlow))
+      .find((value) => value !== null) ?? null;
+  const sourceFcf = numberOrNull(input.sources?.freeCashFlow?.value);
+  const freeCashFlow = averageFcf ?? firstScenarioFcf ?? sourceFcf;
+  const sharesOutstanding = numberOrNull(input.sharesOutstanding);
+  const fcfPerShare =
+    freeCashFlow !== null && sharesOutstanding !== null && sharesOutstanding !== 0
+      ? freeCashFlow / sharesOutstanding
+      : null;
+
+  return {
+    freeCashFlow,
+    sharesOutstanding,
+    fcfPerShare,
+  };
+}
+
+function average(values: number[]) {
+  if (values.length === 0) {
+    return null;
+  }
+
+  return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function historicalMultiplePeriodAverages(
+  rows: HistoricalMultipleCalculationRow[],
+): HistoricalMultiplePeriodAverage[] {
+  const usableRows = rows.filter(
+    (row) => row.usableForApply && row.multiple !== null && row.multiple > 0,
+  );
+  const years = usableRows
+    .map((row) => row.year)
+    .filter((year): year is number => year !== null);
+  const latestYear = years.length ? Math.max(...years) : null;
+
+  return historicalMultiplePeriods.map((period) => {
+    const periodRows =
+      latestYear === null
+        ? usableRows.slice(0, period.years)
+        : usableRows.filter(
+            (row) => row.year !== null && row.year >= latestYear - period.years + 1,
+          );
+    const values = periodRows
+      .map((row) => row.multiple)
+      .filter((value): value is number => value !== null && value > 0);
+
+    return {
+      key: period.key,
+      label: period.key,
+      years: period.years,
+      average: average(values),
+      count: values.length,
+    };
+  });
+}
+
+export function calculateHistoricalFcfAverage(
+  input: StockValuationInput,
+): HistoricalFreeCashFlowAverageCalculation {
+  const sourceRows = normalizeHistoricalFreeCashFlowRows(input.historicalFreeCashFlows);
+  const paddedRows: HistoricalFreeCashFlowRow[] = Array.from(
+    { length: historicalFreeCashFlowRowCount },
+    (_, index) => sourceRows[index] ?? { year: null, freeCashFlow: null },
+  );
+  const rows = paddedRows.map((row, slot): HistoricalFreeCashFlowCalculationRow => {
+    const yearIndex = historicalFreeCashFlowRowCount - 1 - slot;
+    const previousRow = paddedRows[slot + 1];
+    const currentFcf = numberOrNull(row.freeCashFlow);
+    const previousFcf = numberOrNull(previousRow?.freeCashFlow);
+    const growthPercent =
+      yearIndex > 0 &&
+      currentFcf !== null &&
+      previousFcf !== null &&
+      previousFcf !== 0
+        ? (currentFcf - previousFcf) / Math.abs(previousFcf)
+        : null;
+
+    return {
+      year: yearOrNull(row.year),
+      freeCashFlow: currentFcf,
+      source: row.source,
+      asOf: row.asOf,
+      label: `Year ${yearIndex}`,
+      slot,
+      growthLabel: yearIndex > 0 ? `Y${yearIndex - 1} to Y${yearIndex}` : null,
+      growthPercent,
+    };
+  });
+  const numericFreeCashFlows = rows
+    .map((row) => numberOrNull(row.freeCashFlow))
+    .filter((value): value is number => value !== null);
+  const validGrowthPercents = rows
+    .map((row) => numberOrNull(row.growthPercent))
+    .filter((value): value is number => value !== null);
+
+  return {
+    rows,
+    averageFreeCashFlow: average(numericFreeCashFlows),
+    averageGrowthPercent: average(validGrowthPercents),
+    isPartialHistory: numericFreeCashFlows.length < historicalFreeCashFlowRowCount,
+    missingRows: historicalFreeCashFlowRowCount - numericFreeCashFlows.length,
+  };
+}
+
+export function calculateHistoricalMultipleSummary(
+  input: StockValuationInput,
+  key: HistoricalMultipleKey,
+): HistoricalMultipleSummary {
+  const rows = normalizeHistoricalMultipleRows(input.historicalMultiples?.[key]).map(
+    (row): HistoricalMultipleCalculationRow => {
+      const multiple = numberOrNull(row.multiple);
+      const denominator = numberOrNull(row.denominator);
+      const usableForApply =
+        row.needsReview !== true &&
+        multiple !== null &&
+        multiple > 0 &&
+        denominator !== null &&
+        denominator > 0;
+      const ignoredReason =
+        usableForApply
+          ? null
+          : row.needsReview === true
+            ? "needs-review"
+            : multiple === null || denominator === null
+              ? "missing"
+              : "negative-or-zero";
+
+      return {
+        ...row,
+        usableForApply,
+        ignoredReason,
+      };
+    },
+  );
+  const usableMultiples = rows
+    .filter((row) => row.usableForApply)
+    .map((row) => row.multiple)
+    .filter((value): value is number => value !== null);
+  const low = usableMultiples.length ? Math.min(...usableMultiples) : null;
+  const high = usableMultiples.length ? Math.max(...usableMultiples) : null;
+  const averageMultiple = average(usableMultiples);
+  const currentMultiple = numberOrNull(input.sources?.[key]?.value);
+  const applyValues =
+    low !== null && high !== null && averageMultiple !== null
+      ? {
+          optimistic: high,
+          base: averageMultiple,
+          worst: low,
+        }
+      : null;
+
+  return {
+    key,
+    rows,
+    currentMultiple,
+    low,
+    average: averageMultiple,
+    high,
+    periodAverages: historicalMultiplePeriodAverages(rows),
+    canApply: applyValues !== null,
+    applyValues,
   };
 }
 
@@ -420,6 +767,7 @@ function calculateDcfScenario(
     scenario.baseFreeCashFlow!,
     scenario.growthNextFiveYears!,
     scenario.growthYearsFiveToTen!,
+    // The source workbook applies the Average scenario's second-stage growth from year 5.
     scenario.id === "base" ? 4 : 5,
   );
   const discountedCashFlows = forecast.reduce(

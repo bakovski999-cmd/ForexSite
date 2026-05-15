@@ -2,9 +2,63 @@ import { describe, expect, test } from "vitest";
 
 import {
   buildDefaultStockValuationInput,
+  calculateFcfPerShareTtm,
+  calculateHistoricalFcfAverage,
+  calculateHistoricalMultipleSummary,
   calculateStockValuation,
+  type HistoricalFreeCashFlowRow,
+  type HistoricalMultipleRow,
   type StockValuationInput,
 } from "@/lib/stock-valuation";
+
+const screenshotHistoricalFcfRows: HistoricalFreeCashFlowRow[] = [
+  { year: 2023, freeCashFlow: 4358, source: "Manual" },
+  { year: 2022, freeCashFlow: 8502, source: "Manual" },
+  { year: 2021, freeCashFlow: 3787, source: "Manual" },
+  { year: 2020, freeCashFlow: 2786, source: "Manual" },
+  { year: 2019, freeCashFlow: 1078, source: "Manual" },
+  { year: 2018, freeCashFlow: -3, source: "Manual" },
+  { year: 2017, freeCashFlow: -3476, source: "Manual" },
+  { year: 2016, freeCashFlow: -1404.63, source: "Manual" },
+  { year: 2015, freeCashFlow: -2159.35, source: "Manual" },
+  { year: 2014, freeCashFlow: -1027.22, source: "Manual" },
+  { year: 2013, freeCashFlow: 0.58, source: "Manual" },
+];
+
+const historicalPriceToFcfRows: HistoricalMultipleRow[] = [
+  {
+    year: 2025,
+    numerator: 40,
+    denominator: -2,
+    multiple: -20,
+    source: "Yahoo",
+    asOf: "2025-12-31",
+  },
+  {
+    year: 2024,
+    numerator: 30,
+    denominator: 2,
+    multiple: 15,
+    source: "Yahoo",
+    asOf: "2024-12-31",
+  },
+  {
+    year: 2023,
+    numerator: 24,
+    denominator: 3,
+    multiple: 8,
+    source: "Yahoo",
+    asOf: "2023-12-31",
+  },
+  {
+    year: 2022,
+    numerator: 60,
+    denominator: 2,
+    multiple: 30,
+    source: "Yahoo",
+    asOf: "2022-12-31",
+  },
+];
 
 const metaWorkbookInput: StockValuationInput = {
   ticker: "META",
@@ -209,5 +263,291 @@ describe("stock valuation workbook parity", () => {
     expect(result.missingFields).toContain(
       "models.dcf10Years.scenarios.optimistic.baseFreeCashFlow",
     );
+  });
+
+  test("keeps workbook default multiples instead of overwriting scenarios with market multiples", () => {
+    const input = buildDefaultStockValuationInput({
+      ticker: "GOOG",
+      currentPrice: 381.54,
+      sharesOutstanding: 5_456_000_000,
+      fields: {
+        currentPrice: { value: 381.54, source: "Yahoo" },
+        sharesOutstanding: { value: 5_456_000_000, source: "Alpha Vantage" },
+        freeCashFlow: { value: 64_429_000_000, source: "SEC TTM", asOf: "TTM 2026-03-31" },
+        ebitda: { value: 123_166_000_000, source: "Alpha Vantage" },
+        eps: { value: 13.11, source: "SEC TTM", asOf: "TTM 2026-03-31" },
+        peRatio: { value: 55.35, source: "Alpha Vantage" },
+        evToEbitda: { value: 22.4, source: "Alpha Vantage" },
+        priceToFreeCashFlow: { value: 32.3, source: "Derived" },
+      },
+    });
+
+    expect(input.models.evEbitda.scenarios.map((scenario) => scenario.terminalMultiple)).toEqual([
+      18,
+      14,
+      11,
+    ]);
+    expect(input.models.pe.scenarios.map((scenario) => scenario.terminalMultiple)).toEqual([
+      29,
+      24,
+      18,
+    ]);
+    expect(input.models.dcfMultiple.scenarios.map((scenario) => scenario.terminalMultiple)).toEqual([
+      31,
+      28,
+      24,
+    ]);
+    expect(input.models.dcf10Years.scenarios[0].baseFreeCashFlow).toBe(64_429_000_000);
+    expect(input.models.dcfMultiple.scenarios[0].baseMetricPerShare).toBeCloseTo(
+      64_429_000_000 / 5_456_000_000,
+      6,
+    );
+  });
+
+  test("calculates FCF per share TTM from DCF average FCF and shares outstanding", () => {
+    const input = buildDefaultStockValuationInput({
+      ticker: "GOOG",
+      currentPrice: 381.54,
+      sharesOutstanding: 5_456_000_000,
+      fields: {
+        freeCashFlow: { value: 64_429_000_000, source: "SEC TTM", asOf: "TTM 2026-03-31" },
+        sharesOutstanding: { value: 5_456_000_000, source: "Alpha Vantage" },
+      },
+    });
+
+    const calculation = calculateFcfPerShareTtm(input);
+
+    expect(calculation.freeCashFlow).toBe(64_429_000_000);
+    expect(calculation.sharesOutstanding).toBe(5_456_000_000);
+    expect(calculation.fcfPerShare).toBeCloseTo(11.808834, 6);
+  });
+
+  test("returns null FCF per share TTM when FCF or shares are missing", () => {
+    const missingShares = buildDefaultStockValuationInput({
+      ticker: "GOOG",
+      fields: {
+        freeCashFlow: { value: 64_429_000_000, source: "SEC TTM" },
+      },
+    });
+    const missingFcf = buildDefaultStockValuationInput({
+      ticker: "GOOG",
+      sharesOutstanding: 5_456_000_000,
+    });
+
+    expect(calculateFcfPerShareTtm(missingShares).fcfPerShare).toBeNull();
+    expect(calculateFcfPerShareTtm(missingFcf).fcfPerShare).toBeNull();
+  });
+
+  test("uses the current DCF 10 years average FCF when assumptions change", () => {
+    const input = buildDefaultStockValuationInput({
+      ticker: "GOOG",
+      sharesOutstanding: 5_456_000_000,
+      fields: {
+        freeCashFlow: { value: 64_429_000_000, source: "SEC TTM" },
+        sharesOutstanding: { value: 5_456_000_000, source: "Alpha Vantage" },
+      },
+    });
+    const averageScenario = input.models.dcf10Years.scenarios.find(
+      (scenario) => scenario.id === "base",
+    );
+
+    if (!averageScenario) {
+      throw new Error("Missing DCF average scenario");
+    }
+
+    averageScenario.baseFreeCashFlow = 70_000_000_000;
+
+    expect(calculateFcfPerShareTtm(input).fcfPerShare).toBeCloseTo(
+      70_000_000_000 / 5_456_000_000,
+      6,
+    );
+  });
+
+  test("calculates historical 10 year FCF average and YoY percentage like the workbook calculator", () => {
+    const input = buildDefaultStockValuationInput({
+      ticker: "TEST",
+      historicalFreeCashFlows: screenshotHistoricalFcfRows,
+    });
+
+    const calculation = calculateHistoricalFcfAverage(input);
+
+    expect(calculation.rows).toHaveLength(11);
+    expect(calculation.rows[0]).toMatchObject({
+      label: "Year 10",
+      year: 2023,
+      freeCashFlow: 4358,
+      growthLabel: "Y9 to Y10",
+    });
+    expect(calculation.rows[10]).toMatchObject({
+      label: "Year 0",
+      year: 2013,
+      freeCashFlow: 0.58,
+      growthLabel: null,
+      growthPercent: null,
+    });
+    expect(calculation.rows[0].growthPercent).toBeCloseTo(-0.487414726, 6);
+    expect(calculation.rows[4].growthPercent).toBeCloseTo(360.333333, 6);
+    expect(calculation.averageFreeCashFlow).toBeCloseTo(1131.034545, 6);
+    expect(calculation.averageGrowthPercent).toBeCloseTo(-141.026244, 6);
+    expect(calculation.isPartialHistory).toBe(false);
+    expect(calculation.missingRows).toBe(0);
+  });
+
+  test("historical FCF calculation treats zero or missing previous years as needs input", () => {
+    const input = buildDefaultStockValuationInput({
+      ticker: "TEST",
+      historicalFreeCashFlows: [
+        { year: 2023, freeCashFlow: 100, source: "Manual" },
+        { year: 2022, freeCashFlow: 0, source: "Manual" },
+        { year: 2021, freeCashFlow: null, source: "Manual" },
+      ],
+    });
+
+    const calculation = calculateHistoricalFcfAverage(input);
+
+    expect(calculation.rows[0].growthPercent).toBeNull();
+    expect(calculation.rows[1].growthPercent).toBeNull();
+    expect(calculation.averageFreeCashFlow).toBe(50);
+    expect(calculation.averageGrowthPercent).toBeNull();
+    expect(calculation.isPartialHistory).toBe(true);
+    expect(calculation.missingRows).toBe(9);
+  });
+
+  test("historical multiple summary shows raw rows but applies only positive usable multiples", () => {
+    const input = buildDefaultStockValuationInput({
+      ticker: "INTC",
+      fields: {
+        priceToFreeCashFlow: { value: -17.21, source: "Derived" },
+      },
+    });
+    input.historicalMultiples = {
+      priceToFreeCashFlow: historicalPriceToFcfRows,
+    };
+
+    const summary = calculateHistoricalMultipleSummary(input, "priceToFreeCashFlow");
+
+    expect(summary.rows).toHaveLength(4);
+    expect(summary.rows[0]).toMatchObject({
+      year: 2025,
+      multiple: -20,
+      usableForApply: false,
+      ignoredReason: "negative-or-zero",
+    });
+    expect(summary.currentMultiple).toBe(-17.21);
+    expect(summary.low).toBe(8);
+    expect(summary.average).toBeCloseTo(17.666667, 6);
+    expect(summary.high).toBe(30);
+    expect(summary.applyValues).toEqual({
+      optimistic: 30,
+      base: expect.closeTo(17.666667, 6),
+      worst: 8,
+    });
+    expect(summary.canApply).toBe(true);
+  });
+
+  test("historical multiple summary keeps up to 20 years and calculates period averages", () => {
+    const rows = Array.from({ length: 22 }, (_, index): HistoricalMultipleRow => {
+      const year = 2025 - index;
+      const multiple = index + 1;
+
+      return {
+        year,
+        numerator: multiple * 10,
+        denominator: 10,
+        multiple,
+        source: "Derived",
+        asOf: `${year}-12-31`,
+      };
+    });
+    const input = buildDefaultStockValuationInput({
+      ticker: "LONG",
+      historicalMultiples: {
+        evToEbitda: rows,
+      },
+    });
+
+    const summary = calculateHistoricalMultipleSummary(input, "evToEbitda");
+
+    expect(summary.rows).toHaveLength(20);
+    expect(summary.rows.at(0)?.year).toBe(2025);
+    expect(summary.rows.at(-1)?.year).toBe(2006);
+    expect(summary.periodAverages).toEqual([
+      { key: "3Y", label: "3Y", years: 3, average: 2, count: 3 },
+      { key: "5Y", label: "5Y", years: 5, average: 3, count: 5 },
+      { key: "10Y", label: "10Y", years: 10, average: 5.5, count: 10 },
+      { key: "15Y", label: "15Y", years: 15, average: 8, count: 15 },
+      { key: "20Y", label: "20Y", years: 20, average: 10.5, count: 20 },
+    ]);
+  });
+
+  test("historical multiple summary disables apply when no positive rows exist", () => {
+    const input = buildDefaultStockValuationInput({ ticker: "LOSS" });
+    input.historicalMultiples = {
+      peRatio: [
+        {
+          year: 2025,
+          numerator: 12,
+          denominator: -1,
+          multiple: -12,
+          source: "Yahoo",
+          asOf: "2025-12-31",
+        },
+        {
+          year: 2024,
+          numerator: 10,
+          denominator: 0,
+          multiple: null,
+          source: "Yahoo",
+          asOf: "2024-12-31",
+        },
+      ],
+    };
+
+    const summary = calculateHistoricalMultipleSummary(input, "peRatio");
+
+    expect(summary.rows.map((row) => row.usableForApply)).toEqual([false, false]);
+    expect(summary.low).toBeNull();
+    expect(summary.average).toBeNull();
+    expect(summary.high).toBeNull();
+    expect(summary.applyValues).toBeNull();
+    expect(summary.canApply).toBe(false);
+  });
+
+  test("historical multiple summary marks currency or ADR uncertain rows as needs review", () => {
+    const input = buildDefaultStockValuationInput({ ticker: "NVO" });
+    input.historicalMultiples = {
+      peRatio: [
+        {
+          year: 2025,
+          numerator: 45.8,
+          denominator: 23.03,
+          multiple: 1.99,
+          source: "SEC IFRS",
+          asOf: "2025-12-31",
+          needsReview: true,
+          reviewReason: "Price is USD ADR, denominator is DKK ordinary-share data.",
+        },
+        {
+          year: 2024,
+          numerator: 40,
+          denominator: 4,
+          multiple: 10,
+          source: "Derived",
+          asOf: "2024-12-31",
+        },
+      ],
+    };
+
+    const summary = calculateHistoricalMultipleSummary(input, "peRatio");
+
+    expect(summary.rows[0].usableForApply).toBe(false);
+    expect(summary.rows[0].ignoredReason).toBe("needs-review");
+    expect(summary.rows[1].usableForApply).toBe(true);
+    expect(summary.average).toBe(10);
+    expect(summary.applyValues).toEqual({
+      optimistic: 10,
+      base: 10,
+      worst: 10,
+    });
   });
 });

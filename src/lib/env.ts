@@ -29,6 +29,8 @@ const envSchema = z.object({
   OPENAI_API_KEY: optionalString,
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
   ALPHA_VANTAGE_API_KEY: optionalString,
+  IBKR_CLIENT_PORTAL_BASE_URL: optionalUrl,
+  IBKR_ACCOUNT_ID: optionalString,
   FRED_API_KEY: optionalString,
   ESTAT_APP_ID: optionalString,
   TRADING_ECONOMICS_API_KEY: optionalString,

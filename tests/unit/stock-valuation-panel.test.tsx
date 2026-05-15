@@ -1,9 +1,19 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { StockValuationPanel } from "@/components/stock-valuation-panel";
-import { buildDefaultStockValuationInput } from "@/lib/stock-valuation";
+import {
+  buildDefaultStockValuationInput,
+  type HistoricalFreeCashFlowRow,
+  type HistoricalMultipleRow,
+} from "@/lib/stock-valuation";
+
+vi.mock("@/components/charts/base-chart", () => ({
+  BaseChart: ({ height }: { height?: number }) => (
+    <div data-height={height} data-testid="mock-base-chart" />
+  ),
+}));
 
 const metaInput = buildDefaultStockValuationInput({
   ticker: "META",
@@ -21,6 +31,139 @@ const metaInput = buildDefaultStockValuationInput({
     priceToFreeCashFlow: { value: 23.48, source: "Derived" },
   },
 });
+
+const sofiInput = buildDefaultStockValuationInput({
+  ticker: "SOFI",
+  companyName: "SoFi Technologies, Inc.",
+  currentPrice: 15.65,
+  sharesOutstanding: 1_100_000_000,
+  fields: {
+    currentPrice: { value: 15.65, source: "Yahoo" },
+    sharesOutstanding: { value: 1_100_000_000, source: "Alpha Vantage" },
+    freeCashFlow: { value: 600_000_000, source: "SEC FY", asOf: "FY 2025" },
+    ebitda: { value: 500_000_000, source: "Alpha Vantage" },
+    eps: { value: 0.15, source: "Alpha Vantage" },
+  },
+});
+
+const googInput = buildDefaultStockValuationInput({
+  ticker: "GOOG",
+  companyName: "Alphabet Inc.",
+  currentPrice: 381.54,
+  sharesOutstanding: 5_456_000_000,
+  fields: {
+    currentPrice: { value: 381.54, source: "Yahoo" },
+    sharesOutstanding: { value: 5_456_000_000, source: "Alpha Vantage" },
+    freeCashFlow: { value: 64_429_000_000, source: "SEC TTM", asOf: "TTM 2026-03-31" },
+    ebitda: { value: 123_166_000_000, source: "Alpha Vantage" },
+    eps: { value: 13.11, source: "SEC TTM", asOf: "TTM 2026-03-31" },
+  },
+});
+
+const nvoFxInput = buildDefaultStockValuationInput({
+  ticker: "NVO",
+  companyName: "Novo Nordisk A/S",
+  currentPrice: 45.8,
+  sharesOutstanding: 3_357_979_000,
+  fields: {
+    currentPrice: { value: 45.8, source: "Yahoo" },
+    sharesOutstanding: { value: 3_357_979_000, source: "Alpha Vantage" },
+    freeCashFlow: {
+      value: 4_809_573_000,
+      source: "Yahoo TTM + FX",
+      asOf: "TTM 2026-03-31",
+      original: { value: 30_890_000_000, currency: "DKK", unit: "total" },
+      fx: { from: "DKK", to: "USD", rate: 0.1557 },
+    },
+    ebitda: {
+      value: 28_008_873_000,
+      source: "Yahoo TTM + FX",
+      asOf: "TTM 2026-03-31",
+      original: { value: 179_890_000_000, currency: "DKK", unit: "total" },
+      fx: { from: "DKK", to: "USD", rate: 0.1557 },
+    },
+    eps: {
+      value: 4.27,
+      source: "Yahoo TTM + FX",
+      asOf: "TTM 2026-03-31",
+      original: { value: 27.41, currency: "DKK", unit: "perShare" },
+      fx: { from: "DKK", to: "USD", rate: 0.1557 },
+    },
+  },
+});
+
+const screenshotHistoricalFcfRows: HistoricalFreeCashFlowRow[] = [
+  { year: 2023, freeCashFlow: 4358, source: "Manual" },
+  { year: 2022, freeCashFlow: 8502, source: "Manual" },
+  { year: 2021, freeCashFlow: 3787, source: "Manual" },
+  { year: 2020, freeCashFlow: 2786, source: "Manual" },
+  { year: 2019, freeCashFlow: 1078, source: "Manual" },
+  { year: 2018, freeCashFlow: -3, source: "Manual" },
+  { year: 2017, freeCashFlow: -3476, source: "Manual" },
+  { year: 2016, freeCashFlow: -1404.63, source: "Manual" },
+  { year: 2015, freeCashFlow: -2159.35, source: "Manual" },
+  { year: 2014, freeCashFlow: -1027.22, source: "Manual" },
+  { year: 2013, freeCashFlow: 0.58, source: "Manual" },
+];
+
+const historicalPriceToFcfRows: HistoricalMultipleRow[] = [
+  { year: 2025, numerator: 40, denominator: -2, multiple: -20, source: "Yahoo", asOf: "2025-12-31" },
+  { year: 2024, numerator: 30, denominator: 2, multiple: 15, source: "Yahoo", asOf: "2024-12-31" },
+  { year: 2023, numerator: 24, denominator: 3, multiple: 8, source: "Yahoo", asOf: "2023-12-31" },
+  { year: 2022, numerator: 60, denominator: 2, multiple: 30, source: "Yahoo", asOf: "2022-12-31" },
+];
+
+const historicalPeRows: HistoricalMultipleRow[] = [
+  { year: 2025, numerator: 40, denominator: -1, multiple: -40, source: "Yahoo", asOf: "2025-12-31" },
+  { year: 2024, numerator: 30, denominator: 2, multiple: 15, source: "Yahoo", asOf: "2024-12-31" },
+  { year: 2023, numerator: 24, denominator: 3, multiple: 8, source: "Yahoo", asOf: "2023-12-31" },
+];
+
+const historicalEvEbitdaRows: HistoricalMultipleRow[] = [
+  { year: 2025, numerator: 4_100, denominator: 500, multiple: 8.2, source: "Derived", asOf: "2025-12-31" },
+  { year: 2024, numerator: 3_100, denominator: 400, multiple: 7.75, source: "Derived", asOf: "2024-12-31" },
+  { year: 2023, numerator: 2_000, denominator: -100, multiple: -20, source: "Derived", asOf: "2023-12-31" },
+];
+
+const historicalInput = {
+  ...buildDefaultStockValuationInput({
+    ticker: "HIST",
+    companyName: "History Corp",
+    currentPrice: 10,
+    sharesOutstanding: 100,
+    historicalFreeCashFlows: screenshotHistoricalFcfRows,
+    fields: {
+      currentPrice: { value: 10, source: "Manual" },
+      sharesOutstanding: { value: 100, source: "Manual" },
+      freeCashFlow: { value: -6336345000, source: "SEC TTM" },
+    },
+  }),
+  historicalFreeCashFlows: screenshotHistoricalFcfRows,
+};
+
+const multipleInput = {
+  ...buildDefaultStockValuationInput({
+    ticker: "INTC",
+    companyName: "Intel Corp",
+    currentPrice: 40,
+    sharesOutstanding: 100,
+    fields: {
+      currentPrice: { value: 40, source: "Yahoo" },
+      sharesOutstanding: { value: 100, source: "Alpha Vantage" },
+      freeCashFlow: { value: -200, source: "SEC FY", asOf: "FY 2025" },
+      eps: { value: -1, source: "SEC FY", asOf: "FY 2025" },
+      ebitda: { value: 500, source: "Alpha Vantage" },
+      priceToFreeCashFlow: { value: -20, source: "Derived" },
+      peRatio: { value: -40, source: "Derived" },
+      evToEbitda: { value: 8.2, source: "Derived" },
+    },
+  }),
+  historicalMultiples: {
+    priceToFreeCashFlow: historicalPriceToFcfRows,
+    peRatio: historicalPeRows,
+    evToEbitda: historicalEvEbitdaRows,
+  },
+};
 
 function mockFetch() {
   vi.stubGlobal(
@@ -115,6 +258,9 @@ describe("StockValuationPanel", () => {
     expect(screen.getByDisplayValue("Meta Platforms")).toBeVisible();
     expect(screen.getByRole("button", { name: /DCF 10 years · \$/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /EV\/EBITDA · \$/ })).toBeVisible();
+    expect(screen.queryByText(/SEC и Alpha Vantage са primary/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Source badges/ }));
+    expect(screen.getByText(/SEC и Alpha Vantage са primary/)).toBeVisible();
     expect(screen.getAllByText("Yahoo").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Alpha Vantage").length).toBeGreaterThan(0);
   });
@@ -138,5 +284,578 @@ describe("StockValuationPanel", () => {
     await user.click(screen.getByRole("button", { name: "Save analysis" }));
 
     await waitFor(() => expect(screen.getByText("Запазено")).toBeVisible());
+  });
+
+  test("autofill replaces previous ticker data and shows SEC period source labels", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "/api/valuation/saved") {
+          return {
+            ok: true,
+            json: async () => ({ ok: true, analyses: [] }),
+          };
+        }
+
+        if (url.includes("ticker=SOFI")) {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              input: sofiInput,
+              fields: sofiInput.sources,
+              warnings: ["SEC TTM free cash flow unavailable; latest full-year SEC cash flow was used."],
+            }),
+          };
+        }
+
+        if (url.includes("ticker=GOOG")) {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              input: googInput,
+              fields: googInput.sources,
+              warnings: [],
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<StockValuationPanel />);
+
+    await user.clear(screen.getByLabelText("Ticker"));
+    await user.type(screen.getByLabelText("Ticker"), "SOFI");
+    await user.click(screen.getByRole("button", { name: "Авто попълване" }));
+    await waitFor(() => expect(screen.getByDisplayValue("SOFI")).toBeVisible());
+    expect(screen.getByDisplayValue("SoFi Technologies, Inc.")).toBeVisible();
+    expect(screen.getByText(/SEC TTM free cash flow unavailable/)).toBeVisible();
+
+    await user.clear(screen.getByLabelText("Ticker"));
+    await user.type(screen.getByLabelText("Ticker"), "GOOG");
+    await user.click(screen.getByRole("button", { name: "Авто попълване" }));
+
+    await waitFor(() => expect(screen.getByDisplayValue("GOOG")).toBeVisible());
+    expect(screen.getByDisplayValue("Alphabet Inc.")).toBeVisible();
+    expect(screen.queryByDisplayValue("SoFi Technologies, Inc.")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Source badges/ }));
+    expect(screen.getAllByText("SEC TTM").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("· TTM 2026-03-31").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/DKK/)).not.toBeInTheDocument();
+  });
+
+  test("shows FX original labels and full converted scenario values", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "/api/valuation/saved") {
+          return {
+            ok: true,
+            json: async () => ({ ok: true, analyses: [] }),
+          };
+        }
+
+        if (url.startsWith("/api/valuation/autofill")) {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              input: nvoFxInput,
+              fields: nvoFxInput.sources,
+              warnings: [],
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<StockValuationPanel />);
+
+    await user.clear(screen.getByLabelText("Ticker"));
+    await user.type(screen.getByLabelText("Ticker"), "NVO");
+    await user.click(screen.getByRole("button", { name: "Авто попълване" }));
+    await waitFor(() => expect(screen.getByDisplayValue("NVO")).toBeVisible());
+
+    expect(screen.getAllByText("30,890,000,000 DKK").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByLabelText("FCF").map((field) => (field as HTMLInputElement).value),
+    ).toEqual(["4,809,573,000", "4,809,573,000", "4,809,573,000"]);
+
+    await user.click(screen.getByRole("button", { name: /EV\/EBITDA ·/ }));
+
+    expect(screen.getAllByText("179,890,000,000 DKK").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByLabelText("EBITDA").map((field) => (field as HTMLInputElement).value),
+    ).toEqual(["28,008,873,000", "28,008,873,000", "28,008,873,000"]);
+
+    fireEvent.change(screen.getAllByLabelText("EBITDA")[0], {
+      target: { value: "28,008,873,000" },
+    });
+    expect((screen.getAllByLabelText("EBITDA")[0] as HTMLInputElement).value).toBe(
+      "28,008,873,000",
+    );
+
+    await user.click(screen.getByRole("button", { name: /P\/E ·/ }));
+
+    expect(screen.getAllByText("27.41 DKK").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByLabelText("EPS").map((field) => (field as HTMLInputElement).value),
+    ).toEqual(["4.27", "4.27", "4.27"]);
+
+    await user.click(screen.getByRole("button", { name: /DCF Multiple ·/ }));
+
+    expect(screen.getAllByText("9.2 DKK/share").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByLabelText("FCF/share").map((field) => (field as HTMLInputElement).value),
+    ).toEqual(["1.43", "1.43", "1.43"]);
+  });
+
+  test("shows the read-only FCF per share TTM calculator only in DCF Multiple", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "/api/valuation/saved") {
+          return {
+            ok: true,
+            json: async () => ({ ok: true, analyses: [] }),
+          };
+        }
+
+        if (url.startsWith("/api/valuation/autofill")) {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              input: googInput,
+              fields: googInput.sources,
+              warnings: [],
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<StockValuationPanel />);
+
+    await user.clear(screen.getByLabelText("Ticker"));
+    await user.type(screen.getByLabelText("Ticker"), "GOOG");
+    await user.click(screen.getByRole("button", { name: "Авто попълване" }));
+    await waitFor(() => expect(screen.getByDisplayValue("GOOG")).toBeVisible());
+
+    expect(screen.queryByTestId("fcf-per-share-ttm-calculator")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /DCF Multiple ·/ }));
+
+    expect(screen.getByTestId("fcf-per-share-ttm-calculator")).toBeVisible();
+    expect(screen.getByText("Free Cash Flow TTM")).toBeVisible();
+    expect(screen.getByTestId("fcf-ttm-value")).toHaveTextContent("$64,429,000,000.00");
+    expect(screen.getByTestId("shares-outstanding-value")).toHaveTextContent("5,456,000,000");
+    expect(screen.getByTestId("fcf-per-share-ttm-value")).toHaveTextContent("$11.81");
+  });
+
+  test("FCF per share calculator does not overwrite DCF Multiple scenario inputs", async () => {
+    const customGoogInput = buildDefaultStockValuationInput({
+      ticker: "GOOG",
+      companyName: "Alphabet Inc.",
+      currentPrice: 381.54,
+      sharesOutstanding: 5_456_000_000,
+      fields: {
+        currentPrice: { value: 381.54, source: "Yahoo" },
+        sharesOutstanding: { value: 5_456_000_000, source: "Alpha Vantage" },
+        freeCashFlow: { value: 64_429_000_000, source: "SEC TTM", asOf: "TTM 2026-03-31" },
+      },
+    });
+    customGoogInput.models.dcfMultiple.scenarios = customGoogInput.models.dcfMultiple.scenarios.map(
+      (scenario, index) => ({
+        ...scenario,
+        baseMetricPerShare: index + 1,
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "/api/valuation/saved") {
+          return {
+            ok: true,
+            json: async () => ({ ok: true, analyses: [] }),
+          };
+        }
+
+        if (url.startsWith("/api/valuation/autofill")) {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              input: customGoogInput,
+              fields: customGoogInput.sources,
+              warnings: [],
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<StockValuationPanel />);
+
+    await user.clear(screen.getByLabelText("Ticker"));
+    await user.type(screen.getByLabelText("Ticker"), "GOOG");
+    await user.click(screen.getByRole("button", { name: "Авто попълване" }));
+    await waitFor(() => expect(screen.getByDisplayValue("GOOG")).toBeVisible());
+    await user.click(screen.getByRole("button", { name: /DCF Multiple ·/ }));
+
+    expect(screen.getByTestId("fcf-per-share-ttm-value")).toHaveTextContent("$11.81");
+    expect(
+      screen.getAllByLabelText("FCF/share").map((field) => (field as HTMLInputElement).value),
+    ).toEqual(["1", "2", "3"]);
+  });
+
+  test("shows collapsible historical FCF calculator only in DCF 10 years", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "/api/valuation/saved") {
+          return {
+            ok: true,
+            json: async () => ({ ok: true, analyses: [] }),
+          };
+        }
+
+        if (url.startsWith("/api/valuation/autofill")) {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              input: historicalInput,
+              fields: historicalInput.sources,
+              warnings: [],
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<StockValuationPanel />);
+
+    await user.clear(screen.getByLabelText("Ticker"));
+    await user.type(screen.getByLabelText("Ticker"), "HIST");
+    await user.click(screen.getByRole("button", { name: "Авто попълване" }));
+    await waitFor(() => expect(screen.getByDisplayValue("HIST")).toBeVisible());
+
+    expect(screen.getByRole("button", { name: /10 Years Free Cash Flow/ })).toBeVisible();
+    expect(screen.queryByTestId("historical-fcf-row-0")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /P\/E ·/ }));
+
+    expect(screen.queryByRole("button", { name: /10 Years Free Cash Flow/ })).not.toBeInTheDocument();
+  });
+
+  test("historical FCF calculator renders averages, edits rows, and applies average to DCF scenarios", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "/api/valuation/saved") {
+          return {
+            ok: true,
+            json: async () => ({ ok: true, analyses: [] }),
+          };
+        }
+
+        if (url.startsWith("/api/valuation/autofill")) {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              input: historicalInput,
+              fields: historicalInput.sources,
+              warnings: [],
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<StockValuationPanel />);
+
+    await user.clear(screen.getByLabelText("Ticker"));
+    await user.type(screen.getByLabelText("Ticker"), "HIST");
+    await user.click(screen.getByRole("button", { name: "Авто попълване" }));
+    await waitFor(() => expect(screen.getByDisplayValue("HIST")).toBeVisible());
+
+    await user.click(screen.getByRole("button", { name: /10 Years Free Cash Flow/ }));
+
+    expect(screen.getByTestId("historical-fcf-row-0")).toHaveTextContent("Year 10");
+    expect(screen.getByTestId("historical-fcf-row-10")).toHaveTextContent("Year 0");
+    expect(screen.getByTestId("historical-fcf-average")).toHaveTextContent("$1,131.03");
+    expect(screen.getByTestId("historical-fcf-average-percent")).toHaveTextContent("-14102.62%");
+
+    await user.clear(screen.getByLabelText("Historical FCF Year 10"));
+    await user.type(screen.getByLabelText("Historical FCF Year 10"), "5000");
+
+    expect(screen.getByTestId("historical-fcf-average")).toHaveTextContent("$1,189.40");
+
+    await user.click(screen.getByRole("button", { name: "Apply average to DCF scenarios" }));
+
+    expect(
+      screen.getAllByLabelText("FCF").map((field) => (field as HTMLInputElement).value),
+    ).toEqual(["1,189.4", "1,189.4", "1,189.4"]);
+  });
+
+  test("saved valuation restores historical FCF rows", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "/api/valuation/saved") {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              analyses: [
+                {
+                  id: "history-analysis",
+                  userId: "user-1",
+                  ticker: "HIST",
+                  companyName: "History Corp",
+                  title: "HIST history",
+                  latestFairValue: 10,
+                  currentPrice: 10,
+                  payload: historicalInput,
+                  createdAt: "2026-05-14T06:00:00.000Z",
+                  updatedAt: "2026-05-14T06:00:00.000Z",
+                },
+              ],
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<StockValuationPanel />);
+
+    await user.click(await screen.findByText("HIST history"));
+    await user.click(screen.getByRole("button", { name: /10 Years Free Cash Flow/ }));
+
+    expect(screen.getByLabelText("Historical year Year 10")).toHaveValue(2023);
+    expect(screen.getByLabelText("Historical FCF Year 10")).toHaveValue(4358);
+    expect(screen.getByTestId("historical-fcf-average")).toHaveTextContent("$1,131.03");
+  });
+
+  test("formats noisy scenario input decimals in P/E and DCF Multiple", async () => {
+    const customGoogInput = buildDefaultStockValuationInput({
+      ticker: "GOOG",
+      companyName: "Alphabet Inc.",
+      currentPrice: 381.54,
+      sharesOutstanding: 5_456_000_000,
+      fields: {
+        currentPrice: { value: 381.54, source: "Yahoo" },
+        sharesOutstanding: { value: 5_456_000_000, source: "Alpha Vantage" },
+        freeCashFlow: { value: 64_429_000_000, source: "SEC TTM", asOf: "TTM 2026-03-31" },
+        eps: { value: 13.110000000000001, source: "SEC TTM", asOf: "TTM 2026-03-31" },
+      },
+    });
+    customGoogInput.models.pe.scenarios = customGoogInput.models.pe.scenarios.map((scenario) => ({
+      ...scenario,
+      baseMetricPerShare: 13.110000000000001,
+    }));
+    customGoogInput.models.dcfMultiple.scenarios = customGoogInput.models.dcfMultiple.scenarios.map(
+      (scenario) => ({
+        ...scenario,
+        baseMetricPerShare: 11.06330807146357,
+        growthYearsFiveToTen: 0.14000000000000002,
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "/api/valuation/saved") {
+          return {
+            ok: true,
+            json: async () => ({ ok: true, analyses: [] }),
+          };
+        }
+
+        if (url.startsWith("/api/valuation/autofill")) {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              input: customGoogInput,
+              fields: customGoogInput.sources,
+              warnings: [],
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<StockValuationPanel />);
+
+    await user.clear(screen.getByLabelText("Ticker"));
+    await user.type(screen.getByLabelText("Ticker"), "GOOG");
+    await user.click(screen.getByRole("button", { name: "Авто попълване" }));
+    await waitFor(() => expect(screen.getByDisplayValue("GOOG")).toBeVisible());
+
+    await user.click(screen.getByRole("button", { name: /P\/E ·/ }));
+    expect(
+      screen.getAllByLabelText("EPS").map((field) => (field as HTMLInputElement).value),
+    ).toEqual(["13.11", "13.11", "13.11"]);
+
+    await user.click(screen.getByRole("button", { name: /DCF Multiple ·/ }));
+    expect(
+      screen.getAllByLabelText("FCF/share").map((field) => (field as HTMLInputElement).value),
+    ).toEqual(["11.06", "11.06", "11.06"]);
+    expect((screen.getAllByLabelText("Growth 6-10")[0] as HTMLInputElement).value).toBe("14");
+  });
+
+  test("historical multiple calculators are collapsed by default and apply positive ranges to scenarios", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "/api/valuation/saved") {
+          return {
+            ok: true,
+            json: async () => ({ ok: true, analyses: [] }),
+          };
+        }
+
+        if (url.startsWith("/api/valuation/autofill")) {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              input: multipleInput,
+              fields: multipleInput.sources,
+              warnings: [],
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<StockValuationPanel />);
+
+    await user.clear(screen.getByLabelText("Ticker"));
+    await user.type(screen.getByLabelText("Ticker"), "INTC");
+    await user.click(screen.getByRole("button", { name: "Авто попълване" }));
+    await waitFor(() => expect(screen.getByDisplayValue("INTC")).toBeVisible());
+
+    await user.click(screen.getByRole("button", { name: /DCF Multiple ·/ }));
+
+    expect(screen.getByRole("button", { name: /Historical multiples/ })).toBeVisible();
+    expect(screen.queryByTestId("historical-multiple-row-priceToFreeCashFlow-0")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Historical multiples/ }));
+
+    expect(screen.getByRole("tab", { name: "P/FCF" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("historical-multiple-bar-chart-priceToFreeCashFlow")).toBeVisible();
+    expect(screen.getByTestId("historical-multiple-line-chart-priceToFreeCashFlow")).toBeVisible();
+    expect(screen.getAllByTestId("mock-base-chart")).toHaveLength(2);
+    expect(screen.getByRole("link", { name: "FinanceCharts benchmark" })).toHaveAttribute(
+      "href",
+      "https://www.financecharts.com/stocks/INTC/value/price-to-free-cash-flow",
+    );
+    expect(screen.getByTestId("historical-multiple-row-priceToFreeCashFlow-0")).toHaveTextContent("-20");
+    expect(screen.getByTestId("historical-multiple-row-priceToFreeCashFlow-0")).toHaveTextContent("ignored for Apply");
+    expect(screen.getByTestId("historical-multiple-low-priceToFreeCashFlow")).toHaveTextContent("8");
+    expect(screen.getByTestId("historical-multiple-average-priceToFreeCashFlow")).toHaveTextContent("17.67");
+    expect(screen.getByTestId("historical-multiple-high-priceToFreeCashFlow")).toHaveTextContent("30");
+
+    await user.click(screen.getByRole("button", { name: "Apply P/FCF to scenarios" }));
+
+    expect(
+      screen.getAllByLabelText("P/FCF").map((field) => (field as HTMLInputElement).value),
+    ).toEqual(["30", "17.67", "8"]);
+  });
+
+  test("Historical multiples chart block switches between P/E and EV/EBITDA", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "/api/valuation/saved") {
+          return {
+            ok: true,
+            json: async () => ({ ok: true, analyses: [] }),
+          };
+        }
+
+        if (url.startsWith("/api/valuation/autofill")) {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              input: multipleInput,
+              fields: multipleInput.sources,
+              warnings: [],
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<StockValuationPanel />);
+
+    await user.clear(screen.getByLabelText("Ticker"));
+    await user.type(screen.getByLabelText("Ticker"), "INTC");
+    await user.click(screen.getByRole("button", { name: "Авто попълване" }));
+    await waitFor(() => expect(screen.getByDisplayValue("INTC")).toBeVisible());
+
+    await user.click(screen.getByRole("button", { name: /P\/E ·/ }));
+    await user.click(screen.getByRole("button", { name: /Historical multiples/ }));
+    expect(screen.getByRole("tab", { name: "P/E" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("historical-multiple-bar-chart-peRatio")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: /EV\/EBITDA ·/ }));
+    expect(screen.getByRole("tab", { name: "EV/EBITDA" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("historical-multiple-line-chart-evToEbitda")).toBeVisible();
   });
 });
