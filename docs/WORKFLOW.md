@@ -2,10 +2,10 @@
 
 ## Before Editing
 
-Use the deployed worktree unless the user explicitly asks for another checkout:
+Use only the active project workspace unless the user explicitly asks for another checkout:
 
 ```bash
-cd /Users/bakovski/.config/superpowers/worktrees/ForexSite/mt5-live-sync
+cd /Users/bakovski/ForexSite
 git fetch origin
 git status --short
 git rev-parse HEAD
@@ -14,7 +14,7 @@ git rev-parse origin/main
 
 Expected for normal work: `HEAD` should match `origin/main`, or the difference should be intentional and understood.
 
-The checkout at `/Users/bakovski/ForexSite` may contain local memory files and may lag behind production. Do not use it for code edits until it is fast-forwarded or deliberately selected.
+Do not make new code edits in `/Users/bakovski/.config/superpowers/worktrees/ForexSite/mt5-live-sync` unless the user explicitly asks for that old feature worktree. It is no longer the default workspace.
 
 ## Local Development
 
@@ -61,6 +61,7 @@ Do not commit these unless the user explicitly requests it:
 
 - `.obsidian/`
 - `.claude/`
+- `.superpowers/`
 - local memory timestamps
 - `.env*`
 - `.next/`

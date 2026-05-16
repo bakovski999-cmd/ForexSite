@@ -11,10 +11,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 - Production branch: `main`
 - Live URL: `https://forex-site-chi.vercel.app`
-- Prefer the deployed worktree for code edits:
-  `/Users/bakovski/.config/superpowers/worktrees/ForexSite/mt5-live-sync`
+- Active project workspace: `/Users/bakovski/ForexSite`
 - Before editing, run `git fetch origin`, `git status --short`, and compare `HEAD` with `origin/main`.
-- `/Users/bakovski/ForexSite` may contain local memory/tooling files and may lag behind production. Do not assume it is current.
+- Do not make new code edits in `/Users/bakovski/.config/superpowers/worktrees/ForexSite/mt5-live-sync` unless the user explicitly asks for that worktree. It is an old feature worktree, not the current source of truth.
+- Local memory/tooling folders may exist in the active workspace. Treat them as helper context, not commit targets.
 
 ## Local Memory
 
@@ -30,6 +30,7 @@ Treat these files as local memory only. Verify against code, tests, Git history,
 
 - `.obsidian/`
 - `.claude/`
+- `.superpowers/`
 - local memory timestamps
 - `.env*`
 - `.next/`

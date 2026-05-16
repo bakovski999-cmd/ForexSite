@@ -5,6 +5,7 @@ Private trading and valuation workspace hosted on Vercel.
 - Live site: https://forex-site-chi.vercel.app
 - Production branch: `main`
 - Primary backend: Supabase
+- Active local workspace: `/Users/bakovski/ForexSite`
 - Main authenticated tools:
   - `/risk-calculator` - risk calculator, portfolio risk, lots/sales planning, MT5 live sync
   - `/valuation` - stock fair value workspace with DCF, EV/EBITDA, P/E, DCF Multiple and historical multiples
@@ -29,6 +30,8 @@ For project structure and agent workflow, read:
 Firebase files still exist as legacy project artifacts. Current production hosting is Vercel, not Firebase.
 
 ## Local Start
+
+Use `/Users/bakovski/ForexSite` for normal development. Older feature worktrees under `.config/superpowers/worktrees/` are historical and should not receive new edits unless deliberately selected.
 
 Install dependencies:
 
@@ -116,6 +119,7 @@ Do not commit local memory/tooling folders unless explicitly requested:
 
 - `.obsidian/`
 - `.claude/`
+- `.superpowers/`
 - `.next/`
 - `.vercel/`
 - `graphify-out/`

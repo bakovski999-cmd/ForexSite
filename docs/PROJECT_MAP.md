@@ -4,8 +4,9 @@
 
 - Production branch: `main`
 - Live URL: https://forex-site-chi.vercel.app
-- Current working tree for recent deployed work: `/Users/bakovski/.config/superpowers/worktrees/ForexSite/mt5-live-sync`
-- The older checkout `/Users/bakovski/ForexSite` can lag behind `origin/main`; verify before editing.
+- Active project workspace: `/Users/bakovski/ForexSite`
+- Before editing, verify this workspace with `git fetch origin`, `git status --short`, and `HEAD == origin/main`.
+- Old feature worktree `/Users/bakovski/.config/superpowers/worktrees/ForexSite/mt5-live-sync` is not the default source of truth. Do not use it for new edits unless explicitly requested.
 
 ## App Routes
 
@@ -92,3 +93,4 @@ These are not source-of-truth code:
 - `test-results/`
 - `.obsidian/`
 - `.claude/`
+- `.superpowers/`
