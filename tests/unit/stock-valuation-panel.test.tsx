@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -851,12 +851,13 @@ describe("StockValuationPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "Historical charts" }));
 
-    expect(screen.getByRole("dialog", { name: /Historical charts/ })).toBeVisible();
+    const dialog = screen.getByRole("dialog", { name: /Historical charts/ });
+    expect(dialog).toBeVisible();
     expect(screen.getByRole("tab", { name: "P/FCF" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("historical-multiple-bar-chart-priceToFreeCashFlow")).toBeVisible();
     expect(screen.getByTestId("historical-multiple-line-chart-priceToFreeCashFlow")).toBeVisible();
     expect(screen.getAllByTestId("mock-base-chart")).toHaveLength(2);
-    expect(screen.getByRole("link", { name: "FinanceCharts benchmark" })).toHaveAttribute(
+    expect(within(dialog).getByRole("link", { name: "Open P/FCF on FinanceCharts" })).toHaveAttribute(
       "href",
       "https://www.financecharts.com/stocks/INTC/value/price-to-free-cash-flow",
     );
@@ -911,9 +912,25 @@ describe("StockValuationPanel", () => {
     await waitFor(() => expect(screen.getByDisplayValue("INTC")).toBeVisible());
 
     await user.click(screen.getByRole("button", { name: /P\/E ·/ }));
+    expect(screen.getByRole("link", { name: "Open P/E on FinanceCharts" })).toHaveAttribute(
+      "href",
+      "https://www.financecharts.com/stocks/INTC/value/pe-ratio",
+    );
     await user.click(screen.getByRole("button", { name: "Historical charts" }));
+    const dialog = screen.getByRole("dialog", { name: /Historical charts/ });
     expect(screen.getByRole("tab", { name: "P/E" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("historical-multiple-bar-chart-peRatio")).toBeVisible();
+    expect(
+      within(dialog).getByRole("link", { name: "Open EV/EBITDA on FinanceCharts" }),
+    ).toHaveAttribute("href", "https://www.financecharts.com/stocks/INTC/value/ev-to-ebitda");
+    expect(within(dialog).getByRole("link", { name: "Open P/E on FinanceCharts" })).toHaveAttribute(
+      "href",
+      "https://www.financecharts.com/stocks/INTC/value/pe-ratio",
+    );
+    expect(within(dialog).getByRole("link", { name: "Open P/FCF on FinanceCharts" })).toHaveAttribute(
+      "href",
+      "https://www.financecharts.com/stocks/INTC/value/price-to-free-cash-flow",
+    );
 
     await user.click(screen.getByRole("button", { name: /EV\/EBITDA ·/ }));
     expect(screen.getByRole("tab", { name: "EV/EBITDA" })).toHaveAttribute("aria-selected", "true");
@@ -962,6 +979,7 @@ describe("StockValuationPanel", () => {
 
     await user.click(screen.getByRole("button", { name: /EV\/EBITDA ·/ }));
     await user.click(screen.getByRole("button", { name: "Historical charts" }));
+    const dialog = screen.getByRole("dialog", { name: /Historical charts/ });
 
     expect(screen.getByTestId("historical-multiple-source-evToEbitda")).toHaveTextContent(
       "FinanceCharts",
@@ -969,9 +987,8 @@ describe("StockValuationPanel", () => {
     expect(screen.getByTestId("historical-multiple-average-evToEbitda")).toHaveTextContent(
       "13.11",
     );
-    expect(screen.getByRole("link", { name: "FinanceCharts benchmark" })).toHaveAttribute(
-      "href",
-      "https://www.financecharts.com/stocks/NVO/value/ev-to-ebitda",
-    );
+    expect(
+      within(dialog).getByRole("link", { name: "Open EV/EBITDA on FinanceCharts" }),
+    ).toHaveAttribute("href", "https://www.financecharts.com/stocks/NVO/value/ev-to-ebitda");
   });
 });

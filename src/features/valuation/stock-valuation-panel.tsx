@@ -7,6 +7,7 @@ import {
   ChevronDown,
   CheckCircle2,
   Database,
+  ExternalLink,
   Loader2,
   Save,
   Search,
@@ -378,6 +379,34 @@ function financeChartsBenchmarkUrl(ticker: string, key: HistoricalMultipleKey) {
   }
 
   return `https://www.financecharts.com/stocks/${encodeURIComponent(clean)}/value/${historicalMultipleLabels[key].benchmarkPath}`;
+}
+
+function FinanceChartsMetricLink({
+  className,
+  metricKey,
+  ticker,
+}: {
+  className?: string;
+  metricKey: HistoricalMultipleKey;
+  ticker: string;
+}) {
+  const label = historicalMultipleLabels[metricKey].label;
+
+  return (
+    <a
+      aria-label={`Open ${label} on FinanceCharts`}
+      className={cn(
+        "inline-flex min-h-9 items-center justify-center gap-2 rounded-xl border border-sky-300/20 bg-sky-300/10 px-3 text-xs font-semibold text-sky-100 transition hover:bg-sky-300/15 hover:text-white",
+        className,
+      )}
+      href={financeChartsBenchmarkUrl(ticker, metricKey)}
+      rel="noreferrer"
+      target="_blank"
+    >
+      <ExternalLink className="size-3.5" />
+      {label}
+    </a>
+  );
 }
 
 function formatChartValue(value: unknown) {
@@ -763,14 +792,11 @@ function HistoricalMultiplesModal({
         <div className="flex flex-col gap-3 border-t border-white/10 p-4 md:flex-row md:items-center md:justify-between">
           <div className="text-sm leading-6 text-slate-400">
             <p>Apply maps High to Best, Average to Average, and Low to Worst.</p>
-            <a
-              className="mt-1 inline-flex font-semibold text-sky-200 transition hover:text-sky-100"
-              href={financeChartsBenchmarkUrl(ticker, selectedKey)}
-              rel="noreferrer"
-              target="_blank"
-            >
-              FinanceCharts benchmark
-            </a>
+            <div className="mt-2 flex flex-wrap gap-2" aria-label="FinanceCharts benchmark links">
+              {historicalMultipleTabs.map((key) => (
+                <FinanceChartsMetricLink key={key} metricKey={key} ticker={ticker} />
+              ))}
+            </div>
           </div>
           <button
             className="inline-flex min-h-12 items-center justify-center rounded-xl bg-blue-500 px-4 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
@@ -1360,6 +1386,7 @@ export function StockValuationPanel() {
 
   const activeResult = result.models[activeModel];
   const activeScenarios = input.models[activeModel].scenarios;
+  const activeModelHistoricalKey = historicalMultipleKeyForModel(activeModel);
   const sourceEntries = Object.entries(input.sources ?? {});
   const signalTone =
     result.signal === "BUY" ? "good" : result.signal === "SELL" ? "bad" : "neutral";
@@ -1534,15 +1561,19 @@ export function StockValuationPanel() {
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {activeModel !== "dcf10Years" ? (
+                {activeModelHistoricalKey ? (
+                  <FinanceChartsMetricLink
+                    className="border-white/10 bg-white/[0.04] text-slate-300 hover:bg-white/[0.08]"
+                    metricKey={activeModelHistoricalKey}
+                    ticker={input.ticker}
+                  />
+                ) : null}
+                {activeModelHistoricalKey ? (
                   <button
                     className="inline-flex min-h-9 items-center justify-center gap-2 rounded-xl border border-violet-300/20 bg-violet-300/10 px-3 text-xs font-semibold text-violet-100 transition hover:bg-violet-300/15"
                     type="button"
                     onClick={() => {
-                      const historicalKey = historicalMultipleKeyForModel(activeModel);
-                      if (historicalKey) {
-                        setActiveHistoricalMultipleKey(historicalKey);
-                      }
+                      setActiveHistoricalMultipleKey(activeModelHistoricalKey);
                       setIsHistoricalMultiplesModalOpen(true);
                     }}
                   >
