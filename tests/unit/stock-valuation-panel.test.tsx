@@ -6,6 +6,7 @@ import { StockValuationPanel } from "@/components/stock-valuation-panel";
 import {
   buildDefaultStockValuationInput,
   type HistoricalFreeCashFlowRow,
+  type HistoricalMultipleBenchmark,
   type HistoricalMultipleRow,
   type HistoricalMultipleSeriesPoint,
 } from "@/lib/stock-valuation";
@@ -184,6 +185,43 @@ const multipleInput = {
     priceToFreeCashFlow: historicalPriceToFcfSeries,
     peRatio: historicalPeSeries,
     evToEbitda: historicalEvEbitdaSeries,
+  },
+};
+
+const financeChartsEvToEbitdaBenchmark: HistoricalMultipleBenchmark = {
+  source: "FinanceCharts",
+  sourceStatus: "available",
+  currentMultiple: 8.21,
+  low: 7.22,
+  average: 13.11,
+  high: 19.71,
+  periodAverages: [
+    { key: "TTM", label: "TTM", years: 1, average: 7.22, count: 1 },
+    { key: "3Y", label: "3Y", years: 3, average: 12, count: 1 },
+    { key: "5Y", label: "5Y", years: 5, average: 13.3, count: 1 },
+    { key: "10Y", label: "10Y", years: 10, average: 13.11, count: 1 },
+    { key: "15Y", label: "15Y", years: 15, average: 13.3, count: 1 },
+    { key: "20Y", label: "20Y", years: 20, average: 12.45, count: 1 },
+  ],
+  seriesPoints: [
+    {
+      date: "2022-04-22",
+      year: 2022,
+      numerator: null,
+      denominator: null,
+      multiple: 19.71,
+      source: "FinanceCharts",
+      asOf: "2022-04-22",
+    },
+  ],
+};
+
+const financeChartsMultipleInput = {
+  ...multipleInput,
+  ticker: "NVO",
+  companyName: "Novo Nordisk A/S",
+  historicalMultipleBenchmarks: {
+    evToEbitda: financeChartsEvToEbitdaBenchmark,
   },
 };
 
@@ -883,5 +921,57 @@ describe("StockValuationPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "Close historical charts" }));
     expect(screen.queryByRole("dialog", { name: /Historical charts/ })).not.toBeInTheDocument();
+  });
+
+  test("Historical charts modal labels FinanceCharts benchmark data when available", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "/api/valuation/saved") {
+          return {
+            ok: true,
+            json: async () => ({ ok: true, analyses: [] }),
+          };
+        }
+
+        if (url.startsWith("/api/valuation/autofill")) {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              input: financeChartsMultipleInput,
+              fields: financeChartsMultipleInput.sources,
+              warnings: [],
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<StockValuationPanel />);
+
+    await user.clear(screen.getByLabelText("Ticker"));
+    await user.type(screen.getByLabelText("Ticker"), "NVO");
+    await user.click(screen.getByRole("button", { name: "Авто попълване" }));
+    await waitFor(() => expect(screen.getByDisplayValue("NVO")).toBeVisible());
+
+    await user.click(screen.getByRole("button", { name: /EV\/EBITDA ·/ }));
+    await user.click(screen.getByRole("button", { name: "Historical charts" }));
+
+    expect(screen.getByTestId("historical-multiple-source-evToEbitda")).toHaveTextContent(
+      "FinanceCharts",
+    );
+    expect(screen.getByTestId("historical-multiple-average-evToEbitda")).toHaveTextContent(
+      "13.11",
+    );
+    expect(screen.getByRole("link", { name: "FinanceCharts benchmark" })).toHaveAttribute(
+      "href",
+      "https://www.financecharts.com/stocks/NVO/value/ev-to-ebitda",
+    );
   });
 });

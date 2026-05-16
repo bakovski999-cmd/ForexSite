@@ -1,7 +1,10 @@
 import { env } from "@/lib/env";
+import { fetchFinanceChartsHistoricalMultipleBenchmarks } from "@/lib/financecharts-historical-multiples";
 import {
   buildDefaultStockValuationInput,
   type HistoricalFreeCashFlowRow,
+  type HistoricalMultipleBenchmark,
+  type HistoricalMultipleKey,
   type HistoricalMultipleRow,
   type HistoricalMultipleSeriesPoint,
   type StockValuationAutofillFields,
@@ -17,9 +20,12 @@ type AlphaOverview = Record<string, unknown>;
 type StockValuationAutofillFieldsWithHistory = StockValuationAutofillFields & {
   historicalFreeCashFlows?: HistoricalFreeCashFlowRow[];
   historicalFinancialMetrics?: HistoricalFinancialMetricRow[];
-  historicalMultiples?: Partial<Record<"priceToFreeCashFlow" | "peRatio" | "evToEbitda", HistoricalMultipleRow[]>>;
+  historicalMultiples?: Partial<Record<HistoricalMultipleKey, HistoricalMultipleRow[]>>;
   historicalMultipleSeries?: Partial<
-    Record<"priceToFreeCashFlow" | "peRatio" | "evToEbitda", HistoricalMultipleSeriesPoint[]>
+    Record<HistoricalMultipleKey, HistoricalMultipleSeriesPoint[]>
+  >;
+  historicalMultipleBenchmarks?: Partial<
+    Record<HistoricalMultipleKey, HistoricalMultipleBenchmark>
   >;
 };
 
@@ -1548,11 +1554,11 @@ export async function fetchValuationAutofill(
 
   let historicalMultiples =
     secFields.historicalMultiples ??
-    ({} as Partial<Record<"priceToFreeCashFlow" | "peRatio" | "evToEbitda", HistoricalMultipleRow[]>>);
+    ({} as Partial<Record<HistoricalMultipleKey, HistoricalMultipleRow[]>>);
   let historicalMultipleSeries =
     secFields.historicalMultipleSeries ??
     ({} as Partial<
-      Record<"priceToFreeCashFlow" | "peRatio" | "evToEbitda", HistoricalMultipleSeriesPoint[]>
+      Record<HistoricalMultipleKey, HistoricalMultipleSeriesPoint[]>
     >);
   if (secFields.historicalFinancialMetrics?.length) {
     try {
@@ -1570,6 +1576,9 @@ export async function fetchValuationAutofill(
       );
     }
   }
+  const historicalMultipleBenchmarks = await fetchFinanceChartsHistoricalMultipleBenchmarks(
+    ticker,
+  );
 
   const secFieldsForMerge = hasSecIfrsFields
     ? {
@@ -1644,6 +1653,7 @@ export async function fetchValuationAutofill(
     historicalFreeCashFlows,
     historicalMultiples,
     historicalMultipleSeries,
+    historicalMultipleBenchmarks,
   });
 
   return {

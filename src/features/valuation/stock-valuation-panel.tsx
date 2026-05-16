@@ -338,6 +338,7 @@ const historicalMultipleLabels: Record<
     denominator: string;
     label: string;
     numerator: string;
+    ratioLabel: string;
   }
 > = {
   priceToFreeCashFlow: {
@@ -345,18 +346,21 @@ const historicalMultipleLabels: Record<
     denominator: "FCF/share",
     label: "P/FCF",
     numerator: "Price",
+    ratioLabel: "Price to Free Cash Flow Ratio",
   },
   peRatio: {
     benchmarkPath: "pe-ratio",
     denominator: "EPS",
     label: "P/E",
     numerator: "Price",
+    ratioLabel: "P/E Ratio",
   },
   evToEbitda: {
     benchmarkPath: "ev-to-ebitda",
     denominator: "EBITDA",
     label: "EV/EBITDA",
     numerator: "Enterprise value",
+    ratioLabel: "EV to EBITDA Ratio",
   },
 };
 
@@ -380,6 +384,22 @@ function formatChartValue(value: unknown) {
   const numericValue = typeof value === "number" ? value : Number(value);
 
   return Number.isFinite(numericValue) ? formatMultiple(numericValue) : "needs input";
+}
+
+function formatHistoricalChartDate(date: string) {
+  const parsed = new Date(`${date}T00:00:00Z`);
+
+  if (!Number.isFinite(parsed.getTime())) {
+    return date;
+  }
+
+  return parsed.toLocaleDateString("en-US", {
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+    weekday: "long",
+    year: "numeric",
+  });
 }
 
 function historicalMultipleBarOption(summary: HistoricalMultipleSummary): EChartsOption {
@@ -465,15 +485,9 @@ function historicalMultipleLineOption(summary: HistoricalMultipleSummary): EChar
         }
 
         return [
-          `<strong>${date}</strong>`,
-          `Multiple: ${formatMultiple(row.multiple)}`,
-          `${historicalMultipleLabels[summary.key].numerator}: ${formatPlainNumber(row.numerator, 2)}`,
-          `${historicalMultipleLabels[summary.key].denominator}: ${formatPlainNumber(row.denominator, 2)}`,
-          `Source: ${sourceLabel(row.source)}`,
-          row.asOf ? `Fundamentals as of: ${row.asOf}` : null,
-          row.needsReview && row.reviewReason ? `Review: ${row.reviewReason}` : null,
+          `<strong>${formatHistoricalChartDate(date)}</strong>`,
+          `${historicalMultipleLabels[summary.key].ratioLabel}: ${formatMultiple(row.multiple)}`,
         ]
-          .filter(Boolean)
           .join("<br/>");
       },
       textStyle: { color: "#f8fafc" },
@@ -496,9 +510,9 @@ function historicalMultipleLineOption(summary: HistoricalMultipleSummary): EChar
     },
     series: [
       {
-        areaStyle: { color: "rgba(56,189,248,0.12)" },
+        areaStyle: { color: "rgba(74,222,128,0.12)" },
         data: rows.map((row) => row.multiple),
-        lineStyle: { color: "#5eead4", width: 2 },
+        lineStyle: { color: "#7ddf91", width: 2 },
         name: historicalMultipleLabels[summary.key].label,
         showSymbol: rows.length <= 24,
         smooth: false,
@@ -548,8 +562,12 @@ function HistoricalMultiplesModal({
 
   const summary = summaries[selectedKey];
   const labels = historicalMultipleLabels[selectedKey];
-  const visibleRows = summary.rows.slice(0, 8);
+  const visibleRows = summary.source === "Derived" ? summary.rows.slice(0, 8) : [];
   const hasChartData = summary.seriesPoints.some((row) => row.multiple !== null);
+  const sourceText =
+    summary.source === "FinanceCharts"
+      ? "FinanceCharts benchmark data"
+      : "Derived fallback from SEC/Yahoo";
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-950/78 p-0 backdrop-blur-md sm:items-center sm:p-5">
@@ -571,11 +589,27 @@ function HistoricalMultiplesModal({
             <div>
               <h3 className="text-lg font-semibold text-white">Historical charts</h3>
               <p className="mt-1 text-sm text-slate-400">
-                Derived from SEC/Yahoo. Compare with FinanceCharts if needed.
+                {sourceText}
               </p>
+              {summary.sourceMessage ? (
+                <p className="mt-1 text-xs font-semibold text-amber-200">
+                  {summary.sourceMessage}
+                </p>
+              ) : null}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs font-semibold",
+                summary.source === "FinanceCharts"
+                  ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
+                  : "border-amber-300/20 bg-amber-300/10 text-amber-100",
+              )}
+              data-testid={`historical-multiple-source-${summary.key}`}
+            >
+              {summary.source === "FinanceCharts" ? "FinanceCharts" : "Derived fallback"}
+            </span>
             <span className="rounded-full border border-violet-300/20 bg-violet-300/10 px-3 py-1 text-xs font-semibold text-violet-100">
               {labels.label} avg {formatMultiple(summary.average)}
             </span>

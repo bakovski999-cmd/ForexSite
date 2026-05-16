@@ -8,6 +8,7 @@ import {
   calculateStockValuation,
   type HistoricalFreeCashFlowRow,
   type HistoricalMultipleRow,
+  type HistoricalMultipleBenchmark,
   type HistoricalMultipleSeriesPoint,
   type StockValuationInput,
 } from "@/lib/stock-valuation";
@@ -550,6 +551,73 @@ describe("stock valuation workbook parity", () => {
     expect(summary.periodAverages.find((period) => period.key === "TTM")).toMatchObject({
       average: expect.closeTo(16.666667, 6),
       count: 3,
+    });
+  });
+
+  test("historical multiple summary prefers available FinanceCharts benchmark data", () => {
+    const financeChartsBenchmark: HistoricalMultipleBenchmark = {
+      source: "FinanceCharts",
+      sourceStatus: "available",
+      currentMultiple: 8.21,
+      low: 7.22,
+      average: 13.11,
+      high: 19.71,
+      periodAverages: [
+        { key: "TTM", label: "TTM", years: 1, average: 7.22, count: 1 },
+        { key: "3Y", label: "3Y", years: 3, average: 12, count: 1 },
+        { key: "5Y", label: "5Y", years: 5, average: 13.3, count: 1 },
+        { key: "10Y", label: "10Y", years: 10, average: 13.11, count: 1 },
+        { key: "15Y", label: "15Y", years: 15, average: 13.3, count: 1 },
+        { key: "20Y", label: "20Y", years: 20, average: 12.45, count: 1 },
+      ],
+      seriesPoints: [
+        {
+          date: "2022-04-22",
+          year: 2022,
+          numerator: null,
+          denominator: null,
+          multiple: 19.71,
+          source: "FinanceCharts",
+          asOf: "2022-04-22",
+        },
+      ],
+    };
+    const input = buildDefaultStockValuationInput({
+      ticker: "NVO",
+      fields: {
+        evToEbitda: { value: 2.9, source: "Derived" },
+      },
+      historicalMultipleSeries: {
+        evToEbitda: [
+          {
+            date: "2024-01-31",
+            year: 2024,
+            numerator: 2_000,
+            denominator: 1_000,
+            multiple: 2,
+            source: "Derived",
+            asOf: "2023-12-31",
+          },
+        ],
+      },
+      historicalMultipleBenchmarks: {
+        evToEbitda: financeChartsBenchmark,
+      },
+    });
+
+    const summary = calculateHistoricalMultipleSummary(input, "evToEbitda");
+
+    expect(summary.source).toBe("FinanceCharts");
+    expect(summary.sourceStatus).toBe("available");
+    expect(summary.currentMultiple).toBe(8.21);
+    expect(summary.average).toBe(13.11);
+    expect(summary.high).toBe(19.71);
+    expect(summary.periodAverages.find((period) => period.key === "10Y")?.average).toBe(13.11);
+    expect(summary.seriesPoints).toEqual(financeChartsBenchmark.seriesPoints);
+    expect(summary.applyValues).toEqual({
+      optimistic: 19.71,
+      base: 13.11,
+      worst: 7.22,
     });
   });
 

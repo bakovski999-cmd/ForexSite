@@ -11,7 +11,8 @@ export type ValuationSource =
   | "Yahoo TTM"
   | "Yahoo TTM + FX"
   | "Manual"
-  | "Derived";
+  | "Derived"
+  | "FinanceCharts";
 
 export type ValuationSignal = "BUY" | "SELL" | "NEUTRAL";
 
@@ -139,8 +140,30 @@ export type HistoricalMultiplePeriodAverage = {
   count: number;
 };
 
+export type HistoricalMultipleChartSource = "FinanceCharts" | "Derived";
+
+export type HistoricalMultipleSourceStatus =
+  | "available"
+  | "fallback"
+  | "unavailable";
+
+export type HistoricalMultipleBenchmark = {
+  source: Extract<HistoricalMultipleChartSource, "FinanceCharts">;
+  sourceStatus: Extract<HistoricalMultipleSourceStatus, "available" | "unavailable">;
+  sourceMessage?: string;
+  currentMultiple: number | null;
+  low: number | null;
+  average: number | null;
+  high: number | null;
+  periodAverages: HistoricalMultiplePeriodAverage[];
+  seriesPoints: HistoricalMultipleSeriesPoint[];
+};
+
 export type HistoricalMultipleSummary = {
   key: HistoricalMultipleKey;
+  source: HistoricalMultipleChartSource;
+  sourceStatus: HistoricalMultipleSourceStatus;
+  sourceMessage?: string;
   rows: HistoricalMultipleCalculationRow[];
   seriesPoints: HistoricalMultipleSeriesPoint[];
   currentMultiple: number | null;
@@ -164,6 +187,9 @@ export type StockValuationInput = {
   historicalMultiples?: Partial<Record<HistoricalMultipleKey, HistoricalMultipleRow[]>>;
   historicalMultipleSeries?: Partial<
     Record<HistoricalMultipleKey, HistoricalMultipleSeriesPoint[]>
+  >;
+  historicalMultipleBenchmarks?: Partial<
+    Record<HistoricalMultipleKey, HistoricalMultipleBenchmark>
   >;
   finalWeights: {
     dcf10Years: number;
@@ -257,6 +283,9 @@ type DefaultInputOptions = {
   historicalMultiples?: Partial<Record<HistoricalMultipleKey, HistoricalMultipleRow[]>>;
   historicalMultipleSeries?: Partial<
     Record<HistoricalMultipleKey, HistoricalMultipleSeriesPoint[]>
+  >;
+  historicalMultipleBenchmarks?: Partial<
+    Record<HistoricalMultipleKey, HistoricalMultipleBenchmark>
   >;
 };
 
@@ -441,6 +470,57 @@ function normalizeHistoricalMultipleSeries(
   };
 }
 
+function normalizeHistoricalMultipleBenchmark(
+  benchmark: HistoricalMultipleBenchmark | undefined,
+) {
+  if (!benchmark) {
+    return undefined;
+  }
+
+  const normalized: HistoricalMultipleBenchmark = {
+    source: "FinanceCharts",
+    sourceStatus: benchmark.sourceStatus === "available" ? "available" : "unavailable",
+    currentMultiple: numberOrNull(benchmark.currentMultiple),
+    low: numberOrNull(benchmark.low),
+    average: numberOrNull(benchmark.average),
+    high: numberOrNull(benchmark.high),
+    periodAverages: (benchmark.periodAverages ?? []).map((period) => ({
+      key: period.key,
+      label: period.label || period.key,
+      years: period.years,
+      average: numberOrNull(period.average),
+      count: Number.isFinite(period.count) ? period.count : 0,
+    })),
+    seriesPoints: normalizeHistoricalMultipleSeriesPoints(benchmark.seriesPoints),
+  };
+
+  if (typeof benchmark.sourceMessage === "string" && benchmark.sourceMessage.trim()) {
+    normalized.sourceMessage = benchmark.sourceMessage.trim();
+  }
+
+  return normalized;
+}
+
+function normalizeHistoricalMultipleBenchmarks(
+  historicalMultipleBenchmarks:
+    | Partial<Record<HistoricalMultipleKey, HistoricalMultipleBenchmark>>
+    | undefined,
+) {
+  if (!historicalMultipleBenchmarks) {
+    return undefined;
+  }
+
+  return {
+    priceToFreeCashFlow: normalizeHistoricalMultipleBenchmark(
+      historicalMultipleBenchmarks.priceToFreeCashFlow,
+    ),
+    peRatio: normalizeHistoricalMultipleBenchmark(historicalMultipleBenchmarks.peRatio),
+    evToEbitda: normalizeHistoricalMultipleBenchmark(
+      historicalMultipleBenchmarks.evToEbitda,
+    ),
+  };
+}
+
 function sourceValue(fields: StockValuationAutofillFields | undefined, key: keyof StockValuationAutofillFields) {
   return numberOrNull(fields?.[key]?.value);
 }
@@ -547,6 +627,9 @@ export function buildDefaultStockValuationInput(
     historicalMultiples: normalizeHistoricalMultiples(options.historicalMultiples),
     historicalMultipleSeries: normalizeHistoricalMultipleSeries(
       options.historicalMultipleSeries,
+    ),
+    historicalMultipleBenchmarks: normalizeHistoricalMultipleBenchmarks(
+      options.historicalMultipleBenchmarks,
     ),
     finalWeights: {
       dcf10Years: 0.4,
@@ -833,9 +916,60 @@ export function calculateHistoricalMultipleSummary(
           worst: applyLow,
         }
       : null;
+  const benchmark = normalizeHistoricalMultipleBenchmark(
+    input.historicalMultipleBenchmarks?.[key],
+  );
+
+  if (
+    benchmark?.sourceStatus === "available" &&
+    (benchmark.seriesPoints.length > 0 || benchmark.periodAverages.length > 0)
+  ) {
+    const benchmarkMultiples = benchmark.seriesPoints
+      .map((point) => point.multiple)
+      .filter(positiveMultiple);
+    const benchmarkLow =
+      benchmark.low ?? (benchmarkMultiples.length ? Math.min(...benchmarkMultiples) : null);
+    const benchmarkHigh =
+      benchmark.high ?? (benchmarkMultiples.length ? Math.max(...benchmarkMultiples) : null);
+    const benchmarkAverage = benchmark.average ?? average(benchmarkMultiples);
+    const benchmarkApplyValues =
+      benchmarkLow !== null && benchmarkHigh !== null && benchmarkAverage !== null
+        ? {
+            optimistic: benchmarkHigh,
+            base: benchmarkAverage,
+            worst: benchmarkLow,
+          }
+        : null;
+
+    return {
+      key,
+      source: "FinanceCharts",
+      sourceStatus: "available",
+      sourceMessage: benchmark.sourceMessage,
+      rows,
+      seriesPoints: benchmark.seriesPoints,
+      currentMultiple: benchmark.currentMultiple ?? currentMultiple,
+      low: benchmarkLow,
+      average: benchmarkAverage,
+      high: benchmarkHigh,
+      periodAverages:
+        benchmark.periodAverages.length > 0
+          ? benchmark.periodAverages
+          : historicalMultiplePeriodAverages(benchmark.seriesPoints),
+      canApply: benchmarkApplyValues !== null,
+      applyValues: benchmarkApplyValues,
+    };
+  }
 
   return {
     key,
+    source: "Derived",
+    sourceStatus: benchmark ? "fallback" : "available",
+    sourceMessage:
+      benchmark?.sourceStatus === "unavailable"
+        ? benchmark.sourceMessage ??
+          "FinanceCharts data unavailable; showing derived fallback."
+        : undefined,
     rows,
     seriesPoints,
     currentMultiple,
