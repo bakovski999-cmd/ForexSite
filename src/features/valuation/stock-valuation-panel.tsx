@@ -1,6 +1,5 @@
 "use client";
 
-import type { EChartsOption } from "echarts";
 import {
   BadgeDollarSign,
   Calculator,
@@ -12,11 +11,9 @@ import {
   Save,
   Search,
   Trash2,
-  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { BaseChart } from "@/components/charts/base-chart";
 import {
   buildDefaultStockValuationInput,
   calculateFcfPerShareTtm,
@@ -409,279 +406,80 @@ function FinanceChartsMetricLink({
   );
 }
 
-function formatChartValue(value: unknown) {
-  const numericValue = typeof value === "number" ? value : Number(value);
-
-  return Number.isFinite(numericValue) ? formatMultiple(numericValue) : "needs input";
-}
-
-function formatHistoricalChartDate(date: string) {
-  const parsed = new Date(`${date}T00:00:00Z`);
-
-  if (!Number.isFinite(parsed.getTime())) {
-    return date;
-  }
-
-  return parsed.toLocaleDateString("en-US", {
-    day: "numeric",
-    month: "long",
-    timeZone: "UTC",
-    weekday: "long",
-    year: "numeric",
-  });
-}
-
-function historicalMultipleBarOption(summary: HistoricalMultipleSummary): EChartsOption {
-  const data = [
-    { label: "Current", value: summary.currentMultiple },
-    ...summary.periodAverages.map((period) => ({
-      label: period.label,
-      value: period.average,
-    })),
-  ];
-
-  return {
-    animation: false,
-    grid: { bottom: 28, containLabel: true, left: 34, right: 16, top: 18 },
-    tooltip: {
-      appendTo: "body",
-      backgroundColor: "#0f1729",
-      borderColor: "rgba(255,255,255,0.1)",
-      confine: true,
-      formatter: (params) => {
-        const entry = Array.isArray(params) ? params[0] : params;
-        const name = String(entry?.name ?? "");
-        const value = Array.isArray(entry?.value) ? entry.value[1] : entry?.value;
-
-        return `<strong>${name}</strong><br/>Multiple: ${formatChartValue(value)}`;
-      },
-      textStyle: { color: "#f8fafc" },
-      trigger: "item",
-    },
-    xAxis: {
-      axisLabel: { color: "#94a3b8", fontSize: 11 },
-      axisLine: { lineStyle: { color: "rgba(255,255,255,0.14)" } },
-      axisTick: { show: false },
-      data: data.map((row) => row.label),
-      type: "category",
-    },
-    yAxis: {
-      axisLabel: {
-        color: "#94a3b8",
-        formatter: (value: number) => formatMultiple(value),
-      },
-      splitLine: { lineStyle: { color: "rgba(255,255,255,0.08)" } },
-      type: "value",
-    },
-    series: [
-      {
-        barMaxWidth: 34,
-        data: data.map((row, index) => ({
-          value: row.value,
-          itemStyle: {
-            borderRadius: [7, 7, 0, 0],
-            color: index === 0 ? "#60a5fa" : "#38bdf8",
-          },
-        })),
-        name: "Average multiple",
-        type: "bar",
-      },
-    ],
-  };
-}
-
-function historicalMultipleLineOption(summary: HistoricalMultipleSummary): EChartsOption {
-  const rows = [...summary.seriesPoints]
-    .filter((row) => row.date && row.multiple !== null)
-    .sort((first, second) => first.date.localeCompare(second.date));
-  const rowByDate = new Map(rows.map((row) => [row.date, row]));
-
-  return {
-    animation: false,
-    grid: { bottom: 30, containLabel: true, left: 34, right: 18, top: 18 },
-    tooltip: {
-      appendTo: "body",
-      backgroundColor: "#0f1729",
-      borderColor: "rgba(255,255,255,0.1)",
-      confine: true,
-      formatter: (params) => {
-        const entry = Array.isArray(params) ? params[0] : params;
-        const date = String(entry?.name ?? "");
-        const row = rowByDate.get(date);
-
-        if (!row) {
-          return "";
-        }
-
-        return [
-          `<strong>${formatHistoricalChartDate(date)}</strong>`,
-          `${historicalMultipleLabels[summary.key].ratioLabel}: ${formatMultiple(row.multiple)}`,
-        ]
-          .join("<br/>");
-      },
-      textStyle: { color: "#f8fafc" },
-      trigger: "axis",
-    },
-    xAxis: {
-      axisLabel: { color: "#94a3b8", fontSize: 11, hideOverlap: true },
-      axisLine: { lineStyle: { color: "rgba(255,255,255,0.14)" } },
-      axisTick: { show: false },
-      data: rows.map((row) => row.date),
-      type: "category",
-    },
-    yAxis: {
-      axisLabel: {
-        color: "#94a3b8",
-        formatter: (value: number) => formatMultiple(value),
-      },
-      splitLine: { lineStyle: { color: "rgba(255,255,255,0.08)" } },
-      type: "value",
-    },
-    series: [
-      {
-        areaStyle: { color: "rgba(74,222,128,0.12)" },
-        data: rows.map((row) => row.multiple),
-        lineStyle: { color: "#7ddf91", width: 2 },
-        name: historicalMultipleLabels[summary.key].label,
-        showSymbol: rows.length <= 24,
-        smooth: false,
-        symbolSize: 6,
-        type: "line",
-      },
-    ],
-  };
-}
-
-function HistoricalMultiplesModal({
+function HistoricalMultiplesPanel({
   isOpen,
+  metricKey,
   onApply,
-  onClose,
-  onSelectKey,
-  selectedKey,
-  summaries,
+  onToggle,
+  summary,
   ticker,
 }: {
   isOpen: boolean;
+  metricKey: HistoricalMultipleKey;
   onApply: (key: HistoricalMultipleKey) => void;
-  onClose: () => void;
-  onSelectKey: (key: HistoricalMultipleKey) => void;
-  selectedKey: HistoricalMultipleKey;
-  summaries: Record<HistoricalMultipleKey, HistoricalMultipleSummary>;
+  onToggle: () => void;
+  summary: HistoricalMultipleSummary;
   ticker: string;
 }) {
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
-
-  if (!isOpen) {
-    return null;
-  }
-
-  const summary = summaries[selectedKey];
-  const labels = historicalMultipleLabels[selectedKey];
+  const labels = historicalMultipleLabels[metricKey];
   const visibleRows = summary.source === "Derived" ? summary.rows.slice(0, 8) : [];
-  const hasChartData = summary.seriesPoints.some((row) => row.multiple !== null);
   const sourceText =
     summary.source === "FinanceCharts"
       ? "FinanceCharts benchmark data"
       : "Derived fallback from SEC/Yahoo";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-950/78 p-0 backdrop-blur-md sm:items-center sm:p-5">
+    <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03]">
       <button
-        aria-label="Close historical charts backdrop"
-        className="absolute inset-0 cursor-default"
+        aria-expanded={isOpen}
+        className="flex w-full items-center justify-between gap-4 p-4 text-left transition hover:bg-white/[0.03]"
         type="button"
-        onClick={onClose}
-      />
-      <div
-        aria-label="Historical charts"
-        aria-modal="true"
-        className="relative flex h-full w-full max-w-6xl flex-col overflow-hidden border border-white/10 bg-slate-950 shadow-[0_30px_140px_rgba(0,0,0,0.55)] sm:max-h-[88vh] sm:rounded-3xl"
-        role="dialog"
+        onClick={onToggle}
       >
-        <div className="flex flex-col gap-4 border-b border-white/10 p-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-start gap-3">
-            <Calculator className="mt-1 size-5 text-violet-200" />
-            <div>
-              <h3 className="text-lg font-semibold text-white">Historical charts</h3>
-              <p className="mt-1 text-sm text-slate-400">
-                {sourceText}
-              </p>
-              {summary.sourceMessage ? (
-                <p className="mt-1 text-xs font-semibold text-amber-200">
-                  {summary.sourceMessage}
-                </p>
-              ) : null}
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={cn(
-                "rounded-full border px-3 py-1 text-xs font-semibold",
-                summary.source === "FinanceCharts"
-                  ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
-                  : "border-amber-300/20 bg-amber-300/10 text-amber-100",
-              )}
-              data-testid={`historical-multiple-source-${summary.key}`}
-            >
-              {summary.source === "FinanceCharts" ? "FinanceCharts" : "Derived fallback"}
+        <span className="flex min-w-0 items-start gap-3">
+          <Calculator className="mt-0.5 size-5 shrink-0 text-violet-200" />
+          <span className="min-w-0">
+            <span className="block text-base font-semibold text-white">Historical multiples</span>
+            <span className="mt-1 block text-sm text-slate-400">
+              {labels.label} · {sourceText}
             </span>
-            <span className="rounded-full border border-violet-300/20 bg-violet-300/10 px-3 py-1 text-xs font-semibold text-violet-100">
-              {labels.label} avg {formatMultiple(summary.average)}
-            </span>
-            <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300">
-              Current {formatMultiple(summary.currentMultiple)}
-            </span>
-            <button
-              aria-label="Close historical charts"
-              className="inline-flex size-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 transition hover:bg-white/[0.08] hover:text-white"
-              type="button"
-              onClick={onClose}
-            >
-              <X className="size-4" />
-            </button>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4">
-          <div
-            aria-label="Historical multiple metric"
-            className="flex flex-wrap gap-2"
-            role="tablist"
+            {summary.sourceMessage ? (
+              <span className="mt-1 block text-xs font-semibold text-amber-200">
+                {summary.sourceMessage}
+              </span>
+            ) : null}
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <span
+            className={cn(
+              "hidden rounded-full border px-3 py-1 text-xs font-semibold sm:inline-flex",
+              summary.source === "FinanceCharts"
+                ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
+                : "border-amber-300/20 bg-amber-300/10 text-amber-100",
+            )}
+            data-testid={`historical-multiple-source-${summary.key}`}
           >
-            {historicalMultipleTabs.map((key) => (
-              <button
-                key={key}
-                aria-selected={selectedKey === key}
-                className={cn(
-                  "rounded-xl border px-3 py-2 text-sm font-semibold transition",
-                  selectedKey === key
-                    ? "border-blue-300/30 bg-blue-500/20 text-blue-100"
-                    : "border-white/10 bg-slate-950/45 text-slate-400 hover:text-white",
-                )}
-                role="tab"
-                type="button"
-                onClick={() => onSelectKey(key)}
-              >
-                {historicalMultipleLabels[key].label}
-              </button>
-            ))}
-          </div>
+            {summary.source === "FinanceCharts" ? "FinanceCharts" : "Derived fallback"}
+          </span>
+          <span className="hidden rounded-full border border-violet-300/20 bg-violet-300/10 px-3 py-1 text-xs font-semibold text-violet-100 md:inline-flex">
+            {labels.label} avg {formatMultiple(summary.average)}
+          </span>
+          <span className="hidden rounded-full border border-white/10 bg-slate-950/40 px-3 py-1 text-xs font-semibold text-slate-300 md:inline-flex">
+            Current {formatMultiple(summary.currentMultiple)}
+          </span>
+          <ChevronDown
+            className={cn("size-5 text-slate-400 transition", isOpen ? "rotate-180" : "")}
+          />
+        </span>
+      </button>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-4">
+      {isOpen ? (
+        <div
+          className="grid gap-4 border-t border-white/10 p-4"
+          data-testid={`historical-multiple-panel-${summary.key}`}
+        >
+          <div className="grid gap-3 md:grid-cols-4">
             <ReadOnlyCalculationMetric
               label="Current"
               value={formatMultiple(summary.currentMultiple)}
@@ -704,110 +502,83 @@ function HistoricalMultiplesModal({
             />
           </div>
 
-          {hasChartData ? (
-            <div className="mt-4 grid gap-4">
-              <div
-                className="rounded-2xl border border-white/10 bg-slate-950/45 p-3"
-                data-testid={`historical-multiple-line-chart-${summary.key}`}
-              >
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-white">
-                    {ticker.toUpperCase()} {labels.label} Ratio Chart
-                  </p>
-                  <p className="text-xs font-medium text-slate-500">monthly 10Y series</p>
+          {visibleRows.length > 0 ? (
+            <div className="grid gap-3">
+              {visibleRows.map((row, index) => (
+                <div
+                  key={`${row.year ?? "unknown"}-${index}`}
+                  className="grid gap-3 rounded-xl border border-white/10 bg-slate-950/45 p-3 lg:grid-cols-[minmax(80px,0.65fr)_minmax(120px,1fr)_minmax(120px,1fr)_minmax(100px,0.7fr)_minmax(135px,0.9fr)] lg:items-center"
+                  data-testid={`historical-multiple-row-${summary.key}-${index}`}
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-white">{row.year ?? "Year"}</p>
+                    <p className="mt-1 text-xs text-slate-500">{row.asOf ?? "manual"}</p>
+                  </div>
+                  <ReadOnlyCalculationMetric
+                    label={labels.numerator}
+                    value={formatPlainNumber(row.numerator, 2)}
+                  />
+                  <ReadOnlyCalculationMetric
+                    label={labels.denominator}
+                    value={formatPlainNumber(row.denominator, 2)}
+                  />
+                  <ReadOnlyCalculationMetric
+                    label={labels.label}
+                    value={formatMultiple(row.multiple)}
+                    highlight={row.usableForApply}
+                  />
+                  <div
+                    className={cn(
+                      "rounded-xl border px-3 py-2 text-sm font-semibold",
+                      row.usableForApply
+                        ? "border-emerald-300/15 bg-emerald-300/[0.06] text-emerald-200"
+                        : row.ignoredReason === "needs-review"
+                          ? "border-sky-300/15 bg-sky-300/[0.06] text-sky-100"
+                          : "border-amber-300/15 bg-amber-300/[0.06] text-amber-100",
+                    )}
+                  >
+                    <span className="block">
+                      {row.usableForApply
+                        ? "used for Apply"
+                        : row.ignoredReason === "needs-review"
+                          ? "needs review"
+                          : "ignored for Apply"}
+                    </span>
+                    {row.reviewReason ? (
+                      <span className="mt-1 block text-xs font-medium opacity-80">
+                        {row.reviewReason}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
-                <BaseChart height={390} option={historicalMultipleLineOption(summary)} />
-              </div>
-              <div
-                className="rounded-2xl border border-white/10 bg-slate-950/45 p-3"
-                data-testid={`historical-multiple-bar-chart-${summary.key}`}
-              >
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-white">Period averages</p>
-                  <p className="text-xs font-medium text-slate-500">
-                    Current / TTM / 3Y / 5Y / 10Y / 15Y / 20Y
-                  </p>
-                </div>
-                <BaseChart height={230} option={historicalMultipleBarOption(summary)} />
-              </div>
+              ))}
             </div>
           ) : (
-            <div className="mt-4 rounded-xl border border-dashed border-white/10 bg-slate-950/45 p-4 text-sm text-slate-400">
-              Няма historical chart series за тази метрика. Попълни multiple assumptions ръчно.
+            <div className="rounded-xl border border-dashed border-white/10 bg-slate-950/45 p-4 text-sm text-slate-400">
+              Няма raw historical rows за тази метрика. Използвай FinanceCharts линка или попълни assumptions ръчно.
             </div>
           )}
 
-          <div className="mt-4 grid gap-3">
-            {visibleRows.map((row, index) => (
-              <div
-                key={`${row.year ?? "unknown"}-${index}`}
-                className="grid gap-3 rounded-xl border border-white/10 bg-slate-950/45 p-3 lg:grid-cols-[minmax(80px,0.65fr)_minmax(120px,1fr)_minmax(120px,1fr)_minmax(100px,0.7fr)_minmax(135px,0.9fr)] lg:items-center"
-                data-testid={`historical-multiple-row-${summary.key}-${index}`}
-              >
-                <div>
-                  <p className="text-sm font-semibold text-white">{row.year ?? "Year"}</p>
-                  <p className="mt-1 text-xs text-slate-500">{row.asOf ?? "manual"}</p>
-                </div>
-                <ReadOnlyCalculationMetric
-                  label={labels.numerator}
-                  value={formatPlainNumber(row.numerator, 2)}
-                />
-                <ReadOnlyCalculationMetric
-                  label={labels.denominator}
-                  value={formatPlainNumber(row.denominator, 2)}
-                />
-                <ReadOnlyCalculationMetric
-                  label={labels.label}
-                  value={formatMultiple(row.multiple)}
-                  highlight={row.usableForApply}
-                />
-                <div
-                  className={cn(
-                    "rounded-xl border px-3 py-2 text-sm font-semibold",
-                    row.usableForApply
-                      ? "border-emerald-300/15 bg-emerald-300/[0.06] text-emerald-200"
-                      : row.ignoredReason === "needs-review"
-                        ? "border-sky-300/15 bg-sky-300/[0.06] text-sky-100"
-                        : "border-amber-300/15 bg-amber-300/[0.06] text-amber-100",
-                  )}
-                >
-                  <span className="block">
-                    {row.usableForApply
-                      ? "used for Apply"
-                      : row.ignoredReason === "needs-review"
-                        ? "needs review"
-                        : "ignored for Apply"}
-                  </span>
-                  {row.reviewReason ? (
-                    <span className="mt-1 block text-xs font-medium opacity-80">
-                      {row.reviewReason}
-                    </span>
-                  ) : null}
-                </div>
+          <div className="flex flex-col gap-3 rounded-xl border border-white/10 bg-slate-950/45 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm leading-6 text-slate-400">
+              <p>Apply maps High to Best, Average to Average, and Low to Worst.</p>
+              <div className="mt-2 flex flex-wrap gap-2" aria-label="FinanceCharts benchmark links">
+                {historicalMultipleTabs.map((key) => (
+                  <FinanceChartsMetricLink key={key} metricKey={key} ticker={ticker} />
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-3 border-t border-white/10 p-4 md:flex-row md:items-center md:justify-between">
-          <div className="text-sm leading-6 text-slate-400">
-            <p>Apply maps High to Best, Average to Average, and Low to Worst.</p>
-            <div className="mt-2 flex flex-wrap gap-2" aria-label="FinanceCharts benchmark links">
-              {historicalMultipleTabs.map((key) => (
-                <FinanceChartsMetricLink key={key} metricKey={key} ticker={ticker} />
-              ))}
             </div>
+            <button
+              className="inline-flex min-h-12 items-center justify-center rounded-xl bg-blue-500 px-4 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+              type="button"
+              disabled={!summary.canApply}
+              onClick={() => onApply(metricKey)}
+            >
+              Apply {labels.label} to scenarios
+            </button>
           </div>
-          <button
-            className="inline-flex min-h-12 items-center justify-center rounded-xl bg-blue-500 px-4 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-            type="button"
-            disabled={!summary.canApply}
-            onClick={() => onApply(selectedKey)}
-          >
-            Apply {labels.label} to scenarios
-          </button>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
@@ -1092,10 +863,7 @@ export function StockValuationPanel() {
   const [isSaving, setIsSaving] = useState(false);
   const [isSourceBadgesOpen, setIsSourceBadgesOpen] = useState(false);
   const [isHistoricalFcfOpen, setIsHistoricalFcfOpen] = useState(false);
-  const [isHistoricalMultiplesModalOpen, setIsHistoricalMultiplesModalOpen] =
-    useState(false);
-  const [activeHistoricalMultipleKey, setActiveHistoricalMultipleKey] =
-    useState<HistoricalMultipleKey>("priceToFreeCashFlow");
+  const [isHistoricalMultiplesOpen, setIsHistoricalMultiplesOpen] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -1532,13 +1300,7 @@ export function StockValuationPanel() {
                       : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]",
                   )}
                   type="button"
-                  onClick={() => {
-                    const nextHistoricalKey = historicalMultipleKeyForModel(tab.key);
-                    setActiveModel(tab.key);
-                    if (nextHistoricalKey) {
-                      setActiveHistoricalMultipleKey(nextHistoricalKey);
-                    }
-                  }}
+                  onClick={() => setActiveModel(tab.key)}
                 >
                   <span aria-hidden="true">{tab.label}</span>
                   <span aria-hidden="true" className="text-slate-300">
@@ -1567,19 +1329,6 @@ export function StockValuationPanel() {
                     metricKey={activeModelHistoricalKey}
                     ticker={input.ticker}
                   />
-                ) : null}
-                {activeModelHistoricalKey ? (
-                  <button
-                    className="inline-flex min-h-9 items-center justify-center gap-2 rounded-xl border border-violet-300/20 bg-violet-300/10 px-3 text-xs font-semibold text-violet-100 transition hover:bg-violet-300/15"
-                    type="button"
-                    onClick={() => {
-                      setActiveHistoricalMultipleKey(activeModelHistoricalKey);
-                      setIsHistoricalMultiplesModalOpen(true);
-                    }}
-                  >
-                    <Calculator className="size-4" />
-                    Historical charts
-                  </button>
                 ) : null}
                 <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   Scenario weight total {formatPercent(activeResult.scenarioWeightTotal, 0)}
@@ -1626,17 +1375,17 @@ export function StockValuationPanel() {
               <FcfPerShareTtmPanel calculation={fcfPerShareTtm} currency={input.currency} />
             ) : null}
 
+            {activeModelHistoricalKey ? (
+              <HistoricalMultiplesPanel
+                isOpen={isHistoricalMultiplesOpen}
+                metricKey={activeModelHistoricalKey}
+                summary={historicalMultipleSummaries[activeModelHistoricalKey]}
+                ticker={input.ticker}
+                onApply={applyHistoricalMultipleByKey}
+                onToggle={() => setIsHistoricalMultiplesOpen((current) => !current)}
+              />
+            ) : null}
           </div>
-
-          <HistoricalMultiplesModal
-            isOpen={isHistoricalMultiplesModalOpen}
-            selectedKey={activeHistoricalMultipleKey}
-            summaries={historicalMultipleSummaries}
-            ticker={input.ticker}
-            onApply={applyHistoricalMultipleByKey}
-            onClose={() => setIsHistoricalMultiplesModalOpen(false)}
-            onSelectKey={setActiveHistoricalMultipleKey}
-          />
 
           <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03]">
             <button

@@ -628,11 +628,13 @@ describe("StockValuationPanel", () => {
     await waitFor(() => expect(screen.getByDisplayValue("HIST")).toBeVisible());
 
     expect(screen.getByRole("button", { name: /10 Years Free Cash Flow/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Historical multiples/ })).not.toBeInTheDocument();
     expect(screen.queryByTestId("historical-fcf-row-0")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /P\/E ·/ }));
 
     expect(screen.queryByRole("button", { name: /10 Years Free Cash Flow/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Historical multiples/ })).toBeVisible();
   });
 
   test("historical FCF calculator renders averages, edits rows, and applies average to DCF scenarios", async () => {
@@ -807,7 +809,7 @@ describe("StockValuationPanel", () => {
     expect((screen.getAllByLabelText("Growth 6-10")[0] as HTMLInputElement).value).toBe("14");
   });
 
-  test("historical charts button opens modal and applies positive ranges to scenarios", async () => {
+  test("inline historical multiples panel opens and applies positive ranges to scenarios", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
@@ -846,18 +848,19 @@ describe("StockValuationPanel", () => {
 
     await user.click(screen.getByRole("button", { name: /DCF Multiple ·/ }));
 
-    expect(screen.getByRole("button", { name: "Historical charts" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Historical charts" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Historical multiples/ })).toBeVisible();
     expect(screen.queryByTestId("historical-multiple-row-priceToFreeCashFlow-0")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Historical charts" }));
+    await user.click(screen.getByRole("button", { name: /Historical multiples/ }));
 
-    const dialog = screen.getByRole("dialog", { name: /Historical charts/ });
-    expect(dialog).toBeVisible();
-    expect(screen.getByRole("tab", { name: "P/FCF" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByTestId("historical-multiple-bar-chart-priceToFreeCashFlow")).toBeVisible();
-    expect(screen.getByTestId("historical-multiple-line-chart-priceToFreeCashFlow")).toBeVisible();
-    expect(screen.getAllByTestId("mock-base-chart")).toHaveLength(2);
-    expect(within(dialog).getByRole("link", { name: "Open P/FCF on FinanceCharts" })).toHaveAttribute(
+    const panel = screen.getByTestId("historical-multiple-panel-priceToFreeCashFlow");
+    expect(panel).toBeVisible();
+    expect(screen.queryByRole("dialog", { name: /Historical charts/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("historical-multiple-bar-chart-priceToFreeCashFlow")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("historical-multiple-line-chart-priceToFreeCashFlow")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("mock-base-chart")).not.toBeInTheDocument();
+    expect(within(panel).getByRole("link", { name: "Open P/FCF on FinanceCharts" })).toHaveAttribute(
       "href",
       "https://www.financecharts.com/stocks/INTC/value/price-to-free-cash-flow",
     );
@@ -874,7 +877,7 @@ describe("StockValuationPanel", () => {
     ).toEqual(["30", "17.67", "8"]);
   });
 
-  test("Historical charts modal switches between P/E and EV/EBITDA and closes", async () => {
+  test("inline historical multiples panel follows the active valuation model", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
@@ -916,31 +919,31 @@ describe("StockValuationPanel", () => {
       "href",
       "https://www.financecharts.com/stocks/INTC/value/pe-ratio",
     );
-    await user.click(screen.getByRole("button", { name: "Historical charts" }));
-    const dialog = screen.getByRole("dialog", { name: /Historical charts/ });
-    expect(screen.getByRole("tab", { name: "P/E" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByTestId("historical-multiple-bar-chart-peRatio")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /Historical multiples/ }));
+    const pePanel = screen.getByTestId("historical-multiple-panel-peRatio");
+    expect(pePanel).toBeVisible();
+    expect(screen.queryByRole("dialog", { name: /Historical charts/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("historical-multiple-bar-chart-peRatio")).not.toBeInTheDocument();
     expect(
-      within(dialog).getByRole("link", { name: "Open EV/EBITDA on FinanceCharts" }),
+      within(pePanel).getByRole("link", { name: "Open EV/EBITDA on FinanceCharts" }),
     ).toHaveAttribute("href", "https://www.financecharts.com/stocks/INTC/value/ev-to-ebitda");
-    expect(within(dialog).getByRole("link", { name: "Open P/E on FinanceCharts" })).toHaveAttribute(
+    expect(within(pePanel).getByRole("link", { name: "Open P/E on FinanceCharts" })).toHaveAttribute(
       "href",
       "https://www.financecharts.com/stocks/INTC/value/pe-ratio",
     );
-    expect(within(dialog).getByRole("link", { name: "Open P/FCF on FinanceCharts" })).toHaveAttribute(
+    expect(within(pePanel).getByRole("link", { name: "Open P/FCF on FinanceCharts" })).toHaveAttribute(
       "href",
       "https://www.financecharts.com/stocks/INTC/value/price-to-free-cash-flow",
     );
 
     await user.click(screen.getByRole("button", { name: /EV\/EBITDA ·/ }));
-    expect(screen.getByRole("tab", { name: "EV/EBITDA" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByTestId("historical-multiple-line-chart-evToEbitda")).toBeVisible();
-
-    await user.click(screen.getByRole("button", { name: "Close historical charts" }));
-    expect(screen.queryByRole("dialog", { name: /Historical charts/ })).not.toBeInTheDocument();
+    const evPanel = screen.getByTestId("historical-multiple-panel-evToEbitda");
+    expect(evPanel).toBeVisible();
+    expect(screen.getByTestId("historical-multiple-row-evToEbitda-0")).toHaveTextContent("8.2");
+    expect(screen.queryByTestId("historical-multiple-line-chart-evToEbitda")).not.toBeInTheDocument();
   });
 
-  test("Historical charts modal labels FinanceCharts benchmark data when available", async () => {
+  test("inline historical multiples panel labels FinanceCharts benchmark data when available", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
@@ -978,8 +981,8 @@ describe("StockValuationPanel", () => {
     await waitFor(() => expect(screen.getByDisplayValue("NVO")).toBeVisible());
 
     await user.click(screen.getByRole("button", { name: /EV\/EBITDA ·/ }));
-    await user.click(screen.getByRole("button", { name: "Historical charts" }));
-    const dialog = screen.getByRole("dialog", { name: /Historical charts/ });
+    await user.click(screen.getByRole("button", { name: /Historical multiples/ }));
+    const panel = screen.getByTestId("historical-multiple-panel-evToEbitda");
 
     expect(screen.getByTestId("historical-multiple-source-evToEbitda")).toHaveTextContent(
       "FinanceCharts",
@@ -988,7 +991,7 @@ describe("StockValuationPanel", () => {
       "13.11",
     );
     expect(
-      within(dialog).getByRole("link", { name: "Open EV/EBITDA on FinanceCharts" }),
+      within(panel).getByRole("link", { name: "Open EV/EBITDA on FinanceCharts" }),
     ).toHaveAttribute("href", "https://www.financecharts.com/stocks/NVO/value/ev-to-ebitda");
   });
 });
