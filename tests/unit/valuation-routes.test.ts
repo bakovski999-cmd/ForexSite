@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { getCurrentSession } from "@/lib/auth";
 import { fetchValuationAutofill } from "@/lib/stock-valuation-autofill";
+import { fetchValuationQuotes } from "@/lib/stock-valuation-quotes";
 import { getStockValuationRepository } from "@/lib/stock-valuation-repository";
 import { buildDefaultStockValuationInput } from "@/lib/stock-valuation";
 
@@ -15,6 +16,10 @@ vi.mock("@/lib/stock-valuation-autofill", () => ({
 
 vi.mock("@/lib/stock-valuation-repository", () => ({
   getStockValuationRepository: vi.fn(),
+}));
+
+vi.mock("@/lib/stock-valuation-quotes", () => ({
+  fetchValuationQuotes: vi.fn(),
 }));
 
 describe("valuation routes", () => {
@@ -155,5 +160,68 @@ describe("valuation routes", () => {
       expect.objectContaining({ title: "Updated" }),
     );
     expect(repository.deleteAnalysis).toHaveBeenCalledWith("user-1", "analysis-1");
+  });
+
+  test("gets one saved analysis by id for the current user", async () => {
+    const payload = buildDefaultStockValuationInput({ ticker: "GOOGL" });
+    vi.mocked(getCurrentSession).mockResolvedValue({
+      id: "user-1",
+      email: "test@example.com",
+      mode: "supabase",
+    });
+    const repository = {
+      getAnalysis: vi.fn().mockResolvedValue({
+        id: "analysis-1",
+        userId: "user-1",
+        ticker: "GOOGL",
+        companyName: "Alphabet",
+        title: "GOOGL valuation",
+        latestFairValue: 200,
+        currentPrice: 150,
+        payload,
+        createdAt: "2026-05-12T07:00:00.000Z",
+        updatedAt: "2026-05-12T08:00:00.000Z",
+      }),
+    };
+    vi.mocked(getStockValuationRepository).mockReturnValue(repository as never);
+    const route = await import("@/app/api/valuation/saved/[id]/route");
+
+    const response = await route.GET(
+      new Request("http://localhost/api/valuation/saved/analysis-1"),
+      { params: Promise.resolve({ id: "analysis-1" }) },
+    );
+    const body = (await response.json()) as { ok: boolean; analysis: { id: string } };
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.analysis.id).toBe("analysis-1");
+    expect(repository.getAnalysis).toHaveBeenCalledWith("user-1", "analysis-1");
+  });
+
+  test("quote endpoint returns best-effort prices for authenticated users", async () => {
+    vi.mocked(getCurrentSession).mockResolvedValue({
+      id: "user-1",
+      email: "test@example.com",
+      mode: "supabase",
+    });
+    vi.mocked(fetchValuationQuotes).mockResolvedValue([
+      { ticker: "GOOGL", currentPrice: 150, currency: "USD", source: "Yahoo", error: null },
+      { ticker: "COIN", currentPrice: null, currency: null, source: "Yahoo", error: "No quote" },
+    ]);
+    const { GET } = await import("@/app/api/valuation/quotes/route");
+
+    const response = await GET(
+      new Request("http://localhost/api/valuation/quotes?tickers=googl,coin"),
+    );
+    const body = (await response.json()) as {
+      ok: boolean;
+      quotes: Array<{ ticker: string; currentPrice: number | null }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.quotes).toHaveLength(2);
+    expect(body.quotes[0]).toMatchObject({ ticker: "GOOGL", currentPrice: 150 });
+    expect(fetchValuationQuotes).toHaveBeenCalledWith(["GOOGL", "COIN"]);
   });
 });

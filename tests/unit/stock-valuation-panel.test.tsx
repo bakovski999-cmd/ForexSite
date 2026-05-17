@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { StockValuationPanel } from "@/components/stock-valuation-panel";
+import { SavedValuationsPanel } from "@/features/valuation/saved-valuations-panel";
 import {
   buildDefaultStockValuationInput,
   type HistoricalFreeCashFlowRow,
@@ -354,7 +355,8 @@ describe("StockValuationPanel", () => {
 
     expect(screen.getByRole("heading", { name: "Справедлива цена" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Авто попълване" })).toBeVisible();
-    expect(await screen.findByText("Запазени анализи")).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Save analysis" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Запазени анализи" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /DCF 10 years ·/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /EV\/EBITDA ·/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /P\/E ·/ })).toBeVisible();
@@ -372,7 +374,7 @@ describe("StockValuationPanel", () => {
 
     render(<StockValuationPanel />);
 
-    await screen.findByText("Запазени анализи");
+    await screen.findByRole("button", { name: "Save analysis" });
 
     await user.click(screen.getAllByRole("button", { name: "Weight help" })[0]);
     expect(screen.getByText(/тегло искаме да придадем/)).toBeVisible();
@@ -785,7 +787,66 @@ describe("StockValuationPanel", () => {
     ).toEqual(["1,189.4", "1,189.4", "1,189.4"]);
   });
 
-  test("saved valuation restores historical FCF rows", async () => {
+  test("loads a saved valuation by id from the valuation query route", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "/api/valuation/saved/history-analysis") {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              analysis: {
+                id: "history-analysis",
+                userId: "user-1",
+                ticker: "HIST",
+                companyName: "History Corp",
+                title: "HIST history",
+                latestFairValue: 10,
+                currentPrice: 10,
+                payload: historicalInput,
+                createdAt: "2026-05-14T06:00:00.000Z",
+                updatedAt: "2026-05-14T06:00:00.000Z",
+              },
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<StockValuationPanel initialAnalysisId="history-analysis" />);
+
+    await waitFor(() => expect(screen.getByDisplayValue("HIST")).toBeVisible());
+    await user.click(screen.getByRole("button", { name: /10 Years Free Cash Flow/ }));
+
+    expect(screen.getByLabelText("Historical year Year 10")).toHaveValue(2023);
+    expect(screen.getByLabelText("Historical FCF Year 10")).toHaveValue(4358);
+    expect(screen.getByTestId("historical-fcf-average")).toHaveTextContent("$1,131.03");
+  });
+
+  test("renders saved analyses as compact rows with model values and current quote", async () => {
+    const undervaluedPayload = buildDefaultStockValuationInput({
+      ticker: "GOOGL",
+      companyName: "Alphabet Inc.",
+      currentPrice: 120,
+      fields: {
+        currentPrice: { value: 120, source: "Yahoo" },
+      },
+    });
+    const overvaluedPayload = buildDefaultStockValuationInput({
+      ticker: "COIN",
+      companyName: "Coinbase Global",
+      currentPrice: 240,
+      fields: {
+        currentPrice: { value: 240, source: "Yahoo" },
+      },
+    });
+
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
@@ -798,14 +859,26 @@ describe("StockValuationPanel", () => {
               ok: true,
               analyses: [
                 {
-                  id: "history-analysis",
+                  id: "analysis-googl",
                   userId: "user-1",
-                  ticker: "HIST",
-                  companyName: "History Corp",
-                  title: "HIST history",
-                  latestFairValue: 10,
-                  currentPrice: 10,
-                  payload: historicalInput,
+                  ticker: "GOOGL",
+                  companyName: "Alphabet Inc.",
+                  title: "GOOGL valuation",
+                  latestFairValue: 200,
+                  currentPrice: 120,
+                  payload: undervaluedPayload,
+                  createdAt: "2026-05-14T06:00:00.000Z",
+                  updatedAt: "2026-05-14T06:00:00.000Z",
+                },
+                {
+                  id: "analysis-coin",
+                  userId: "user-1",
+                  ticker: "COIN",
+                  companyName: "Coinbase Global",
+                  title: "COIN valuation",
+                  latestFairValue: 100,
+                  currentPrice: 240,
+                  payload: overvaluedPayload,
                   createdAt: "2026-05-14T06:00:00.000Z",
                   updatedAt: "2026-05-14T06:00:00.000Z",
                 },
@@ -814,19 +887,41 @@ describe("StockValuationPanel", () => {
           };
         }
 
+        if (url === "/api/valuation/quotes?tickers=GOOGL%2CCOIN") {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              quotes: [
+                { ticker: "GOOGL", currentPrice: 150, currency: "USD", source: "Yahoo", error: null },
+                { ticker: "COIN", currentPrice: 250, currency: "USD", source: "Yahoo", error: null },
+              ],
+            }),
+          };
+        }
+
         throw new Error(`Unexpected fetch ${url}`);
       }),
     );
-    const user = userEvent.setup();
 
-    render(<StockValuationPanel />);
+    render(<SavedValuationsPanel />);
 
-    await user.click(await screen.findByText("HIST history"));
-    await user.click(screen.getByRole("button", { name: /10 Years Free Cash Flow/ }));
-
-    expect(screen.getByLabelText("Historical year Year 10")).toHaveValue(2023);
-    expect(screen.getByLabelText("Historical FCF Year 10")).toHaveValue(4358);
-    expect(screen.getByTestId("historical-fcf-average")).toHaveTextContent("$1,131.03");
+    expect(await screen.findByRole("heading", { name: "Запазени анализи" })).toBeVisible();
+    const rows = await screen.findAllByTestId("saved-valuation-row");
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).getByText("GOOGL valuation")).toBeVisible();
+    expect(within(rows[0]).getByText("DCF")).toBeVisible();
+    expect(within(rows[0]).getByText("EV/EBITDA")).toBeVisible();
+    expect(within(rows[0]).getByText("P/E")).toBeVisible();
+    expect(within(rows[0]).getByText("P/FCF")).toBeVisible();
+    expect(within(rows[0]).getByText("$200.00")).toBeVisible();
+    expect(within(rows[0]).getByText("$150.00")).toBeVisible();
+    expect(rows[0]).toHaveAttribute("data-valuation-tone", "buy");
+    expect(rows[1]).toHaveAttribute("data-valuation-tone", "wait");
+    expect(within(rows[0]).getByRole("link", { name: /Open GOOGL valuation/ })).toHaveAttribute(
+      "href",
+      "/valuation?analysis=analysis-googl",
+    );
   });
 
   test("formats noisy scenario input decimals in P/E and DCF Multiple", async () => {

@@ -63,6 +63,23 @@ function validateUpdateInput(body: unknown): UpdateStockValuationAnalysisInput {
   return input;
 }
 
+export async function GET(_request: Request, context: SavedValuationRouteContext) {
+  const userId = await requireStableUserId();
+
+  if (!userId) {
+    return NextResponse.json({ ok: false, error: "Real login is required." }, { status: 401 });
+  }
+
+  const { id } = await context.params;
+  const analysis = await getStockValuationRepository().getAnalysis(userId, id);
+
+  if (!analysis) {
+    return NextResponse.json({ ok: false, error: "Saved valuation not found." }, { status: 404 });
+  }
+
+  return NextResponse.json({ ok: true, analysis });
+}
+
 export async function PUT(request: Request, context: SavedValuationRouteContext) {
   const userId = await requireStableUserId();
 

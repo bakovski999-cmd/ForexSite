@@ -5,6 +5,7 @@ import {
   BadgeDollarSign,
   Calculator,
   CalendarDays,
+  Database,
   Newspaper,
   Radar,
   TrendingUp,
@@ -29,6 +30,7 @@ const navigation = [
   { href: "/signal-lab", label: "Сигнал", icon: Waypoints },
   { href: "/risk-calculator", label: "Риск калкулатор", icon: Calculator },
   { href: "/valuation", label: "Справедлива цена", icon: BadgeDollarSign },
+  { href: "/valuation/saved", label: "Запазени анализи", icon: Database },
 ];
 
 export function AppShell({
@@ -43,7 +45,7 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const isValuationWorkspace = pathname === "/valuation";
+  const isValuationWorkspace = pathname === "/valuation" || pathname === "/valuation/saved";
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(255,214,102,0.18),_transparent_26%),linear-gradient(180deg,_#0a1020_0%,_#07101e_36%,_#050911_100%)] text-white">
@@ -84,7 +86,7 @@ export function AppShell({
             </div>
           </div>
 
-          <nav className="mt-5 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
+          <nav className="mt-5 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-9">
             {navigation.map((item) => {
               const active = pathname === item.href;
               const Icon = item.icon;
@@ -94,7 +96,7 @@ export function AppShell({
                   key={item.href}
                   href={item.href}
                   className={cn(
-                    "flex min-h-14 items-center justify-center gap-2 rounded-2xl border px-4 text-sm font-medium transition",
+                    "flex min-h-14 items-center justify-center gap-2 rounded-2xl border px-3 text-xs font-medium transition 2xl:px-4 2xl:text-sm",
                     active
                       ? "border-amber-300/40 bg-amber-300/14 text-amber-100"
                       : "border-white/8 bg-white/[0.03] text-slate-300 hover:bg-white/[0.06]",

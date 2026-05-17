@@ -11,7 +11,6 @@ import {
   Loader2,
   Save,
   Search,
-  Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -35,7 +34,6 @@ import {
   type TerminalMultipleScenario,
   type ValuationField,
 } from "@/lib/stock-valuation";
-import type { SavedStockValuationAnalysis } from "@/lib/stock-valuation-repository";
 import { cn } from "@/lib/utils";
 
 type ModelKey = "dcf10Years" | "evEbitda" | "pe" | "dcfMultiple";
@@ -1107,12 +1105,15 @@ function applyAutofillSources(fields: StockValuationAutofillFields) {
   return fields as StockValuationInput["sources"];
 }
 
-export function StockValuationPanel() {
+export function StockValuationPanel({
+  initialAnalysisId = null,
+}: {
+  initialAnalysisId?: string | null;
+}) {
   const [input, setInput] = useState<StockValuationInput>(() =>
     buildDefaultStockValuationInput(),
   );
   const [activeModel, setActiveModel] = useState<ModelKey>("dcf10Years");
-  const [savedAnalyses, setSavedAnalyses] = useState<SavedStockValuationAnalysis[]>([]);
   const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
   const [isAutofilling, setIsAutofilling] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -1140,34 +1141,46 @@ export function StockValuationPanel() {
   useEffect(() => {
     let cancelled = false;
 
-    async function loadSavedAnalyses() {
-      try {
-        const response = await fetch("/api/valuation/saved");
-        if (!response.ok) {
-          return;
-        }
+    async function loadInitialAnalysis() {
+      if (!initialAnalysisId) {
+        return;
+      }
 
+      try {
+        setErrorMessage(null);
+        setStatusMessage(null);
+
+        const response = await fetch(`/api/valuation/saved/${initialAnalysisId}`);
         const body = (await response.json()) as {
           ok: boolean;
-          analyses?: SavedStockValuationAnalysis[];
+          analysis?: { id: string; title: string; payload: StockValuationInput };
+          error?: string;
         };
 
-        if (!cancelled && body.ok) {
-          setSavedAnalyses(body.analyses ?? []);
+        if (!response.ok || !body.ok || !body.analysis) {
+          throw new Error(body.error || "Saved valuation not found.");
         }
-      } catch {
+
         if (!cancelled) {
-          setSavedAnalyses([]);
+          setInput(body.analysis.payload);
+          setSelectedAnalysisId(body.analysis.id);
+          setStatusMessage(`Зареден анализ: ${body.analysis.title}`);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setErrorMessage(
+            error instanceof Error ? error.message : "Saved valuation not found.",
+          );
         }
       }
     }
 
-    loadSavedAnalyses();
+    loadInitialAnalysis();
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialAnalysisId]);
 
   function setTopLevelNumber(key: "currentPrice" | "sharesOutstanding", value: number | null) {
     setInput((current) => ({
@@ -1406,7 +1419,7 @@ export function StockValuationPanel() {
       });
       const body = (await response.json()) as {
         ok: boolean;
-        analysis?: SavedStockValuationAnalysis;
+        analysis?: { id: string };
         error?: string;
       };
 
@@ -1415,45 +1428,12 @@ export function StockValuationPanel() {
       }
 
       setSelectedAnalysisId(body.analysis.id);
-      setSavedAnalyses((current) => {
-        const rest = current.filter((analysis) => analysis.id !== body.analysis!.id);
-
-        return [body.analysis!, ...rest];
-      });
       setStatusMessage("Запазено");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Save failed.");
     } finally {
       setIsSaving(false);
     }
-  }
-
-  async function handleDelete(id: string) {
-    setErrorMessage(null);
-    setStatusMessage(null);
-
-    try {
-      const response = await fetch(`/api/valuation/saved/${id}`, { method: "DELETE" });
-
-      if (!response.ok) {
-        throw new Error("Delete failed.");
-      }
-
-      setSavedAnalyses((current) => current.filter((analysis) => analysis.id !== id));
-      if (selectedAnalysisId === id) {
-        setSelectedAnalysisId(null);
-      }
-      setStatusMessage("Изтрито");
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Delete failed.");
-    }
-  }
-
-  function openSavedAnalysis(analysis: SavedStockValuationAnalysis) {
-    setInput(analysis.payload);
-    setSelectedAnalysisId(analysis.id);
-    setStatusMessage(null);
-    setErrorMessage(null);
   }
 
   const activeResult = result.models[activeModel];
@@ -1771,65 +1751,6 @@ export function StockValuationPanel() {
           </button>
         </div>
       </section>
-
-      <aside className="min-w-0 rounded-[26px] border border-white/10 bg-slate-950/40 p-5 shadow-[0_30px_100px_rgba(0,0,0,0.22)]">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-white">Запазени анализи</h2>
-            <p className="mt-1 text-sm text-slate-400">Отвори, редактирай и презапиши.</p>
-          </div>
-          <button
-            className="rounded-xl border border-white/10 p-2 text-slate-300 transition hover:bg-white/[0.06]"
-            type="button"
-            onClick={() => {
-              setInput(buildDefaultStockValuationInput());
-              setSelectedAnalysisId(null);
-            }}
-          >
-            New
-          </button>
-        </div>
-
-        <div className="mt-4 grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-          {savedAnalyses.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-slate-400">
-              Няма запазени анализи или текущата сесия е demo. Изчисленията работят, но save
-              изисква реален login.
-            </div>
-          ) : (
-            savedAnalyses.map((analysis) => (
-              <div
-                key={analysis.id}
-                className={cn(
-                  "rounded-2xl border p-3 transition",
-                  selectedAnalysisId === analysis.id
-                    ? "border-blue-400/40 bg-blue-500/10"
-                    : "border-white/10 bg-white/[0.03]",
-                )}
-              >
-                <button
-                  className="block w-full text-left"
-                  type="button"
-                  onClick={() => openSavedAnalysis(analysis)}
-                >
-                  <p className="font-semibold text-white">{analysis.title}</p>
-                  <p className="mt-1 text-sm text-slate-400">
-                    {analysis.ticker} · {formatCurrency(analysis.latestFairValue, analysis.payload.currency)}
-                  </p>
-                </button>
-                <button
-                  className="mt-3 inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/[0.06]"
-                  type="button"
-                  onClick={() => handleDelete(analysis.id)}
-                >
-                  <Trash2 className="size-4" />
-                  Delete
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-      </aside>
     </div>
   );
 }
