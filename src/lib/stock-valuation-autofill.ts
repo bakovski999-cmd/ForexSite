@@ -1067,10 +1067,26 @@ function historicalFreeCashFlowByYear(rows: HistoricalFreeCashFlowRow[]) {
   return byYear;
 }
 
+function firstPositiveNumber(...values: Array<number | null | undefined>) {
+  return (
+    values.find((value): value is number =>
+      typeof value === "number" && Number.isFinite(value) && value > 0,
+    ) ?? null
+  );
+}
+
+function historicalSharesOutstanding(
+  metricRow: HistoricalFinancialMetricRow,
+  fallbackSharesOutstanding: number | null,
+) {
+  return firstPositiveNumber(metricRow.sharesOutstanding, fallbackSharesOutstanding);
+}
+
 function buildHistoricalMultiples(
   metricRows: HistoricalFinancialMetricRow[],
   prices: HistoricalPriceRow[],
   historicalFreeCashFlows: HistoricalFreeCashFlowRow[] = [],
+  fallbackSharesOutstanding: number | null = null,
 ): {
   historicalMultiples: Partial<Record<"priceToFreeCashFlow" | "peRatio" | "evToEbitda", HistoricalMultipleRow[]>>;
   historicalMultipleSeries: Partial<
@@ -1087,11 +1103,11 @@ function buildHistoricalMultiples(
 
   for (const metricRow of metricRows) {
     const price = priceAtOrBefore(prices, yearEndDate(metricRow));
-    const sharesOutstanding = metricRow.sharesOutstanding;
+    const sharesOutstanding = historicalSharesOutstanding(metricRow, fallbackSharesOutstanding);
     const freeCashFlow =
       metricRow.freeCashFlow ?? fallbackFreeCashFlowByYear.get(metricRow.year);
     const fcfPerShare =
-      freeCashFlow !== undefined && sharesOutstanding !== undefined && sharesOutstanding !== 0
+      freeCashFlow !== undefined && sharesOutstanding !== null
         ? freeCashFlow / sharesOutstanding
         : null;
 
@@ -1123,7 +1139,7 @@ function buildHistoricalMultiples(
 
     if (metricRow.ebitda !== undefined) {
       const enterpriseValue =
-        price && sharesOutstanding !== undefined
+        price && sharesOutstanding !== null
           ? price.close * sharesOutstanding +
             (metricRow.totalDebt ?? 0) -
             (metricRow.cashAndCashEquivalents ?? 0)
@@ -1150,11 +1166,11 @@ function buildHistoricalMultiples(
       continue;
     }
 
-    const sharesOutstanding = metricRow.sharesOutstanding;
+    const sharesOutstanding = historicalSharesOutstanding(metricRow, fallbackSharesOutstanding);
     const freeCashFlow =
       metricRow.freeCashFlow ?? fallbackFreeCashFlowByYear.get(metricRow.year);
     const fcfPerShare =
-      freeCashFlow !== undefined && sharesOutstanding !== undefined && sharesOutstanding !== 0
+      freeCashFlow !== undefined && sharesOutstanding !== null
         ? freeCashFlow / sharesOutstanding
         : null;
     const reviewFields = metricRow.needsReview
@@ -1183,7 +1199,7 @@ function buildHistoricalMultiples(
       ...reviewFields,
     });
 
-    if (sharesOutstanding !== undefined && metricRow.ebitda !== undefined) {
+    if (sharesOutstanding !== null && metricRow.ebitda !== undefined) {
       const enterpriseValue =
         price.close * sharesOutstanding +
         (metricRow.totalDebt ?? 0) -
@@ -1576,6 +1592,14 @@ export async function fetchValuationAutofill(
       : secFields.historicalFreeCashFlows?.length
       ? secFields.historicalFreeCashFlows
       : macroFields.historicalFreeCashFlows ?? [];
+  const fallbackSharesOutstanding = firstPositiveNumber(
+    yahooTtmFields.sharesOutstanding?.value,
+    secFields.sharesOutstanding?.value,
+    alphaFields.sharesOutstanding?.value,
+    macroFields.sharesOutstanding?.value,
+    ibkrFields.sharesOutstanding?.value,
+    yahooFields.sharesOutstanding?.value,
+  );
 
   let historicalMultiples =
     secFields.historicalMultiples ??
@@ -1591,6 +1615,7 @@ export async function fetchValuationAutofill(
         secFields.historicalFinancialMetrics,
         await fetchYahooHistoricalPrices(ticker, secFields.historicalFinancialMetrics),
         historicalFreeCashFlows,
+        fallbackSharesOutstanding,
       );
       historicalMultiples = historicalMultipleData.historicalMultiples;
       historicalMultipleSeries = historicalMultipleData.historicalMultipleSeries;

@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Database,
   ExternalLink,
+  Info,
   Loader2,
   Save,
   Search,
@@ -369,6 +370,15 @@ const historicalMultipleTabs: HistoricalMultipleKey[] = [
   "peRatio",
   "evToEbitda",
 ];
+
+const scenarioMultipleHelpText: Partial<Record<ModelKey, string>> = {
+  evEbitda:
+    "Тук въвеждаме EV/EBITDA стойността, която имаме за компанията.\n\nМожем да я проверим във financecharts.com: отвори компанията, отиди на Charts и избери EV/EBITDA.\n\nЗа оптимистичния вариант обикновено се въвежда малко по-висока стойност от средния вариант.",
+  pe:
+    "Тук въвеждаме P/E ratio стойността, която имаме за компанията.\n\nМожем да я проверим във financecharts.com: отвори компанията, отиди на Charts и избери P/E ratio.\n\nЗа оптимистичния вариант обикновено се въвежда малко по-висока стойност от средния вариант.",
+  dcfMultiple:
+    "Тук въвеждаме Price to Free Cash Flow стойността, която имаме за компанията.\n\nМожем да я проверим във financecharts.com: отвори компанията, отиди на Charts и избери Price/FCF ratio.\n\nЗа оптимистичния вариант обикновено се въвежда малко по-висока стойност от средната.",
+};
 
 function financeChartsBenchmarkUrl(ticker: string, key: HistoricalMultipleKey) {
   const clean = ticker.trim().toUpperCase();
@@ -983,6 +993,7 @@ function CompactNumberField({
   value,
   onChange,
   percent = false,
+  helpText,
   originalLabel,
   suffix,
 }: {
@@ -990,18 +1001,31 @@ function CompactNumberField({
   value: number | null;
   onChange: (value: number | null) => void;
   percent?: boolean;
+  helpText?: string | null;
   originalLabel?: string | null;
   suffix?: string | null;
 }) {
+  const [openHelpLabel, setOpenHelpLabel] = useState<string | null>(null);
+  const isHelpOpen = openHelpLabel === label;
   const displayValue = percent && value !== null ? value * 100 : value;
   const inputValue = percent ? numberInputValue(displayValue) : formattedNumberInputValue(displayValue);
 
   return (
-    <label className="min-w-0">
+    <div className="relative min-w-0">
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
           {label}
         </span>
+        {helpText ? (
+          <button
+            aria-label={`${label} help`}
+            className="inline-flex size-4 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-slate-400 transition hover:border-sky-300/30 hover:text-sky-100"
+            type="button"
+            onClick={() => setOpenHelpLabel((current) => (current === label ? null : label))}
+          >
+            <Info className="size-3" />
+          </button>
+        ) : null}
         {originalLabel ? (
           <span className="truncate text-[10px] font-semibold normal-case tracking-normal text-cyan-200/70">
             {originalLabel}
@@ -1025,7 +1049,23 @@ function CompactNumberField({
           <span className="pl-1 text-[10px] font-semibold uppercase text-slate-500">{suffix}</span>
         ) : null}
       </span>
-    </label>
+      {helpText && isHelpOpen ? (
+        <div className="absolute left-0 top-6 z-30 w-72 rounded-xl border border-sky-300/20 bg-slate-950 p-3 text-xs leading-5 text-slate-200 shadow-2xl shadow-black/40">
+          <div className="flex items-start justify-between gap-3">
+            <p className="font-semibold text-white">{label}</p>
+            <button
+              aria-label={`Close ${label} help`}
+              className="text-slate-500 transition hover:text-white"
+              type="button"
+              onClick={() => setOpenHelpLabel(null)}
+            >
+              ×
+            </button>
+          </div>
+          <p className="mt-2 whitespace-pre-line text-slate-300">{helpText}</p>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1809,7 +1849,11 @@ function ScenarioEditor({
       ? evScenario.baseEbitda
       : terminalScenario.baseMetricPerShare;
   const multipleLabel =
-    modelKey === "pe" ? "P/E" : modelKey === "evEbitda" ? "EV/EBITDA" : "P/FCF";
+    modelKey === "pe"
+      ? "P/E Multiple"
+      : modelKey === "evEbitda"
+        ? "EV/EBITDA Multiple"
+        : "P/FCF Multiple";
   const multipleValue = isDcf
     ? dcfScenario.perpetualGrowth
     : (scenario as EvEbitdaScenario | TerminalMultipleScenario).terminalMultiple;
@@ -1854,6 +1898,7 @@ function ScenarioEditor({
 
       <CompactNumberField
         label={isDcf ? "Perpetual" : multipleLabel}
+        helpText={isDcf ? null : scenarioMultipleHelpText[modelKey]}
         percent={isDcf}
         value={multipleValue}
         onChange={(value) => onChange(isDcf ? "perpetualGrowth" : "terminalMultiple", value)}

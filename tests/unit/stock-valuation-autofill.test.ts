@@ -1148,14 +1148,27 @@ describe("stock valuation autofill parsers", () => {
         if (url.includes("query2.finance.yahoo.com/ws/fundamentals-timeseries")) {
           return {
             ok: true,
-            json: async () => ({ timeseries: { result: [] } }),
+            json: async () => ({
+              timeseries: {
+                result: [
+                  {
+                    trailingDilutedAverageShares: [
+                      {
+                        asOfDate: "2025-12-31",
+                        reportedValue: { raw: 100 },
+                      },
+                    ],
+                  },
+                ],
+              },
+            }),
           };
         }
 
         if (url.includes("alphavantage.co")) {
           return {
             ok: true,
-            json: async () => ({}),
+            json: async () => ({ SharesOutstanding: "100" }),
           };
         }
 
@@ -1179,8 +1192,7 @@ describe("stock valuation autofill parsers", () => {
                   EntityCommonStockSharesOutstanding: {
                     units: {
                       shares: [
-                        { end: "2025-12-31", fy: 2025, fp: "FY", form: "10-K", val: 100 },
-                        { end: "2024-12-31", fy: 2024, fp: "FY", form: "10-K", val: 100 },
+                        { end: "2025-12-31", form: "8-K", val: 100 },
                       ],
                     },
                   },

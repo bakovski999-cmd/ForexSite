@@ -936,8 +936,11 @@ describe("StockValuationPanel", () => {
     await user.click(screen.getByRole("button", { name: "Apply P/FCF to scenarios" }));
 
     expect(
-      screen.getAllByLabelText("P/FCF").map((field) => (field as HTMLInputElement).value),
-    ).toEqual(["30", "17.67", "8", "-20", "15", "8", "30"]);
+      screen.getAllByLabelText("P/FCF Multiple").map((field) => (field as HTMLInputElement).value),
+    ).toEqual(["30", "17.67", "8"]);
+
+    await user.click(screen.getAllByRole("button", { name: "P/FCF Multiple help" })[0]);
+    expect(screen.getByText(/Price to Free Cash Flow стойността/)).toBeVisible();
   });
 
   test("inline historical multiples panel follows the active valuation model", async () => {
@@ -978,6 +981,9 @@ describe("StockValuationPanel", () => {
     await waitFor(() => expect(screen.getByDisplayValue("INTC")).toBeVisible());
 
     await user.click(screen.getByRole("button", { name: /P\/E ·/ }));
+    expect(screen.getAllByLabelText("P/E Multiple")).toHaveLength(3);
+    await user.click(screen.getAllByRole("button", { name: "P/E Multiple help" })[0]);
+    expect(screen.getByText(/P\/E ratio стойността/)).toBeVisible();
     expect(screen.getByRole("link", { name: "Open P/E on FinanceCharts" })).toHaveAttribute(
       "href",
       "https://www.financecharts.com/stocks/INTC/value/pe-ratio",
@@ -1000,6 +1006,9 @@ describe("StockValuationPanel", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /EV\/EBITDA ·/ }));
+    expect(screen.getAllByLabelText("EV/EBITDA Multiple")).toHaveLength(3);
+    await user.click(screen.getAllByRole("button", { name: "EV/EBITDA Multiple help" })[0]);
+    expect(screen.getByText(/EV\/EBITDA стойността/)).toBeVisible();
     expect(screen.getByRole("button", { name: /Historical EBITDA/ })).toBeVisible();
     const evPanel = screen.getByTestId("historical-multiple-panel-evToEbitda");
     expect(evPanel).toBeVisible();
