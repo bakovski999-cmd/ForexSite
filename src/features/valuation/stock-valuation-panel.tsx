@@ -380,6 +380,26 @@ const scenarioMultipleHelpText: Partial<Record<ModelKey, string>> = {
     "Тук въвеждаме Price to Free Cash Flow стойността, която имаме за компанията.\n\nМожем да я проверим във financecharts.com: отвори компанията, отиди на Charts и избери Price/FCF ratio.\n\nЗа оптимистичния вариант обикновено се въвежда малко по-висока стойност от средната.",
 };
 
+const scenarioFieldHelpText: Record<
+  "weight" | "fcf" | "perpetual" | "discount" | "growthOneToFive" | "growthSixToTen" | "safety",
+  string
+> = {
+  weight:
+    "Тук въвеждаме какво тегло искаме да придадем на конкретния сценарий.\n\nОбщо теглата от трите сценария трябва да бъдат точно 100%, за да има коректна weighted fair value стойност.",
+  fcf:
+    "Тук въвеждаме последния Free Cash Flow или средния Free Cash Flow за 5-10 годишен период.\n\nFree Cash Flow може да се сметне като Cash flow from operations минус Capital Expenditures.\n\nПо-лесно е да вземем стойността от Yahoo Finance, Macrotrends, StockAnalysis или подобен източник. Ако има колебание, оптимистичният сценарий може да използва по-оптимистична стойност.",
+  perpetual:
+    "Това е вечният процент на нарастване след 10-годишния прогнозен период.\n\nОбикновено е около 2-3%, защото това е приблизителният нормален дългосрочен растеж на икономиките при нормални условия.",
+  discount:
+    "Тук въвеждаме процента, с който дисконтираме бъдещите парични потоци до днешна стойност.\n\nМоже да го мислим като минималната доходност, която очакваме от инвестицията. По-рискови компании обикновено изискват по-висок discount rate.\n\n10% е практичен стандарт; за по-рискови компании може да е 11-12%, а за много стабилни компании може да е около 8%.",
+  growthOneToFive:
+    "Тук въвеждаме с колко очакваме компанията да увеличава свободните си парични потоци през следващите 5 години.\n\nДобре е да се сравни с реалния растеж през последните 5 или 10 години.",
+  growthSixToTen:
+    "Тук въвеждаме очаквания растеж на свободните парични потоци за вторите 5 години от прогнозата.\n\nОбикновено тази стойност е по-консервативна от Growth 1-5, защото колкото по-далеч е прогнозата, толкова по-несигурна е.",
+  safety:
+    "Тук въвеждаме маржът ни на безопасност.\n\nMargin of Safety умишлено сваля справедливата цена, за да сме по-консервативни, защото никой не може да прогнозира бъдещето с пълна точност.\n\nАко компанията пак изглежда подценена след този марж, сметката е по-устойчива.",
+};
+
 function financeChartsBenchmarkUrl(ticker: string, key: HistoricalMultipleKey) {
   const clean = ticker.trim().toUpperCase();
 
@@ -1871,6 +1891,7 @@ function ScenarioEditor({
 
       <CompactNumberField
         label="Weight"
+        helpText={scenarioFieldHelpText.weight}
         percent
         value={scenario.weight}
         onChange={(value) => onChange("weight", value)}
@@ -1878,6 +1899,7 @@ function ScenarioEditor({
 
       <CompactNumberField
         label={primaryMetricLabel}
+        helpText={isDcf ? scenarioFieldHelpText.fcf : null}
         originalLabel={originalMetricLabel}
         suffix={originalMetricLabel ? currency : null}
         value={primaryMetricValue}
@@ -1898,7 +1920,7 @@ function ScenarioEditor({
 
       <CompactNumberField
         label={isDcf ? "Perpetual" : multipleLabel}
-        helpText={isDcf ? null : scenarioMultipleHelpText[modelKey]}
+        helpText={isDcf ? scenarioFieldHelpText.perpetual : scenarioMultipleHelpText[modelKey]}
         percent={isDcf}
         value={multipleValue}
         onChange={(value) => onChange(isDcf ? "perpetualGrowth" : "terminalMultiple", value)}
@@ -1906,6 +1928,7 @@ function ScenarioEditor({
 
       <CompactNumberField
         label="Discount"
+        helpText={scenarioFieldHelpText.discount}
         percent
         value={scenario.discountRate}
         onChange={(value) => onChange("discountRate", value)}
@@ -1913,6 +1936,7 @@ function ScenarioEditor({
 
       <CompactNumberField
         label="Growth 1-5"
+        helpText={scenarioFieldHelpText.growthOneToFive}
         percent
         value={scenario.growthNextFiveYears}
         onChange={(value) => onChange("growthNextFiveYears", value)}
@@ -1920,6 +1944,7 @@ function ScenarioEditor({
 
       <CompactNumberField
         label="Growth 6-10"
+        helpText={scenarioFieldHelpText.growthSixToTen}
         percent
         value={scenario.growthYearsFiveToTen}
         onChange={(value) => onChange("growthYearsFiveToTen", value)}
@@ -1927,6 +1952,7 @@ function ScenarioEditor({
 
       <CompactNumberField
         label="Safety"
+        helpText={scenarioFieldHelpText.safety}
         percent
         value={scenario.marginOfSafety}
         onChange={(value) => onChange("marginOfSafety", value)}

@@ -366,6 +366,36 @@ describe("StockValuationPanel", () => {
     expect(container.querySelector(".overflow-x-auto")).not.toBeInTheDocument();
   });
 
+  test("shows help popovers for DCF scenario inputs", async () => {
+    mockFetch();
+    const user = userEvent.setup();
+
+    render(<StockValuationPanel />);
+
+    await screen.findByText("Запазени анализи");
+
+    await user.click(screen.getAllByRole("button", { name: "Weight help" })[0]);
+    expect(screen.getByText(/тегло искаме да придадем/)).toBeVisible();
+
+    await user.click(screen.getAllByRole("button", { name: "FCF help" })[0]);
+    expect(screen.getByText(/последния Free Cash Flow/)).toBeVisible();
+
+    await user.click(screen.getAllByRole("button", { name: "Perpetual help" })[0]);
+    expect(screen.getByText(/вечният процент на нарастване/)).toBeVisible();
+
+    await user.click(screen.getAllByRole("button", { name: "Discount help" })[0]);
+    expect(screen.getByText(/дисконтираме бъдещите парични потоци/)).toBeVisible();
+
+    await user.click(screen.getAllByRole("button", { name: "Growth 1-5 help" })[0]);
+    expect(screen.getByText(/следващите 5 години/)).toBeVisible();
+
+    await user.click(screen.getAllByRole("button", { name: "Growth 6-10 help" })[0]);
+    expect(screen.getByText(/вторите 5 години/)).toBeVisible();
+
+    await user.click(screen.getAllByRole("button", { name: "Safety help" })[0]);
+    expect(screen.getByText(/маржът ни на безопасност/)).toBeVisible();
+  });
+
   test("autofill populates editable fields and source badges", async () => {
     mockFetch();
     const user = userEvent.setup();
