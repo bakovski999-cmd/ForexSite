@@ -225,6 +225,68 @@ const financeChartsMultipleInput = {
   },
 };
 
+const seriesOnlyMultipleInput = {
+  ...buildDefaultStockValuationInput({
+    ticker: "META",
+    companyName: "Meta Platforms",
+    currentPrice: 609,
+    sharesOutstanding: 2_500_000_000,
+    fields: {
+      currentPrice: { value: 609, source: "Yahoo" },
+      sharesOutstanding: { value: 2_500_000_000, source: "Yahoo" },
+      ebitda: { value: 111_504_000_000, source: "Yahoo TTM" },
+      evToEbitda: { value: 13.93, source: "Derived" },
+    },
+  }),
+  historicalMultiples: {
+    evToEbitda: [],
+  },
+  historicalMultipleSeries: {
+    evToEbitda: [
+      {
+        date: "2025-12-31",
+        year: 2025,
+        numerator: 1_800,
+        denominator: 100,
+        multiple: 18,
+        source: "Derived",
+        asOf: "2025-12-31",
+      },
+      {
+        date: "2024-12-31",
+        year: 2024,
+        numerator: 1_400,
+        denominator: 100,
+        multiple: 14,
+        source: "Derived",
+        asOf: "2024-12-31",
+      },
+      {
+        date: "2023-12-31",
+        year: 2023,
+        numerator: 1_100,
+        denominator: 100,
+        multiple: 11,
+        source: "Derived",
+        asOf: "2023-12-31",
+      },
+    ],
+  },
+  historicalMultipleBenchmarks: {
+    evToEbitda: {
+      source: "FinanceCharts",
+      sourceStatus: "unavailable",
+      sourceMessage: "FinanceCharts data unavailable; HTTP 403.",
+      currentMultiple: null,
+      low: null,
+      average: null,
+      high: null,
+      periodAverages: [],
+      seriesPoints: [],
+    },
+  },
+};
+
 function mockFetch() {
   vi.stubGlobal(
     "fetch",
@@ -864,8 +926,9 @@ describe("StockValuationPanel", () => {
       "href",
       "https://www.financecharts.com/stocks/INTC/value/price-to-free-cash-flow",
     );
-    expect(screen.getByTestId("historical-multiple-row-priceToFreeCashFlow-0")).toHaveTextContent("-20");
-    expect(screen.getByTestId("historical-multiple-row-priceToFreeCashFlow-0")).toHaveTextContent("ignored for Apply");
+    const firstPfcfRow = screen.getByTestId("historical-multiple-row-priceToFreeCashFlow-0");
+    expect(within(firstPfcfRow).getByDisplayValue("-20")).toBeVisible();
+    expect(firstPfcfRow).toHaveTextContent("ignored for Apply");
     expect(screen.getByTestId("historical-multiple-low-priceToFreeCashFlow")).toHaveTextContent("8");
     expect(screen.getByTestId("historical-multiple-average-priceToFreeCashFlow")).toHaveTextContent("17.67");
     expect(screen.getByTestId("historical-multiple-high-priceToFreeCashFlow")).toHaveTextContent("30");
@@ -874,7 +937,7 @@ describe("StockValuationPanel", () => {
 
     expect(
       screen.getAllByLabelText("P/FCF").map((field) => (field as HTMLInputElement).value),
-    ).toEqual(["30", "17.67", "8"]);
+    ).toEqual(["30", "17.67", "8", "-20", "15", "8", "30"]);
   });
 
   test("inline historical multiples panel follows the active valuation model", async () => {
@@ -939,8 +1002,71 @@ describe("StockValuationPanel", () => {
     await user.click(screen.getByRole("button", { name: /EV\/EBITDA ·/ }));
     const evPanel = screen.getByTestId("historical-multiple-panel-evToEbitda");
     expect(evPanel).toBeVisible();
-    expect(screen.getByTestId("historical-multiple-row-evToEbitda-0")).toHaveTextContent("8.2");
+    expect(within(screen.getByTestId("historical-multiple-row-evToEbitda-0")).getByDisplayValue("8.2")).toBeVisible();
     expect(screen.queryByTestId("historical-multiple-line-chart-evToEbitda")).not.toBeInTheDocument();
+  });
+
+  test("inline historical multiples panel builds editable rows from series fallback", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "/api/valuation/saved") {
+          return {
+            ok: true,
+            json: async () => ({ ok: true, analyses: [] }),
+          };
+        }
+
+        if (url.startsWith("/api/valuation/autofill")) {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              input: seriesOnlyMultipleInput,
+              fields: seriesOnlyMultipleInput.sources,
+              warnings: [],
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<StockValuationPanel />);
+
+    await user.clear(screen.getByLabelText("Ticker"));
+    await user.type(screen.getByLabelText("Ticker"), "META");
+    await user.click(screen.getByRole("button", { name: "Авто попълване" }));
+    await waitFor(() => expect(screen.getByDisplayValue("META")).toBeVisible());
+
+    await user.click(screen.getByRole("button", { name: /EV\/EBITDA ·/ }));
+    await user.click(screen.getByRole("button", { name: /Historical multiples/ }));
+
+    const panel = screen.getByTestId("historical-multiple-panel-evToEbitda");
+    expect(panel).toBeVisible();
+    expect(within(panel).getByDisplayValue("2025")).toBeVisible();
+    expect(within(panel).getByDisplayValue("18")).toBeVisible();
+    expect(within(panel).getByDisplayValue("14")).toBeVisible();
+    expect(within(panel).getByDisplayValue("11")).toBeVisible();
+    expect(screen.getByTestId("historical-multiple-low-evToEbitda")).toHaveTextContent("11");
+    expect(screen.getByTestId("historical-multiple-average-evToEbitda")).toHaveTextContent("14.33");
+    expect(screen.getByTestId("historical-multiple-high-evToEbitda")).toHaveTextContent("18");
+
+    const multipleInputs = within(panel).getAllByLabelText("EV/EBITDA");
+    await user.clear(multipleInputs[0]);
+    await user.type(multipleInputs[0], "20");
+
+    expect(screen.getByTestId("historical-multiple-average-evToEbitda")).toHaveTextContent("15");
+    expect(screen.getByTestId("historical-multiple-high-evToEbitda")).toHaveTextContent("20");
+
+    await user.click(screen.getByRole("button", { name: "Apply EV/EBITDA to scenarios" }));
+    expect(
+      screen.getAllByLabelText("EV/EBITDA").map((field) => (field as HTMLInputElement).value),
+    ).toEqual(["20", "15", "11", "20", "14", "11"]);
   });
 
   test("inline historical multiples panel labels FinanceCharts benchmark data when available", async () => {

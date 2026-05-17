@@ -450,6 +450,60 @@ function normalizeHistoricalMultipleSeriesPoints(
     .sort((first, second) => first.date.localeCompare(second.date));
 }
 
+function historicalMultipleRowsFromSeries(
+  points: HistoricalMultipleSeriesPoint[],
+): HistoricalMultipleRow[] {
+  const byYear = new Map<
+    number,
+    { point: HistoricalMultipleSeriesPoint; score: number; timestamp: number }
+  >();
+
+  for (const point of points) {
+    if (point.year === null) {
+      continue;
+    }
+
+    const timestamp = Date.parse(point.date);
+    const score =
+      positiveMultiple(point.multiple) &&
+      (point.denominator === null || point.denominator > 0)
+        ? 2
+        : point.numerator !== null || point.denominator !== null || point.multiple !== null
+          ? 1
+          : 0;
+    const current = byYear.get(point.year);
+
+    if (
+      !current ||
+      score > current.score ||
+      (score === current.score &&
+        Number.isFinite(timestamp) &&
+        timestamp > current.timestamp)
+    ) {
+      byYear.set(point.year, {
+        point,
+        score,
+        timestamp: Number.isFinite(timestamp) ? timestamp : -Infinity,
+      });
+    }
+  }
+
+  return [...byYear.values()]
+    .map(({ point }) => ({
+      year: point.year,
+      numerator: point.numerator,
+      denominator: point.denominator,
+      multiple: point.multiple,
+      source: point.source,
+      asOf: point.date,
+      ...(point.needsReview
+        ? { needsReview: true, reviewReason: point.reviewReason }
+        : {}),
+    }))
+    .sort((first, second) => (second.year ?? -Infinity) - (first.year ?? -Infinity))
+    .slice(0, historicalMultipleRowCount);
+}
+
 function normalizeHistoricalMultipleSeries(
   historicalMultipleSeries:
     | Partial<Record<HistoricalMultipleKey, HistoricalMultipleSeriesPoint[]>>
@@ -831,7 +885,15 @@ export function calculateHistoricalMultipleSummary(
   input: StockValuationInput,
   key: HistoricalMultipleKey,
 ): HistoricalMultipleSummary {
-  const rows = normalizeHistoricalMultipleRows(input.historicalMultiples?.[key]).map(
+  const explicitSeriesPoints = normalizeHistoricalMultipleSeriesPoints(
+    input.historicalMultipleSeries?.[key],
+  );
+  const normalizedRows = normalizeHistoricalMultipleRows(input.historicalMultiples?.[key]);
+  const sourceRows =
+    normalizedRows.length > 0
+      ? normalizedRows
+      : historicalMultipleRowsFromSeries(explicitSeriesPoints);
+  const rows = sourceRows.map(
     (row): HistoricalMultipleCalculationRow => {
       const multiple = numberOrNull(row.multiple);
       const denominator = numberOrNull(row.denominator);
@@ -857,9 +919,6 @@ export function calculateHistoricalMultipleSummary(
       };
     },
   );
-  const explicitSeriesPoints = normalizeHistoricalMultipleSeriesPoints(
-    input.historicalMultipleSeries?.[key],
-  );
   const seriesPoints =
     explicitSeriesPoints.length > 0
       ? explicitSeriesPoints
@@ -879,27 +938,25 @@ export function calculateHistoricalMultipleSummary(
                 : {}),
             }),
           );
-  const displaySource =
-    explicitSeriesPoints.length > 0
-      ? seriesPoints.filter(
-          (point) =>
-            positiveMultiple(point.multiple) &&
-            (point.denominator === null || point.denominator > 0),
-        )
-      : rows.filter((row) => row.usableForApply);
+  const displaySource = rows.length
+    ? rows.filter((row) => row.usableForApply)
+    : seriesPoints.filter(
+        (point) =>
+          positiveMultiple(point.multiple) &&
+          (point.denominator === null || point.denominator > 0),
+      );
   const displayMultiples = displaySource
     .map((row) => row.multiple)
     .filter(positiveMultiple);
-  const applySource =
-    explicitSeriesPoints.length > 0
-      ? seriesPoints.filter(
-          (point) =>
-            point.needsReview !== true &&
-            positiveMultiple(point.multiple) &&
-            point.denominator !== null &&
-            point.denominator > 0,
-        )
-      : rows.filter((row) => row.usableForApply);
+  const applySource = rows.length
+    ? rows.filter((row) => row.usableForApply)
+    : seriesPoints.filter(
+        (point) =>
+          point.needsReview !== true &&
+          positiveMultiple(point.multiple) &&
+          point.denominator !== null &&
+          point.denominator > 0,
+      );
   const applyMultiples = applySource.map((row) => row.multiple).filter(positiveMultiple);
   const low = displayMultiples.length ? Math.min(...displayMultiples) : null;
   const high = displayMultiples.length ? Math.max(...displayMultiples) : null;

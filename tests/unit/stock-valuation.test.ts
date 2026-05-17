@@ -483,7 +483,7 @@ describe("stock valuation workbook parity", () => {
     ]);
   });
 
-  test("historical multiple summary uses monthly series for charts and keeps review rows out of apply values", () => {
+  test("historical multiple summary builds yearly editable rows from monthly series", () => {
     const seriesPoints: HistoricalMultipleSeriesPoint[] = [
       {
         date: "2024-01-31",
@@ -525,6 +525,15 @@ describe("stock valuation workbook parity", () => {
         source: "Derived",
         asOf: "2023-12-31",
       },
+      {
+        date: "2023-12-31",
+        year: 2023,
+        numerator: 1_000,
+        denominator: 100,
+        multiple: 10,
+        source: "Derived",
+        asOf: "2022-12-31",
+      },
     ];
     const input = buildDefaultStockValuationInput({
       ticker: "META",
@@ -538,19 +547,34 @@ describe("stock valuation workbook parity", () => {
 
     const summary = calculateHistoricalMultipleSummary(input, "evToEbitda");
 
-    expect(summary.seriesPoints).toHaveLength(4);
-    expect(summary.low).toBe(14);
-    expect(summary.average).toBeCloseTo(16.666667, 6);
-    expect(summary.high).toBe(20);
+    expect(summary.seriesPoints).toHaveLength(5);
+    expect(summary.rows).toHaveLength(2);
+    expect(summary.rows[0]).toMatchObject({
+      year: 2024,
+      numerator: 1_400,
+      denominator: 100,
+      multiple: 14,
+      usableForApply: true,
+    });
+    expect(summary.rows[1]).toMatchObject({
+      year: 2023,
+      numerator: 1_000,
+      denominator: 100,
+      multiple: 10,
+      usableForApply: true,
+    });
+    expect(summary.low).toBe(10);
+    expect(summary.average).toBe(12);
+    expect(summary.high).toBe(14);
     expect(summary.canApply).toBe(true);
     expect(summary.applyValues).toEqual({
       optimistic: 14,
-      base: 14,
-      worst: 14,
+      base: 12,
+      worst: 10,
     });
     expect(summary.periodAverages.find((period) => period.key === "TTM")).toMatchObject({
-      average: expect.closeTo(16.666667, 6),
-      count: 3,
+      average: expect.closeTo(15, 6),
+      count: 4,
     });
   });
 

@@ -26,6 +26,7 @@ import {
   type FcfPerShareTtmCalculation,
   type HistoricalFreeCashFlowAverageCalculation,
   type HistoricalMultipleKey,
+  type HistoricalMultipleRow,
   type HistoricalMultipleSummary,
   type StockValuationAutofillFields,
   type StockValuationInput,
@@ -408,6 +409,7 @@ function FinanceChartsMetricLink({
 
 function HistoricalMultiplesPanel({
   isOpen,
+  onChangeRow,
   metricKey,
   onApply,
   onToggle,
@@ -415,6 +417,12 @@ function HistoricalMultiplesPanel({
   ticker,
 }: {
   isOpen: boolean;
+  onChangeRow: (
+    metricKey: HistoricalMultipleKey,
+    slot: number,
+    key: "year" | "numerator" | "denominator" | "multiple",
+    value: number | null,
+  ) => void;
   metricKey: HistoricalMultipleKey;
   onApply: (key: HistoricalMultipleKey) => void;
   onToggle: () => void;
@@ -422,7 +430,7 @@ function HistoricalMultiplesPanel({
   ticker: string;
 }) {
   const labels = historicalMultipleLabels[metricKey];
-  const visibleRows = summary.source === "Derived" ? summary.rows.slice(0, 8) : [];
+  const visibleRows = summary.rows.slice(0, 20);
   const sourceText =
     summary.source === "FinanceCharts"
       ? "FinanceCharts benchmark data"
@@ -507,26 +515,95 @@ function HistoricalMultiplesPanel({
               {visibleRows.map((row, index) => (
                 <div
                   key={`${row.year ?? "unknown"}-${index}`}
-                  className="grid gap-3 rounded-xl border border-white/10 bg-slate-950/45 p-3 lg:grid-cols-[minmax(80px,0.65fr)_minmax(120px,1fr)_minmax(120px,1fr)_minmax(100px,0.7fr)_minmax(135px,0.9fr)] lg:items-center"
+                  className="grid gap-3 rounded-xl border border-white/10 bg-slate-950/45 p-3 lg:grid-cols-[minmax(92px,0.7fr)_minmax(140px,1fr)_minmax(140px,1fr)_minmax(110px,0.75fr)_minmax(135px,0.9fr)] lg:items-center"
                   data-testid={`historical-multiple-row-${summary.key}-${index}`}
                 >
                   <div>
-                    <p className="text-sm font-semibold text-white">{row.year ?? "Year"}</p>
+                    <label className="text-xs font-semibold uppercase text-slate-500">
+                      Year
+                    </label>
+                    <input
+                      aria-label="Year"
+                      className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-slate-950/70 px-2 text-sm font-semibold text-white outline-none transition focus:border-amber-300/50"
+                      inputMode="numeric"
+                      type="number"
+                      value={numberInputValue(row.year)}
+                      onChange={(event) =>
+                        onChangeRow(
+                          metricKey,
+                          index,
+                          "year",
+                          parseNumberInput(event.target.value),
+                        )
+                      }
+                    />
                     <p className="mt-1 text-xs text-slate-500">{row.asOf ?? "manual"}</p>
                   </div>
-                  <ReadOnlyCalculationMetric
-                    label={labels.numerator}
-                    value={formatPlainNumber(row.numerator, 2)}
-                  />
-                  <ReadOnlyCalculationMetric
-                    label={labels.denominator}
-                    value={formatPlainNumber(row.denominator, 2)}
-                  />
-                  <ReadOnlyCalculationMetric
-                    label={labels.label}
-                    value={formatMultiple(row.multiple)}
-                    highlight={row.usableForApply}
-                  />
+                  <label>
+                    <span className="text-xs font-semibold uppercase text-slate-500">
+                      {labels.numerator}
+                    </span>
+                    <input
+                      aria-label={labels.numerator}
+                      className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-slate-950/70 px-2 text-sm font-semibold text-white outline-none transition focus:border-amber-300/50"
+                      inputMode="decimal"
+                      type="number"
+                      value={numberInputValue(row.numerator)}
+                      onChange={(event) =>
+                        onChangeRow(
+                          metricKey,
+                          index,
+                          "numerator",
+                          parseNumberInput(event.target.value),
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span className="text-xs font-semibold uppercase text-slate-500">
+                      {labels.denominator}
+                    </span>
+                    <input
+                      aria-label={labels.denominator}
+                      className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-slate-950/70 px-2 text-sm font-semibold text-white outline-none transition focus:border-amber-300/50"
+                      inputMode="decimal"
+                      type="number"
+                      value={numberInputValue(row.denominator)}
+                      onChange={(event) =>
+                        onChangeRow(
+                          metricKey,
+                          index,
+                          "denominator",
+                          parseNumberInput(event.target.value),
+                        )
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span className="text-xs font-semibold uppercase text-slate-500">
+                      {labels.label}
+                    </span>
+                    <input
+                      aria-label={labels.label}
+                      className={cn(
+                        "mt-2 h-10 w-full rounded-lg border bg-slate-950/70 px-2 text-sm font-semibold text-white outline-none transition focus:border-amber-300/50",
+                        row.usableForApply
+                          ? "border-emerald-300/25 text-emerald-100"
+                          : "border-white/10",
+                      )}
+                      inputMode="decimal"
+                      type="number"
+                      value={numberInputValue(row.multiple)}
+                      onChange={(event) =>
+                        onChangeRow(
+                          metricKey,
+                          index,
+                          "multiple",
+                          parseNumberInput(event.target.value),
+                        )
+                      }
+                    />
+                  </label>
                   <div
                     className={cn(
                       "rounded-xl border px-3 py-2 text-sm font-semibold",
@@ -975,6 +1052,55 @@ export function StockValuationPanel() {
     });
   }
 
+  function updateHistoricalMultipleRow(
+    metricKey: HistoricalMultipleKey,
+    slot: number,
+    key: "year" | "numerator" | "denominator" | "multiple",
+    value: number | null,
+  ) {
+    setInput((current) => {
+      const rows: HistoricalMultipleRow[] = calculateHistoricalMultipleSummary(
+        current,
+        metricKey,
+      ).rows.map((row) => ({
+        year: row.year,
+        numerator: row.numerator,
+        denominator: row.denominator,
+        multiple: row.multiple,
+        source: row.source,
+        asOf: row.asOf,
+        ...(row.needsReview
+          ? { needsReview: true, reviewReason: row.reviewReason }
+          : {}),
+      }));
+
+      const currentRow = rows[slot] ?? {
+        year: null,
+        numerator: null,
+        denominator: null,
+        multiple: null,
+      };
+
+      rows[slot] = {
+        year: currentRow.year,
+        numerator: currentRow.numerator,
+        denominator: currentRow.denominator,
+        multiple: currentRow.multiple,
+        [key]: value,
+        source: "Manual",
+        asOf: undefined,
+      };
+
+      return {
+        ...current,
+        historicalMultiples: {
+          ...current.historicalMultiples,
+          [metricKey]: rows,
+        },
+      };
+    });
+  }
+
   function applyHistoricalAverageToDcfScenarios() {
     setInput((current) => {
       const averageFreeCashFlow =
@@ -1382,6 +1508,7 @@ export function StockValuationPanel() {
                 summary={historicalMultipleSummaries[activeModelHistoricalKey]}
                 ticker={input.ticker}
                 onApply={applyHistoricalMultipleByKey}
+                onChangeRow={updateHistoricalMultipleRow}
                 onToggle={() => setIsHistoricalMultiplesOpen((current) => !current)}
               />
             ) : null}
