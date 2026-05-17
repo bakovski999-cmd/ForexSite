@@ -25,6 +25,7 @@ import {
   type EvEbitdaScenario,
   type FcfPerShareTtmCalculation,
   type HistoricalFreeCashFlowAverageCalculation,
+  type HistoricalMultipleCalculationRow,
   type HistoricalMultipleKey,
   type HistoricalMultipleRow,
   type HistoricalMultipleSummary,
@@ -407,6 +408,48 @@ function FinanceChartsMetricLink({
   );
 }
 
+const historicalEbitdaRowCount = 11;
+
+function historicalMultiplePanelTitle(metricKey: HistoricalMultipleKey) {
+  if (metricKey === "evToEbitda") {
+    return "Historical EBITDA";
+  }
+
+  return `Historical ${historicalMultipleLabels[metricKey].label}`;
+}
+
+function historicalSlotLabel(index: number, count = historicalEbitdaRowCount) {
+  return `Year ${count - 1 - index}`;
+}
+
+function emptyHistoricalMultipleRow(): HistoricalMultipleCalculationRow {
+  return {
+    year: null,
+    numerator: null,
+    denominator: null,
+    multiple: null,
+    usableForApply: false,
+    ignoredReason: "missing",
+  };
+}
+
+function historicalMetricGrowthPercent(
+  currentValue: number | null,
+  previousValue: number | null,
+) {
+  if (
+    currentValue === null ||
+    previousValue === null ||
+    previousValue === 0 ||
+    !Number.isFinite(currentValue) ||
+    !Number.isFinite(previousValue)
+  ) {
+    return null;
+  }
+
+  return (currentValue - previousValue) / Math.abs(previousValue);
+}
+
 function HistoricalMultiplesPanel({
   isOpen,
   onChangeRow,
@@ -430,15 +473,25 @@ function HistoricalMultiplesPanel({
   ticker: string;
 }) {
   const labels = historicalMultipleLabels[metricKey];
-  const visibleRows = summary.rows.slice(0, 20);
-  const sourceText =
-    summary.source === "FinanceCharts"
-      ? "FinanceCharts benchmark data"
-      : "Derived fallback from SEC/Yahoo";
+  const title = historicalMultiplePanelTitle(metricKey);
+  const isEbitdaHistory = metricKey === "evToEbitda";
+  const visibleRows = summary.rows.slice(0, isEbitdaHistory ? historicalEbitdaRowCount : 20);
+  const ebitdaRows = Array.from(
+    { length: historicalEbitdaRowCount },
+    (_, index) => visibleRows[index] ?? emptyHistoricalMultipleRow(),
+  );
+  const benchmarkLinks = (
+    <div className="flex flex-wrap gap-2" aria-label="Benchmark links">
+      {historicalMultipleTabs.map((key) => (
+        <FinanceChartsMetricLink key={key} metricKey={key} ticker={ticker} />
+      ))}
+    </div>
+  );
 
   return (
     <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03]">
       <button
+        aria-label={title}
         aria-expanded={isOpen}
         className="flex w-full items-center justify-between gap-4 p-4 text-left transition hover:bg-white/[0.03]"
         type="button"
@@ -447,35 +500,10 @@ function HistoricalMultiplesPanel({
         <span className="flex min-w-0 items-start gap-3">
           <Calculator className="mt-0.5 size-5 shrink-0 text-violet-200" />
           <span className="min-w-0">
-            <span className="block text-base font-semibold text-white">Historical multiples</span>
-            <span className="mt-1 block text-sm text-slate-400">
-              {labels.label} · {sourceText}
-            </span>
-            {summary.sourceMessage ? (
-              <span className="mt-1 block text-xs font-semibold text-amber-200">
-                {summary.sourceMessage}
-              </span>
-            ) : null}
+            <span className="block text-base font-semibold text-white">{title}</span>
           </span>
         </span>
         <span className="flex shrink-0 items-center gap-2">
-          <span
-            className={cn(
-              "hidden rounded-full border px-3 py-1 text-xs font-semibold sm:inline-flex",
-              summary.source === "FinanceCharts"
-                ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
-                : "border-amber-300/20 bg-amber-300/10 text-amber-100",
-            )}
-            data-testid={`historical-multiple-source-${summary.key}`}
-          >
-            {summary.source === "FinanceCharts" ? "FinanceCharts" : "Derived fallback"}
-          </span>
-          <span className="hidden rounded-full border border-violet-300/20 bg-violet-300/10 px-3 py-1 text-xs font-semibold text-violet-100 md:inline-flex">
-            {labels.label} avg {formatMultiple(summary.average)}
-          </span>
-          <span className="hidden rounded-full border border-white/10 bg-slate-950/40 px-3 py-1 text-xs font-semibold text-slate-300 md:inline-flex">
-            Current {formatMultiple(summary.currentMultiple)}
-          </span>
           <ChevronDown
             className={cn("size-5 text-slate-400 transition", isOpen ? "rotate-180" : "")}
           />
@@ -487,30 +515,118 @@ function HistoricalMultiplesPanel({
           className="grid gap-4 border-t border-white/10 p-4"
           data-testid={`historical-multiple-panel-${summary.key}`}
         >
-          <div className="grid gap-3 md:grid-cols-4">
-            <ReadOnlyCalculationMetric
-              label="Current"
-              value={formatMultiple(summary.currentMultiple)}
-            />
-            <ReadOnlyCalculationMetric
-              label="Low"
-              testId={`historical-multiple-low-${summary.key}`}
-              value={formatMultiple(summary.low)}
-            />
-            <ReadOnlyCalculationMetric
-              label="Average"
-              testId={`historical-multiple-average-${summary.key}`}
-              value={formatMultiple(summary.average)}
-              highlight
-            />
-            <ReadOnlyCalculationMetric
-              label="High"
-              testId={`historical-multiple-high-${summary.key}`}
-              value={formatMultiple(summary.high)}
-            />
-          </div>
+          {isEbitdaHistory ? (
+            <div className="grid gap-3">
+              {ebitdaRows.map((row, index) => {
+                const rowLabel = historicalSlotLabel(index);
+                const nextRow = ebitdaRows[index + 1];
+                const growthPercent =
+                  index < historicalEbitdaRowCount - 1
+                    ? historicalMetricGrowthPercent(row.denominator, nextRow?.denominator ?? null)
+                    : null;
+                const growthLabel =
+                  index < historicalEbitdaRowCount - 1
+                    ? `Y${historicalEbitdaRowCount - 2 - index} to Y${historicalEbitdaRowCount - 1 - index}`
+                    : null;
 
-          {visibleRows.length > 0 ? (
+                return (
+                  <div
+                    key={`${row.year ?? "empty"}-${index}`}
+                    className="grid gap-3 rounded-xl border border-white/10 bg-slate-950/45 p-3 lg:grid-cols-[minmax(96px,0.8fr)_minmax(120px,0.8fr)_minmax(190px,1.2fr)_minmax(140px,0.9fr)_minmax(140px,0.9fr)] lg:items-end"
+                    data-testid={`historical-multiple-row-${summary.key}-${index}`}
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-white">{rowLabel}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {row.source ? sourceLabel(row.source) : "Manual"}
+                      </p>
+                    </div>
+                    <label className="grid gap-1">
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                        Fiscal year
+                      </span>
+                      <input
+                        aria-label={`Historical year ${rowLabel}`}
+                        className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-2 text-sm font-semibold text-white outline-none transition focus:border-amber-300/50"
+                        inputMode="numeric"
+                        type="number"
+                        value={numberInputValue(row.year)}
+                        onChange={(event) =>
+                          onChangeRow(
+                            metricKey,
+                            index,
+                            "year",
+                            parseNumberInput(event.target.value),
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="grid gap-1">
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                        EBITDA
+                      </span>
+                      <input
+                        aria-label={`Historical EBITDA ${rowLabel}`}
+                        className="h-10 rounded-lg border border-white/10 bg-slate-950/70 px-2 text-sm font-semibold text-white outline-none transition focus:border-amber-300/50"
+                        inputMode="decimal"
+                        type="number"
+                        value={numberInputValue(row.denominator)}
+                        onChange={(event) =>
+                          onChangeRow(
+                            metricKey,
+                            index,
+                            "denominator",
+                            parseNumberInput(event.target.value),
+                          )
+                        }
+                      />
+                    </label>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                        YoY change
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-slate-200">
+                        {growthLabel ?? "—"}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-slate-950/70 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                        Percent
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-slate-100">
+                        {formatPercent(growthPercent, 2)}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-3 md:grid-cols-4">
+                <ReadOnlyCalculationMetric
+                  label="Current"
+                  value={formatMultiple(summary.currentMultiple)}
+                />
+                <ReadOnlyCalculationMetric
+                  label="Low"
+                  testId={`historical-multiple-low-${summary.key}`}
+                  value={formatMultiple(summary.low)}
+                />
+                <ReadOnlyCalculationMetric
+                  label="Average"
+                  testId={`historical-multiple-average-${summary.key}`}
+                  value={formatMultiple(summary.average)}
+                  highlight
+                />
+                <ReadOnlyCalculationMetric
+                  label="High"
+                  testId={`historical-multiple-high-${summary.key}`}
+                  value={formatMultiple(summary.high)}
+                />
+              </div>
+
+              {visibleRows.length > 0 ? (
             <div className="grid gap-3">
               {visibleRows.map((row, index) => (
                 <div
@@ -630,29 +746,31 @@ function HistoricalMultiplesPanel({
                 </div>
               ))}
             </div>
-          ) : (
+              ) : (
             <div className="rounded-xl border border-dashed border-white/10 bg-slate-950/45 p-4 text-sm text-slate-400">
               Няма raw historical rows за тази метрика. Използвай FinanceCharts линка или попълни assumptions ръчно.
             </div>
+              )}
+            </>
           )}
 
           <div className="flex flex-col gap-3 rounded-xl border border-white/10 bg-slate-950/45 p-4 md:flex-row md:items-center md:justify-between">
             <div className="text-sm leading-6 text-slate-400">
-              <p>Apply maps High to Best, Average to Average, and Low to Worst.</p>
-              <div className="mt-2 flex flex-wrap gap-2" aria-label="FinanceCharts benchmark links">
-                {historicalMultipleTabs.map((key) => (
-                  <FinanceChartsMetricLink key={key} metricKey={key} ticker={ticker} />
-                ))}
-              </div>
+              {!isEbitdaHistory ? (
+                <p>Apply maps High to Best, Average to Average, and Low to Worst.</p>
+              ) : null}
+              <div className={cn(!isEbitdaHistory && "mt-2")}>{benchmarkLinks}</div>
             </div>
-            <button
-              className="inline-flex min-h-12 items-center justify-center rounded-xl bg-blue-500 px-4 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
-              type="button"
-              disabled={!summary.canApply}
-              onClick={() => onApply(metricKey)}
-            >
-              Apply {labels.label} to scenarios
-            </button>
+            {!isEbitdaHistory ? (
+              <button
+                className="inline-flex min-h-12 items-center justify-center rounded-xl bg-blue-500 px-4 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
+                type="button"
+                disabled={!summary.canApply}
+                onClick={() => onApply(metricKey)}
+              >
+                Apply {labels.label} to scenarios
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}

@@ -1094,4 +1094,155 @@ describe("stock valuation autofill parsers", () => {
       },
     ]);
   });
+
+  test("fills historical P/FCF rows from selected FCF history when SEC cash-flow rows are unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes("query1.finance.yahoo.com") && url.includes("range=1d")) {
+          return {
+            ok: true,
+            json: async () => ({
+              chart: {
+                result: [
+                  {
+                    meta: {
+                      currency: "USD",
+                      longName: "FCF Corp",
+                      regularMarketPrice: 42,
+                    },
+                  },
+                ],
+              },
+            }),
+          };
+        }
+
+        if (url.includes("query1.finance.yahoo.com") && url.includes("interval=1mo")) {
+          return {
+            ok: true,
+            json: async () => ({
+              chart: {
+                result: [
+                  {
+                    timestamp: [
+                      Math.floor(Date.parse("2024-12-31T00:00:00.000Z") / 1000),
+                      Math.floor(Date.parse("2025-12-31T00:00:00.000Z") / 1000),
+                    ],
+                    indicators: {
+                      quote: [
+                        {
+                          close: [30, 40],
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            }),
+          };
+        }
+
+        if (url.includes("query2.finance.yahoo.com/ws/fundamentals-timeseries")) {
+          return {
+            ok: true,
+            json: async () => ({ timeseries: { result: [] } }),
+          };
+        }
+
+        if (url.includes("alphavantage.co")) {
+          return {
+            ok: true,
+            json: async () => ({}),
+          };
+        }
+
+        if (url.endsWith("/company_tickers.json")) {
+          return {
+            ok: true,
+            json: async () => ({
+              "0": { cik_str: 654321, ticker: "FCF", title: "FCF Corp" },
+            }),
+          };
+        }
+
+        if (url.includes("/api/xbrl/companyfacts/CIK0000654321.json")) {
+          return {
+            ok: true,
+            json: async () => ({
+              cik: 654321,
+              entityName: "FCF Corp",
+              facts: {
+                "us-gaap": {
+                  EntityCommonStockSharesOutstanding: {
+                    units: {
+                      shares: [
+                        { end: "2025-12-31", fy: 2025, fp: "FY", form: "10-K", val: 100 },
+                        { end: "2024-12-31", fy: 2024, fp: "FY", form: "10-K", val: 100 },
+                      ],
+                    },
+                  },
+                  EarningsPerShareDiluted: {
+                    units: {
+                      "USD/shares": [
+                        { start: "2025-01-01", end: "2025-12-31", fy: 2025, fp: "FY", form: "10-K", val: 4 },
+                        { start: "2024-01-01", end: "2024-12-31", fy: 2024, fp: "FY", form: "10-K", val: 3 },
+                      ],
+                    },
+                  },
+                },
+              },
+            }),
+          };
+        }
+
+        if (url.includes("macrotrends.net")) {
+          return {
+            ok: true,
+            text: async () => `
+              <script>
+                var originalData = [
+                  {"field_name":"Cash Flow From Operating Activities","2025":"1000","2024":"800"},
+                  {"field_name":"Net Change In Property, Plant, And Equipment","2025":"-200","2024":"-300"}
+                ];
+              </script>
+            `,
+          };
+        }
+
+        if (url.includes("financecharts.com")) {
+          return { ok: false, status: 403, text: async () => "" };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+
+    const result = await fetchValuationAutofill("FCF");
+
+    expect(result.input.historicalFreeCashFlows).toEqual([
+      { year: 2025, freeCashFlow: 800_000_000, source: "Macrotrends", asOf: "2025-12-31" },
+      { year: 2024, freeCashFlow: 500_000_000, source: "Macrotrends", asOf: "2024-12-31" },
+    ]);
+    expect(result.input.historicalMultiples?.priceToFreeCashFlow).toEqual([
+      {
+        year: 2025,
+        numerator: 40,
+        denominator: 8_000_000,
+        multiple: 0.000005,
+        source: "Derived",
+        asOf: "2025-12-31",
+      },
+      {
+        year: 2024,
+        numerator: 30,
+        denominator: 5_000_000,
+        multiple: 0.000006,
+        source: "Derived",
+        asOf: "2024-12-31",
+      },
+    ]);
+  });
 });

@@ -690,13 +690,13 @@ describe("StockValuationPanel", () => {
     await waitFor(() => expect(screen.getByDisplayValue("HIST")).toBeVisible());
 
     expect(screen.getByRole("button", { name: /10 Years Free Cash Flow/ })).toBeVisible();
-    expect(screen.queryByRole("button", { name: /Historical multiples/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Historical P\/E/ })).not.toBeInTheDocument();
     expect(screen.queryByTestId("historical-fcf-row-0")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /P\/E ·/ }));
 
     expect(screen.queryByRole("button", { name: /10 Years Free Cash Flow/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Historical multiples/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Historical P\/E/ })).toBeVisible();
   });
 
   test("historical FCF calculator renders averages, edits rows, and applies average to DCF scenarios", async () => {
@@ -911,10 +911,10 @@ describe("StockValuationPanel", () => {
     await user.click(screen.getByRole("button", { name: /DCF Multiple ·/ }));
 
     expect(screen.queryByRole("button", { name: "Historical charts" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Historical multiples/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Historical P\/FCF/ })).toBeVisible();
     expect(screen.queryByTestId("historical-multiple-row-priceToFreeCashFlow-0")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Historical multiples/ }));
+    await user.click(screen.getByRole("button", { name: /Historical P\/FCF/ }));
 
     const panel = screen.getByTestId("historical-multiple-panel-priceToFreeCashFlow");
     expect(panel).toBeVisible();
@@ -982,7 +982,7 @@ describe("StockValuationPanel", () => {
       "href",
       "https://www.financecharts.com/stocks/INTC/value/pe-ratio",
     );
-    await user.click(screen.getByRole("button", { name: /Historical multiples/ }));
+    await user.click(screen.getByRole("button", { name: /Historical P\/E/ }));
     const pePanel = screen.getByTestId("historical-multiple-panel-peRatio");
     expect(pePanel).toBeVisible();
     expect(screen.queryByRole("dialog", { name: /Historical charts/ })).not.toBeInTheDocument();
@@ -1000,13 +1000,14 @@ describe("StockValuationPanel", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /EV\/EBITDA ·/ }));
+    expect(screen.getByRole("button", { name: /Historical EBITDA/ })).toBeVisible();
     const evPanel = screen.getByTestId("historical-multiple-panel-evToEbitda");
     expect(evPanel).toBeVisible();
-    expect(within(screen.getByTestId("historical-multiple-row-evToEbitda-0")).getByDisplayValue("8.2")).toBeVisible();
+    expect(within(evPanel).getByLabelText("Historical EBITDA Year 10")).toHaveValue(500);
     expect(screen.queryByTestId("historical-multiple-line-chart-evToEbitda")).not.toBeInTheDocument();
   });
 
-  test("inline historical multiples panel builds editable rows from series fallback", async () => {
+  test("inline historical EBITDA panel builds editable rows from series fallback without source clutter", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
@@ -1044,29 +1045,23 @@ describe("StockValuationPanel", () => {
     await waitFor(() => expect(screen.getByDisplayValue("META")).toBeVisible());
 
     await user.click(screen.getByRole("button", { name: /EV\/EBITDA ·/ }));
-    await user.click(screen.getByRole("button", { name: /Historical multiples/ }));
+    expect(screen.getByRole("button", { name: /Historical EBITDA/ })).toBeVisible();
+    expect(screen.queryByText("FinanceCharts data unavailable; HTTP 403.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Derived fallback")).not.toBeInTheDocument();
+    expect(screen.queryByText("EV/EBITDA avg needs input")).not.toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: /Historical EBITDA/ }));
     const panel = screen.getByTestId("historical-multiple-panel-evToEbitda");
     expect(panel).toBeVisible();
-    expect(within(panel).getByDisplayValue("2025")).toBeVisible();
-    expect(within(panel).getByDisplayValue("18")).toBeVisible();
-    expect(within(panel).getByDisplayValue("14")).toBeVisible();
-    expect(within(panel).getByDisplayValue("11")).toBeVisible();
-    expect(screen.getByTestId("historical-multiple-low-evToEbitda")).toHaveTextContent("11");
-    expect(screen.getByTestId("historical-multiple-average-evToEbitda")).toHaveTextContent("14.33");
-    expect(screen.getByTestId("historical-multiple-high-evToEbitda")).toHaveTextContent("18");
-
-    const multipleInputs = within(panel).getAllByLabelText("EV/EBITDA");
-    await user.clear(multipleInputs[0]);
-    await user.type(multipleInputs[0], "20");
-
-    expect(screen.getByTestId("historical-multiple-average-evToEbitda")).toHaveTextContent("15");
-    expect(screen.getByTestId("historical-multiple-high-evToEbitda")).toHaveTextContent("20");
-
-    await user.click(screen.getByRole("button", { name: "Apply EV/EBITDA to scenarios" }));
-    expect(
-      screen.getAllByLabelText("EV/EBITDA").map((field) => (field as HTMLInputElement).value),
-    ).toEqual(["20", "15", "11", "20", "14", "11"]);
+    expect(within(panel).getByLabelText("Historical year Year 10")).toHaveValue(2025);
+    expect(within(panel).getByLabelText("Historical EBITDA Year 10")).toHaveValue(100);
+    expect(within(panel).getByLabelText("Historical year Year 9")).toHaveValue(2024);
+    expect(within(panel).getByLabelText("Historical EBITDA Year 9")).toHaveValue(100);
+    expect(within(panel).getByLabelText("Historical year Year 8")).toHaveValue(2023);
+    expect(within(panel).getByLabelText("Historical EBITDA Year 8")).toHaveValue(100);
+    expect(within(panel).queryByText("Current")).not.toBeInTheDocument();
+    expect(within(panel).queryByText("Low")).not.toBeInTheDocument();
+    expect(within(panel).queryByText("Apply EV/EBITDA to scenarios")).not.toBeInTheDocument();
   });
 
   test("inline historical multiples panel labels FinanceCharts benchmark data when available", async () => {
@@ -1107,15 +1102,11 @@ describe("StockValuationPanel", () => {
     await waitFor(() => expect(screen.getByDisplayValue("NVO")).toBeVisible());
 
     await user.click(screen.getByRole("button", { name: /EV\/EBITDA ·/ }));
-    await user.click(screen.getByRole("button", { name: /Historical multiples/ }));
+    await user.click(screen.getByRole("button", { name: /Historical EBITDA/ }));
     const panel = screen.getByTestId("historical-multiple-panel-evToEbitda");
 
-    expect(screen.getByTestId("historical-multiple-source-evToEbitda")).toHaveTextContent(
-      "FinanceCharts",
-    );
-    expect(screen.getByTestId("historical-multiple-average-evToEbitda")).toHaveTextContent(
-      "13.11",
-    );
+    expect(screen.queryByTestId("historical-multiple-source-evToEbitda")).not.toBeInTheDocument();
+    expect(within(panel).queryByText("FinanceCharts")).not.toBeInTheDocument();
     expect(
       within(panel).getByRole("link", { name: "Open EV/EBITDA on FinanceCharts" }),
     ).toHaveAttribute("href", "https://www.financecharts.com/stocks/NVO/value/ev-to-ebitda");
