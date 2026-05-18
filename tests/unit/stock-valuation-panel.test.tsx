@@ -914,6 +914,9 @@ describe("StockValuationPanel", () => {
     expect(within(rows[0]).getByText("EV/EBITDA")).toBeVisible();
     expect(within(rows[0]).getByText("P/E")).toBeVisible();
     expect(within(rows[0]).getByText("P/FCF")).toBeVisible();
+    expect(within(rows[0]).getByText("40%")).toBeVisible();
+    expect(within(rows[0]).getByText("30%")).toBeVisible();
+    expect(within(rows[0]).getAllByText("15%")).toHaveLength(2);
     expect(within(rows[0]).getByText("$200.00")).toBeVisible();
     expect(within(rows[0]).getByText("$150.00")).toBeVisible();
     expect(within(rows[0]).getByText("Подценен")).toBeVisible();
@@ -1062,17 +1065,23 @@ describe("StockValuationPanel", () => {
     render(<SavedValuationsPanel />);
 
     const row = await screen.findByTestId("saved-valuation-row");
-    const dcfCard = within(row).getByText("DCF").closest("div");
-    const evEbitdaCard = within(row).getByText("EV/EBITDA").closest("div");
-    const peCard = within(row).getByText("P/E").closest("div");
-    const pfcfCard = within(row).getByText("P/FCF").closest("div");
+    const modelCards = within(row).getAllByTestId("saved-valuation-model-card");
+    const dcfCard = modelCards.find((card) => card.dataset.modelLabel === "DCF");
+    const evEbitdaCard = modelCards.find((card) => card.dataset.modelLabel === "EV/EBITDA");
+    const peCard = modelCards.find((card) => card.dataset.modelLabel === "P/E");
+    const pfcfCard = modelCards.find((card) => card.dataset.modelLabel === "P/FCF");
 
     expect(dcfCard).toHaveTextContent("--");
+    expect(dcfCard).toHaveTextContent("0%");
+    expect(within(dcfCard as HTMLElement).getByText("0%")).toHaveClass("text-[10px]");
     expect(pfcfCard).toHaveTextContent("--");
+    expect(pfcfCard).toHaveTextContent("0%");
     expect(evEbitdaCard).not.toHaveTextContent("--");
     expect(evEbitdaCard).toHaveTextContent(/\$\d/);
+    expect(evEbitdaCard).toHaveTextContent("50%");
     expect(peCard).not.toHaveTextContent("--");
     expect(peCard).toHaveTextContent(/\$\d/);
+    expect(peCard).toHaveTextContent("50%");
   });
 
   test("formats noisy scenario input decimals in P/E and DCF Multiple", async () => {

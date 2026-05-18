@@ -16,7 +16,7 @@ type SavedValuationView = {
   fairValue: number | null;
   valueGap: ValueGapView;
   tone: "buy" | "wait" | "neutral";
-  modelValues: Array<{ label: string; value: number | null; isUsed: boolean }>;
+  modelValues: Array<{ label: string; value: number | null; weight: number; isUsed: boolean }>;
 };
 
 type ValueGapView = {
@@ -43,6 +43,20 @@ function finiteOrNull(value: number | null | undefined) {
 
 function modelValue(model: ModelValuationResult | undefined) {
   return finiteOrNull(model?.weightedFairValue);
+}
+
+function modelWeight(weight: number | null | undefined) {
+  return finiteOrNull(weight) ?? 0;
+}
+
+function formatModelWeight(weight: number) {
+  const roundedPercent = Math.round(weight * 1000) / 10;
+  const normalizedPercent = Object.is(roundedPercent, -0) ? 0 : roundedPercent;
+  const display = Number.isInteger(normalizedPercent)
+    ? normalizedPercent.toFixed(0)
+    : normalizedPercent.toFixed(1);
+
+  return `${display}%`;
 }
 
 function calculateValueGap(fairValue: number | null, currentPrice: number | null): ValueGapView {
@@ -82,6 +96,10 @@ function buildView(
     finiteOrNull(quote?.currentPrice) ??
     finiteOrNull(analysis.currentPrice) ??
     finiteOrNull(analysis.payload.currentPrice);
+  const dcfWeight = modelWeight(analysis.payload.finalWeights.dcf10Years);
+  const evEbitdaWeight = modelWeight(analysis.payload.finalWeights.evEbitda);
+  const peWeight = modelWeight(analysis.payload.finalWeights.pe);
+  const dcfMultipleWeight = modelWeight(analysis.payload.finalWeights.dcfMultiple);
   const tone =
     fairValue !== null && currentPrice !== null
       ? currentPrice <= fairValue
@@ -100,22 +118,26 @@ function buildView(
       {
         label: "DCF",
         value: modelValue(result.models.dcf10Years),
-        isUsed: analysis.payload.finalWeights.dcf10Years > 0,
+        weight: dcfWeight,
+        isUsed: dcfWeight > 0,
       },
       {
         label: "EV/EBITDA",
         value: modelValue(result.models.evEbitda),
-        isUsed: analysis.payload.finalWeights.evEbitda > 0,
+        weight: evEbitdaWeight,
+        isUsed: evEbitdaWeight > 0,
       },
       {
         label: "P/E",
         value: modelValue(result.models.pe),
-        isUsed: analysis.payload.finalWeights.pe > 0,
+        weight: peWeight,
+        isUsed: peWeight > 0,
       },
       {
         label: "P/FCF",
         value: modelValue(result.models.dcfMultiple),
-        isUsed: analysis.payload.finalWeights.dcfMultiple > 0,
+        weight: dcfMultipleWeight,
+        isUsed: dcfMultipleWeight > 0,
       },
     ],
   };
@@ -329,10 +351,17 @@ export function SavedValuationsPanel() {
                     <div
                       key={model.label}
                       className="rounded-xl border border-white/10 bg-slate-950/35 px-3 py-2"
+                      data-testid="saved-valuation-model-card"
+                      data-model-label={model.label}
                     >
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                        {model.label}
-                      </p>
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="min-w-0 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                          {model.label}
+                        </p>
+                        <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.035] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-slate-300">
+                          {formatModelWeight(model.weight)}
+                        </span>
+                      </div>
                       <p
                         className={cn(
                           "mt-1 text-sm font-semibold",
