@@ -16,7 +16,7 @@ type SavedValuationView = {
   fairValue: number | null;
   valueGap: ValueGapView;
   tone: "buy" | "wait" | "neutral";
-  modelValues: Array<{ label: string; value: number | null }>;
+  modelValues: Array<{ label: string; value: number | null; isUsed: boolean }>;
 };
 
 type ValueGapView = {
@@ -97,10 +97,26 @@ function buildView(
     valueGap: calculateValueGap(fairValue, currentPrice),
     tone,
     modelValues: [
-      { label: "DCF", value: modelValue(result.models.dcf10Years) },
-      { label: "EV/EBITDA", value: modelValue(result.models.evEbitda) },
-      { label: "P/E", value: modelValue(result.models.pe) },
-      { label: "P/FCF", value: modelValue(result.models.dcfMultiple) },
+      {
+        label: "DCF",
+        value: modelValue(result.models.dcf10Years),
+        isUsed: analysis.payload.finalWeights.dcf10Years > 0,
+      },
+      {
+        label: "EV/EBITDA",
+        value: modelValue(result.models.evEbitda),
+        isUsed: analysis.payload.finalWeights.evEbitda > 0,
+      },
+      {
+        label: "P/E",
+        value: modelValue(result.models.pe),
+        isUsed: analysis.payload.finalWeights.pe > 0,
+      },
+      {
+        label: "P/FCF",
+        value: modelValue(result.models.dcfMultiple),
+        isUsed: analysis.payload.finalWeights.dcfMultiple > 0,
+      },
     ],
   };
 }
@@ -317,8 +333,13 @@ export function SavedValuationsPanel() {
                       <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                         {model.label}
                       </p>
-                      <p className="mt-1 text-sm font-semibold text-slate-100">
-                        {formatCurrency(model.value, row.currency)}
+                      <p
+                        className={cn(
+                          "mt-1 text-sm font-semibold",
+                          model.isUsed ? "text-slate-100" : "text-slate-500",
+                        )}
+                      >
+                        {model.isUsed ? formatCurrency(model.value, row.currency) : "--"}
                       </p>
                     </div>
                   ))}
@@ -351,7 +372,7 @@ export function SavedValuationsPanel() {
                   ) : (
                     <p
                       className={cn(
-                        "mt-1 flex flex-wrap items-baseline gap-x-1.5 text-base font-semibold",
+                        "mt-1 flex flex-wrap items-baseline gap-x-1 text-sm font-semibold leading-5",
                         row.valueGap.tone === "undervalued" && "text-emerald-200",
                         row.valueGap.tone === "overvalued" && "text-rose-200",
                         row.valueGap.tone === "fair" && "text-slate-200",

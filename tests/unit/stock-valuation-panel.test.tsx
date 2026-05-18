@@ -918,8 +918,10 @@ describe("StockValuationPanel", () => {
     expect(within(rows[0]).getByText("$150.00")).toBeVisible();
     expect(within(rows[0]).getByText("Подценен")).toBeVisible();
     expect(within(rows[0]).getByText("+33.3%")).toBeVisible();
+    expect(within(rows[0]).getByText("Подценен").parentElement).toHaveClass("text-sm");
     expect(within(rows[1]).getByText("Надценен")).toBeVisible();
     expect(within(rows[1]).getByText("-60.0%")).toBeVisible();
+    expect(within(rows[1]).getByText("Надценен").parentElement).toHaveClass("text-sm");
     expect(rows[0]).toHaveAttribute("data-valuation-tone", "buy");
     expect(rows[1]).toHaveAttribute("data-valuation-tone", "wait");
     expect(within(rows[0]).getByRole("link", { name: /Open GOOGL valuation/ })).toHaveAttribute(
@@ -1000,6 +1002,77 @@ describe("StockValuationPanel", () => {
     await user.click(screen.getByRole("button", { name: "Refresh prices" }));
 
     await waitFor(() => expect(within(row).getByText("+17.6%")).toBeVisible());
+  });
+
+  test("shows dashes for saved valuation models with zero final weight", async () => {
+    const zeroWeightPayload = {
+      ...sofiInput,
+      finalWeights: {
+        dcf10Years: 0,
+        evEbitda: 0.5,
+        pe: 0.5,
+        dcfMultiple: 0,
+      },
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "/api/valuation/saved") {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              analyses: [
+                {
+                  id: "analysis-sofi",
+                  userId: "user-1",
+                  ticker: "SOFI",
+                  companyName: "SoFi Technologies, Inc.",
+                  title: "SOFI valuation",
+                  latestFairValue: 7.73,
+                  currentPrice: 15.65,
+                  payload: zeroWeightPayload,
+                  createdAt: "2026-05-14T06:00:00.000Z",
+                  updatedAt: "2026-05-14T06:00:00.000Z",
+                },
+              ],
+            }),
+          };
+        }
+
+        if (url === "/api/valuation/quotes?tickers=SOFI") {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              quotes: [
+                { ticker: "SOFI", currentPrice: 15.61, currency: "USD", source: "Yahoo", error: null },
+              ],
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+
+    render(<SavedValuationsPanel />);
+
+    const row = await screen.findByTestId("saved-valuation-row");
+    const dcfCard = within(row).getByText("DCF").closest("div");
+    const evEbitdaCard = within(row).getByText("EV/EBITDA").closest("div");
+    const peCard = within(row).getByText("P/E").closest("div");
+    const pfcfCard = within(row).getByText("P/FCF").closest("div");
+
+    expect(dcfCard).toHaveTextContent("--");
+    expect(pfcfCard).toHaveTextContent("--");
+    expect(evEbitdaCard).not.toHaveTextContent("--");
+    expect(evEbitdaCard).toHaveTextContent(/\$\d/);
+    expect(peCard).not.toHaveTextContent("--");
+    expect(peCard).toHaveTextContent(/\$\d/);
   });
 
   test("formats noisy scenario input decimals in P/E and DCF Multiple", async () => {
