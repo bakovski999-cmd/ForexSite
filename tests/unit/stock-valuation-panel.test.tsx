@@ -916,12 +916,90 @@ describe("StockValuationPanel", () => {
     expect(within(rows[0]).getByText("P/FCF")).toBeVisible();
     expect(within(rows[0]).getByText("$200.00")).toBeVisible();
     expect(within(rows[0]).getByText("$150.00")).toBeVisible();
+    expect(within(rows[0]).getByText("Подценен")).toBeVisible();
+    expect(within(rows[0]).getByText("+33.3%")).toBeVisible();
+    expect(within(rows[1]).getByText("Надценен")).toBeVisible();
+    expect(within(rows[1]).getByText("-60.0%")).toBeVisible();
     expect(rows[0]).toHaveAttribute("data-valuation-tone", "buy");
     expect(rows[1]).toHaveAttribute("data-valuation-tone", "wait");
     expect(within(rows[0]).getByRole("link", { name: /Open GOOGL valuation/ })).toHaveAttribute(
       "href",
       "/valuation?analysis=analysis-googl",
     );
+  });
+
+  test("updates saved valuation percent gap when refreshed quotes change", async () => {
+    const undervaluedPayload = buildDefaultStockValuationInput({
+      ticker: "GOOGL",
+      companyName: "Alphabet Inc.",
+      currentPrice: 180,
+      fields: {
+        currentPrice: { value: 180, source: "Yahoo" },
+      },
+    });
+    let quoteRequestCount = 0;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url === "/api/valuation/saved") {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              analyses: [
+                {
+                  id: "analysis-googl",
+                  userId: "user-1",
+                  ticker: "GOOGL",
+                  companyName: "Alphabet Inc.",
+                  title: "GOOGL valuation",
+                  latestFairValue: 200,
+                  currentPrice: 180,
+                  payload: undervaluedPayload,
+                  createdAt: "2026-05-14T06:00:00.000Z",
+                  updatedAt: "2026-05-14T06:00:00.000Z",
+                },
+              ],
+            }),
+          };
+        }
+
+        if (url === "/api/valuation/quotes?tickers=GOOGL") {
+          quoteRequestCount += 1;
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              quotes: [
+                {
+                  ticker: "GOOGL",
+                  currentPrice: quoteRequestCount === 1 ? 180 : 170,
+                  currency: "USD",
+                  source: "Yahoo",
+                  error: null,
+                },
+              ],
+            }),
+          };
+        }
+
+        throw new Error(`Unexpected fetch ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+
+    render(<SavedValuationsPanel />);
+
+    const row = await screen.findByTestId("saved-valuation-row");
+    expect(within(row).getByText("Подценен")).toBeVisible();
+    expect(within(row).getByText("+11.1%")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Refresh prices" }));
+
+    await waitFor(() => expect(within(row).getByText("+17.6%")).toBeVisible());
   });
 
   test("formats noisy scenario input decimals in P/E and DCF Multiple", async () => {

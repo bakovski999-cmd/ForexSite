@@ -14,8 +14,15 @@ type SavedValuationView = {
   currency: string;
   currentPrice: number | null;
   fairValue: number | null;
+  valueGap: ValueGapView;
   tone: "buy" | "wait" | "neutral";
   modelValues: Array<{ label: string; value: number | null }>;
+};
+
+type ValueGapView = {
+  label: "Подценен" | "Надценен" | "Справедлив" | "needs input";
+  display: string;
+  tone: "undervalued" | "overvalued" | "fair" | "unknown";
 };
 
 function formatCurrency(value: number | null, currency = "USD") {
@@ -36,6 +43,32 @@ function finiteOrNull(value: number | null | undefined) {
 
 function modelValue(model: ModelValuationResult | undefined) {
   return finiteOrNull(model?.weightedFairValue);
+}
+
+function calculateValueGap(fairValue: number | null, currentPrice: number | null): ValueGapView {
+  if (fairValue === null || currentPrice === null || currentPrice <= 0) {
+    return { label: "needs input", display: "needs input", tone: "unknown" };
+  }
+
+  const roundedPercent = Math.round(((fairValue - currentPrice) / currentPrice) * 1000) / 10;
+
+  if (roundedPercent > 0) {
+    return {
+      label: "Подценен",
+      display: `+${roundedPercent.toFixed(1)}%`,
+      tone: "undervalued",
+    };
+  }
+
+  if (roundedPercent < 0) {
+    return {
+      label: "Надценен",
+      display: `${roundedPercent.toFixed(1)}%`,
+      tone: "overvalued",
+    };
+  }
+
+  return { label: "Справедлив", display: "0.0%", tone: "fair" };
 }
 
 function buildView(
@@ -61,6 +94,7 @@ function buildView(
     currency,
     currentPrice,
     fairValue,
+    valueGap: calculateValueGap(fairValue, currentPrice),
     tone,
     modelValues: [
       { label: "DCF", value: modelValue(result.models.dcf10Years) },
@@ -246,7 +280,7 @@ export function SavedValuationsPanel() {
             <div
               key={row.analysis.id}
               className={cn(
-                "grid gap-3 rounded-2xl border p-4 transition md:grid-cols-[minmax(220px,0.9fr)_minmax(360px,1.5fr)_minmax(150px,0.45fr)_minmax(150px,0.45fr)_auto] md:items-center",
+                "grid gap-3 rounded-2xl border p-4 transition md:grid-cols-[minmax(180px,0.85fr)_minmax(320px,1.45fr)_minmax(120px,0.42fr)_minmax(120px,0.42fr)_minmax(120px,0.4fr)_auto] md:items-center",
                 row.tone === "buy" &&
                   "border-emerald-300/25 bg-emerald-300/[0.065] hover:bg-emerald-300/[0.09]",
                 row.tone === "wait" &&
@@ -306,6 +340,27 @@ export function SavedValuationsPanel() {
                   <p className="mt-1 text-xl font-semibold text-white">
                     {formatCurrency(row.currentPrice, row.currency)}
                   </p>
+                </div>
+
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    Value gap
+                  </p>
+                  {row.valueGap.tone === "unknown" ? (
+                    <p className="mt-1 text-sm font-semibold text-slate-400">needs input</p>
+                  ) : (
+                    <p
+                      className={cn(
+                        "mt-1 flex flex-wrap items-baseline gap-x-1.5 text-base font-semibold",
+                        row.valueGap.tone === "undervalued" && "text-emerald-200",
+                        row.valueGap.tone === "overvalued" && "text-rose-200",
+                        row.valueGap.tone === "fair" && "text-slate-200",
+                      )}
+                    >
+                      <span>{row.valueGap.label}</span>
+                      <span>{row.valueGap.display}</span>
+                    </p>
+                  )}
                 </div>
               </Link>
 
