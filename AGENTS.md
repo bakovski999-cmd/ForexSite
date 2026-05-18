@@ -22,9 +22,12 @@ If available, read local helper context before project work:
 
 1. `/Users/bakovski/ForexSite/.obsidian/codex-memory/current-state.md`
 2. `/Users/bakovski/ForexSite/.obsidian/codex-memory/project-memory.md`
-3. `/Users/bakovski/ForexSite/.obsidian/codex-memory/next-tasks.md`
+3. `/Users/bakovski/ForexSite/.obsidian/codex-memory/dependency-map.md`
+4. `/Users/bakovski/ForexSite/.obsidian/codex-memory/next-tasks.md`
 
 Treat these files as local memory only. Verify against code, tests, Git history, and production.
+
+After finishing a task, update local Obsidian memory before the final response when the task changed routes, APIs, feature behavior, data flow, caveats, or next tasks. Keep `.obsidian/` local-only; do not stage or commit it unless the user explicitly asks.
 
 ## Do Not Commit Unless Explicitly Requested
 

@@ -16,6 +16,15 @@ Expected for normal work: `HEAD` should match `origin/main`, or the difference s
 
 Do not make new code edits in `/Users/bakovski/.config/superpowers/worktrees/ForexSite/mt5-live-sync` unless the user explicitly asks for that old feature worktree. It is no longer the default workspace.
 
+Read local Obsidian memory before project work when available:
+
+1. `.obsidian/codex-memory/current-state.md`
+2. `.obsidian/codex-memory/project-memory.md`
+3. `.obsidian/codex-memory/dependency-map.md`
+4. `.obsidian/codex-memory/next-tasks.md`
+
+Treat memory as helper context. Verify against code, tests, Git history, and production.
+
 ## Local Development
 
 ```bash
@@ -54,6 +63,8 @@ git push origin HEAD:main
 ```
 
 After push, verify the Vercel production deployment is `READY`.
+
+Before the final response, update local Obsidian memory if the task changed routes, APIs, feature behavior, data flow, caveats, or next tasks. `.obsidian/` remains local-only and should not be staged or committed unless explicitly requested.
 
 ## Files To Keep Local
 
