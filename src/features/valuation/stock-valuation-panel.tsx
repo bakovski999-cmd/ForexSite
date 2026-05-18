@@ -29,6 +29,7 @@ import {
   type HistoricalMultipleKey,
   type HistoricalMultipleRow,
   type HistoricalMultipleSummary,
+  type MarketCapValuationResult,
   type StockValuationAutofillFields,
   type StockValuationInput,
   type TerminalMultipleScenario,
@@ -89,6 +90,33 @@ function formatPlainNumber(value: number | null, maximumFractionDigits = 2) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits,
   }).format(value);
+}
+
+function finiteNumber(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function resolvedInputMarketCap(input: StockValuationInput) {
+  const explicitMarketCap = finiteNumber(input.marketCap);
+
+  if (explicitMarketCap !== null) {
+    return explicitMarketCap;
+  }
+
+  const currentPrice = finiteNumber(input.currentPrice);
+  const sharesOutstanding = finiteNumber(input.sharesOutstanding);
+
+  return currentPrice !== null && sharesOutstanding !== null
+    ? currentPrice * sharesOutstanding
+    : null;
+}
+
+function marketCapSource(input: StockValuationInput) {
+  if (input.sources?.marketCap?.source) {
+    return input.sources.marketCap.source;
+  }
+
+  return resolvedInputMarketCap(input) !== null ? "Derived" : undefined;
 }
 
 function numberInputValue(value: number | null) {
@@ -320,6 +348,111 @@ function FcfPerShareTtmPanel({
           testId="fcf-per-share-ttm-value"
           value={formatCurrency(calculation.fcfPerShare, currency)}
           highlight
+        />
+      </div>
+    </div>
+  );
+}
+
+function MarketCapPanel({
+  modelKey,
+  result,
+  currency,
+  onMarginChange,
+}: {
+  modelKey: "dcf10Years" | "evEbitda";
+  result: MarketCapValuationResult;
+  currency: string;
+  onMarginChange: (value: number | null) => void;
+}) {
+  const title = modelKey === "dcf10Years" ? "Market Cap DCF" : "Market Cap EV/EBITDA";
+  const signalTone =
+    result.signal === "BUY"
+      ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
+      : result.signal === "SELL"
+        ? "border-rose-300/20 bg-rose-300/10 text-rose-100"
+        : "border-white/10 bg-white/[0.04] text-slate-300";
+
+  return (
+    <div
+      className="mt-4 rounded-2xl border border-cyan-300/15 bg-cyan-300/[0.035] p-4"
+      data-testid="market-cap-panel"
+    >
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200/70">
+            {title}
+          </p>
+          <p className="mt-1 text-sm text-slate-400">
+            Current market cap: {formatCurrency(result.marketCap, currency)}
+          </p>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-[minmax(150px,1fr)_auto] sm:items-end">
+          <CompactNumberField
+            label="Market cap safety"
+            percent
+            value={result.marginOfSafety}
+            onChange={onMarginChange}
+          />
+          <div className={cn("rounded-xl border px-3 py-2 text-center", signalTone)}>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] opacity-75">
+              Signal
+            </p>
+            <p className="mt-1 text-sm font-semibold">{result.signal}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2">
+        <div className="hidden grid-cols-[1fr_0.7fr_1fr_1fr] gap-2 px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 md:grid">
+          <span>Scenario</span>
+          <span>Weight</span>
+          <span>Intrinsic market cap</span>
+          <span>IV x Weight</span>
+        </div>
+        {result.scenarios.map((scenario) => (
+          <div
+            key={scenario.id}
+            className="grid gap-2 rounded-xl border border-white/10 bg-slate-950/35 px-3 py-2 text-sm md:grid-cols-[1fr_0.7fr_1fr_1fr] md:items-center"
+            data-testid="market-cap-scenario-row"
+          >
+            <p className="font-semibold text-white">{scenario.label}</p>
+            <p className="text-slate-300">{formatPercent(scenario.weight, 0)}</p>
+            <div>
+              <p className="md:hidden text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                Intrinsic market cap
+              </p>
+              <p className="font-semibold text-slate-100">
+                {formatCurrency(scenario.intrinsicMarketCap, currency)}
+              </p>
+            </div>
+            <div>
+              <p className="md:hidden text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                IV x Weight
+              </p>
+              <p className="font-semibold text-slate-100">
+                {formatCurrency(scenario.weightedIntrinsicMarketCap, currency)}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <ReadOnlyCalculationMetric
+          label="Average intrinsic market cap"
+          value={formatCurrency(result.averageIntrinsicMarketCap, currency)}
+          highlight
+        />
+        <ReadOnlyCalculationMetric
+          label="Under / over valued"
+          value={formatPercent(result.underOverValuedPercent, 2)}
+          highlight={result.underOverValuedPercent !== null && result.underOverValuedPercent > 0}
+        />
+        <ReadOnlyCalculationMetric
+          label="Signal"
+          value={result.signal}
+          highlight={result.signal === "BUY"}
         />
       </div>
     </div>
@@ -962,10 +1095,10 @@ function NumericField({
   step?: string;
 }) {
   return (
-    <label className="grid gap-2 text-sm text-slate-400">
+    <label className="grid min-w-0 gap-2 text-sm text-slate-400">
       <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</span>
       <input
-        className="min-h-12 rounded-xl border border-white/10 bg-slate-950/60 px-3 text-base text-white outline-none transition focus:border-amber-300/50"
+        className="min-h-12 min-w-0 rounded-xl border border-white/10 bg-slate-950/60 px-3 text-base text-white outline-none transition focus:border-amber-300/50"
         inputMode="decimal"
         step={step}
         type="number"
@@ -1182,12 +1315,37 @@ export function StockValuationPanel({
     };
   }, [initialAnalysisId]);
 
-  function setTopLevelNumber(key: "currentPrice" | "sharesOutstanding", value: number | null) {
+  function setTopLevelNumber(
+    key: "currentPrice" | "marketCap" | "sharesOutstanding",
+    value: number | null,
+  ) {
     setInput((current) => ({
       ...current,
       [key]: value,
       sources: updateSource(current.sources, key, value),
     }));
+  }
+
+  function updateMarketCapMargin(
+    modelKey: "dcf10Years" | "evEbitda",
+    value: number | null,
+  ) {
+    setInput((current) => {
+      const next = cloneStockValuationInput(current);
+      if (modelKey === "dcf10Years") {
+        next.models.dcf10Years = {
+          ...next.models.dcf10Years,
+          marketCapMarginOfSafety: value,
+        };
+      } else {
+        next.models.evEbitda = {
+          ...next.models.evEbitda,
+          marketCapMarginOfSafety: value,
+        };
+      }
+
+      return next;
+    });
   }
 
   function updateFinalWeight(key: ModelKey, value: number | null) {
@@ -1521,8 +1679,8 @@ export function StockValuationPanel({
           <MetricCard label="Signal" value={result.signal} tone={signalTone} />
         </div>
 
-        <div className="grid gap-4 border-y border-white/10 p-5 xl:grid-cols-[minmax(320px,0.55fr)_minmax(720px,1fr)]">
-          <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 sm:grid-cols-2">
+        <div className="grid items-start gap-4 border-y border-white/10 p-5 xl:grid-cols-[minmax(320px,0.55fr)_minmax(720px,1fr)]">
+          <div className="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4 md:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3">
             <div className="grid gap-3">
               <NumericField
                 label="Current price"
@@ -1530,6 +1688,14 @@ export function StockValuationPanel({
                 onChange={(value) => setTopLevelNumber("currentPrice", value)}
               />
               <SourceBadge source={input.sources?.currentPrice?.source} />
+            </div>
+            <div className="grid gap-3">
+              <NumericField
+                label="Market cap"
+                value={resolvedInputMarketCap(input)}
+                onChange={(value) => setTopLevelNumber("marketCap", value)}
+              />
+              <SourceBadge source={marketCapSource(input)} />
             </div>
             <div className="grid gap-3">
               <NumericField
@@ -1643,6 +1809,16 @@ export function StockValuationPanel({
                 );
               })}
             </div>
+
+            {(activeModel === "dcf10Years" || activeModel === "evEbitda") &&
+            activeResult.marketCap ? (
+              <MarketCapPanel
+                currency={input.currency}
+                modelKey={activeModel}
+                result={activeResult.marketCap}
+                onMarginChange={(value) => updateMarketCapMargin(activeModel, value)}
+              />
+            ) : null}
 
             {activeModel === "dcf10Years" ? (
               <HistoricalFcfPanel

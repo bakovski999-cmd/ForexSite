@@ -25,6 +25,7 @@ const metaInput = buildDefaultStockValuationInput({
   sharesOutstanding: 2533659000,
   fields: {
     currentPrice: { value: 609, source: "Yahoo" },
+    marketCap: { value: 1_540_000_000_000, source: "Alpha Vantage" },
     sharesOutstanding: { value: 2533659000, source: "Alpha Vantage" },
     freeCashFlow: { value: 65_722_000_000, source: "SEC" },
     ebitda: { value: 98_399_000_000, source: "Alpha Vantage" },
@@ -309,6 +310,7 @@ function mockFetch() {
             input: metaInput,
             fields: {
               currentPrice: { value: 609, source: "Yahoo" },
+              marketCap: { value: 1_540_000_000_000, source: "Alpha Vantage" },
               sharesOutstanding: { value: 2533659000, source: "Alpha Vantage" },
             },
             warnings: [],
@@ -410,6 +412,7 @@ describe("StockValuationPanel", () => {
 
     await waitFor(() => expect(screen.getByDisplayValue("META")).toBeVisible());
     expect(screen.getByDisplayValue("Meta Platforms")).toBeVisible();
+    expect(screen.getByLabelText("Market cap")).toHaveValue(1_540_000_000_000);
     expect(screen.getByRole("button", { name: /DCF 10 years · \$/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /EV\/EBITDA · \$/ })).toBeVisible();
     expect(screen.queryByText(/SEC и Alpha Vantage са primary/)).not.toBeInTheDocument();
@@ -417,6 +420,42 @@ describe("StockValuationPanel", () => {
     expect(screen.getByText(/SEC и Alpha Vantage са primary/)).toBeVisible();
     expect(screen.getAllByText("Yahoo").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Alpha Vantage").length).toBeGreaterThan(0);
+  });
+
+  test("shows editable market cap panels for DCF 10 years and EV/EBITDA only", async () => {
+    mockFetch();
+    const user = userEvent.setup();
+
+    render(<StockValuationPanel />);
+
+    await user.clear(screen.getByLabelText("Ticker"));
+    await user.type(screen.getByLabelText("Ticker"), "meta");
+    await user.click(screen.getByRole("button", { name: "Авто попълване" }));
+    await waitFor(() => expect(screen.getByDisplayValue("META")).toBeVisible());
+
+    let panel = await screen.findByTestId("market-cap-panel");
+    expect(within(panel).getByText("Market Cap DCF")).toBeVisible();
+    expect(within(panel).getAllByTestId("market-cap-scenario-row")).toHaveLength(3);
+    expect(within(panel).getAllByText("Intrinsic market cap").length).toBeGreaterThan(0);
+    expect(within(panel).getAllByText("IV x Weight").length).toBeGreaterThan(0);
+    expect(within(panel).getByText("Average intrinsic market cap")).toBeVisible();
+    expect(within(panel).getByText("Under / over valued")).toBeVisible();
+    expect(within(panel).getAllByText("Signal").length).toBeGreaterThan(0);
+    expect(within(panel).getByLabelText("Market cap safety")).toHaveValue(10);
+
+    await user.clear(within(panel).getByLabelText("Market cap safety"));
+    await user.type(within(panel).getByLabelText("Market cap safety"), "15");
+    expect(within(panel).getByLabelText("Market cap safety")).toHaveValue(15);
+
+    await user.click(screen.getByRole("button", { name: /EV\/EBITDA ·/ }));
+    panel = await screen.findByTestId("market-cap-panel");
+    expect(within(panel).getByText("Market Cap EV/EBITDA")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: /P\/E ·/ }));
+    expect(screen.queryByTestId("market-cap-panel")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /DCF Multiple ·/ }));
+    expect(screen.queryByTestId("market-cap-panel")).not.toBeInTheDocument();
   });
 
   test("manual override recalculates immediately and can be saved", async () => {
@@ -433,7 +472,7 @@ describe("StockValuationPanel", () => {
     await user.clear(screen.getByLabelText("Current price"));
     await user.type(screen.getByLabelText("Current price"), "500");
 
-    expect(screen.getByText(/BUY|SELL/)).toBeVisible();
+    expect(screen.getAllByText(/BUY|SELL/).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: "Save analysis" }));
 

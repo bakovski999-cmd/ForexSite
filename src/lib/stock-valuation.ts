@@ -182,6 +182,7 @@ export type StockValuationInput = {
   currency: string;
   analysisDate?: string;
   currentPrice: number | null;
+  marketCap?: number | null;
   sharesOutstanding: number | null;
   historicalFreeCashFlows?: HistoricalFreeCashFlowRow[];
   historicalMultiples?: Partial<Record<HistoricalMultipleKey, HistoricalMultipleRow[]>>;
@@ -200,9 +201,11 @@ export type StockValuationInput = {
   sources?: Partial<Record<string, ValuationField<unknown>>>;
   models: {
     dcf10Years: {
+      marketCapMarginOfSafety?: number | null;
       scenarios: DcfTenYearsScenario[];
     };
     evEbitda: {
+      marketCapMarginOfSafety?: number | null;
       scenarios: EvEbitdaScenario[];
     };
     pe: {
@@ -219,6 +222,26 @@ export type ScenarioValuationResult = {
   label: string;
   weight: number;
   fairValue: number | null;
+  intrinsicMarketCap?: number | null;
+  missingFields: string[];
+};
+
+export type MarketCapScenarioResult = {
+  id: ValuationScenarioId;
+  label: string;
+  weight: number;
+  intrinsicMarketCap: number | null;
+  weightedIntrinsicMarketCap: number | null;
+};
+
+export type MarketCapValuationResult = {
+  marketCap: number | null;
+  marginOfSafety: number | null;
+  averageIntrinsicMarketCap: number | null;
+  underOverValuedPercent: number | null;
+  signal: ValuationSignal;
+  scenarioWeightTotal: number;
+  scenarios: MarketCapScenarioResult[];
   missingFields: string[];
 };
 
@@ -226,6 +249,7 @@ export type ModelValuationResult = {
   weightedFairValue: number | null;
   scenarioWeightTotal: number;
   scenarios: ScenarioValuationResult[];
+  marketCap?: MarketCapValuationResult;
   missingFields: string[];
 };
 
@@ -276,6 +300,7 @@ type DefaultInputOptions = {
   ticker?: string;
   companyName?: string;
   currentPrice?: number | null;
+  marketCap?: number | null;
   sharesOutstanding?: number | null;
   currency?: string;
   fields?: StockValuationAutofillFields;
@@ -291,6 +316,7 @@ type DefaultInputOptions = {
 
 const historicalFreeCashFlowRowCount = 11;
 const historicalMultipleRowCount = 20;
+const DEFAULT_MARKET_CAP_MARGIN_OF_SAFETY = 0.1;
 
 const historicalMultiplePeriods: Array<{
   key: HistoricalMultiplePeriodKey;
@@ -658,6 +684,7 @@ export function buildDefaultStockValuationInput(
   const companyName =
     options.companyName?.trim() || stringSourceValue(fields, "companyName") || "";
   const currentPrice = options.currentPrice ?? sourceValue(fields, "currentPrice");
+  const marketCap = options.marketCap ?? sourceValue(fields, "marketCap");
   const sharesOutstanding =
     options.sharesOutstanding ?? sourceValue(fields, "sharesOutstanding");
   const currency = options.currency || stringSourceValue(fields, "currency") || "USD";
@@ -674,6 +701,7 @@ export function buildDefaultStockValuationInput(
     currency,
     analysisDate: todayIsoDate(),
     currentPrice,
+    marketCap,
     sharesOutstanding,
     historicalFreeCashFlows: normalizeHistoricalFreeCashFlowRows(
       options.historicalFreeCashFlows,
@@ -694,6 +722,7 @@ export function buildDefaultStockValuationInput(
     sources: fields as Partial<Record<string, ValuationField<unknown>>> | undefined,
     models: {
       dcf10Years: {
+        marketCapMarginOfSafety: DEFAULT_MARKET_CAP_MARGIN_OF_SAFETY,
         scenarios: [
           dcfScenario("optimistic", 0.25, 0.2, 0.15, fields),
           dcfScenario("base", 0.5, 0.15, 0.1, fields),
@@ -701,6 +730,7 @@ export function buildDefaultStockValuationInput(
         ],
       },
       evEbitda: {
+        marketCapMarginOfSafety: DEFAULT_MARKET_CAP_MARGIN_OF_SAFETY,
         scenarios: [
           evEbitdaScenario("optimistic", 0.25, 0.19, 0.14, 18, fields),
           evEbitdaScenario("base", 0.5, 0.15, 0.1, 14, fields),
@@ -1112,7 +1142,14 @@ function calculateDcfScenario(
   ];
 
   if (missingFields.length > 0 || sharesOutstanding === 0) {
-    return { id: scenario.id, label: scenario.label, weight: scenario.weight, fairValue: null, missingFields };
+    return {
+      id: scenario.id,
+      label: scenario.label,
+      weight: scenario.weight,
+      fairValue: null,
+      intrinsicMarketCap: null,
+      missingFields,
+    };
   }
 
   const discountRate = scenario.discountRate!;
@@ -1123,6 +1160,7 @@ function calculateDcfScenario(
       label: scenario.label,
       weight: scenario.weight,
       fairValue: null,
+      intrinsicMarketCap: null,
       missingFields: [`${prefix}.discountRate`],
     };
   }
@@ -1140,10 +1178,17 @@ function calculateDcfScenario(
   );
   const terminalValue =
     (forecast[9] * (1 + perpetualGrowth)) / (discountRate - perpetualGrowth);
-  const enterpriseValue = discountedCashFlows + discount(terminalValue, discountRate, 10);
-  const fairValue = (enterpriseValue / sharesOutstanding!) * (1 - scenario.marginOfSafety!);
+  const intrinsicMarketCap = discountedCashFlows + discount(terminalValue, discountRate, 10);
+  const fairValue = (intrinsicMarketCap / sharesOutstanding!) * (1 - scenario.marginOfSafety!);
 
-  return { id: scenario.id, label: scenario.label, weight: scenario.weight, fairValue, missingFields: [] };
+  return {
+    id: scenario.id,
+    label: scenario.label,
+    weight: scenario.weight,
+    fairValue,
+    intrinsicMarketCap,
+    missingFields: [],
+  };
 }
 
 function calculateEvEbitdaScenario(
@@ -1166,7 +1211,14 @@ function calculateEvEbitdaScenario(
   ];
 
   if (missingFields.length > 0 || sharesOutstanding === 0) {
-    return { id: scenario.id, label: scenario.label, weight: scenario.weight, fairValue: null, missingFields };
+    return {
+      id: scenario.id,
+      label: scenario.label,
+      weight: scenario.weight,
+      fairValue: null,
+      intrinsicMarketCap: null,
+      missingFields,
+    };
   }
 
   const forecast = projectTenYears(
@@ -1176,10 +1228,17 @@ function calculateEvEbitdaScenario(
     scenario.id === "base" ? 4 : 5,
   );
   const terminalValue = forecast[9] * scenario.terminalMultiple!;
-  const enterpriseValue = discount(terminalValue, scenario.discountRate!, 10);
-  const fairValue = (enterpriseValue / sharesOutstanding!) * (1 - scenario.marginOfSafety!);
+  const intrinsicMarketCap = discount(terminalValue, scenario.discountRate!, 10);
+  const fairValue = (intrinsicMarketCap / sharesOutstanding!) * (1 - scenario.marginOfSafety!);
 
-  return { id: scenario.id, label: scenario.label, weight: scenario.weight, fairValue, missingFields: [] };
+  return {
+    id: scenario.id,
+    label: scenario.label,
+    weight: scenario.weight,
+    fairValue,
+    intrinsicMarketCap,
+    missingFields: [],
+  };
 }
 
 function calculateTerminalMultipleScenario(
@@ -1215,19 +1274,127 @@ function calculateTerminalMultipleScenario(
   return { id: scenario.id, label: scenario.label, weight: scenario.weight, fairValue, missingFields: [] };
 }
 
-function buildModelResult(scenarios: ScenarioValuationResult[]): ModelValuationResult {
+function marketCapMarginOfSafety(value: number | null | undefined) {
+  if (value === undefined) {
+    return DEFAULT_MARKET_CAP_MARGIN_OF_SAFETY;
+  }
+
+  return numberOrNull(value);
+}
+
+function resolvedMarketCap(input: StockValuationInput) {
+  const explicitMarketCap = numberOrNull(input.marketCap);
+
+  if (explicitMarketCap !== null) {
+    return explicitMarketCap;
+  }
+
+  const currentPrice = numberOrNull(input.currentPrice);
+  const sharesOutstanding = numberOrNull(input.sharesOutstanding);
+
+  return currentPrice !== null && sharesOutstanding !== null
+    ? currentPrice * sharesOutstanding
+    : null;
+}
+
+function calculateMarketCapValuation(
+  modelKey: "dcf10Years" | "evEbitda",
+  scenarios: ScenarioValuationResult[],
+  marketCap: number | null,
+  marginOfSafety: number | null,
+): MarketCapValuationResult {
+  const marketCapScenarios = scenarios.map((scenario) => {
+    const intrinsicMarketCap = numberOrNull(scenario.intrinsicMarketCap);
+
+    return {
+      id: scenario.id,
+      label: scenario.label,
+      weight: scenario.weight,
+      intrinsicMarketCap,
+      weightedIntrinsicMarketCap:
+        intrinsicMarketCap === null ? null : intrinsicMarketCap * scenario.weight,
+    };
+  });
+  const missingFields = new Set<string>();
+
+  if (marketCap === null || marketCap <= 0) {
+    missingFields.add("marketCap");
+  }
+
+  if (marginOfSafety === null) {
+    missingFields.add(`models.${modelKey}.marketCapMarginOfSafety`);
+  }
+
+  scenarios.forEach((scenario) => {
+    if (numberOrNull(scenario.intrinsicMarketCap) === null) {
+      scenario.missingFields.forEach((field) => missingFields.add(field));
+    }
+  });
+
+  const hasMissingScenario = marketCapScenarios.some(
+    (scenario) => scenario.intrinsicMarketCap === null,
+  );
+  const averageIntrinsicMarketCap =
+    missingFields.size > 0 || hasMissingScenario
+      ? null
+      : marketCapScenarios.reduce(
+          (total, scenario) => total + scenario.weightedIntrinsicMarketCap!,
+          0,
+        ) *
+        (1 - marginOfSafety!);
+  const underOverValuedPercent =
+    averageIntrinsicMarketCap !== null && marketCap !== null && marketCap > 0
+      ? averageIntrinsicMarketCap / marketCap - 1
+      : null;
+  const optimisticIntrinsicMarketCap =
+    marketCapScenarios.find((scenario) => scenario.id === "optimistic")
+      ?.intrinsicMarketCap ?? null;
+  const signal =
+    averageIntrinsicMarketCap === null
+      ? "NEUTRAL"
+      : modelKey === "dcf10Years"
+        ? averageIntrinsicMarketCap > marketCap!
+          ? "BUY"
+          : "SELL"
+        : optimisticIntrinsicMarketCap !== null &&
+            averageIntrinsicMarketCap > optimisticIntrinsicMarketCap
+          ? "BUY"
+          : "SELL";
+
+  return {
+    marketCap,
+    marginOfSafety,
+    averageIntrinsicMarketCap,
+    underOverValuedPercent,
+    signal,
+    scenarioWeightTotal: calculateScenarioWeightTotal(marketCapScenarios),
+    scenarios: marketCapScenarios,
+    missingFields: Array.from(missingFields),
+  };
+}
+
+function buildModelResult(
+  scenarios: ScenarioValuationResult[],
+  marketCap?: MarketCapValuationResult,
+): ModelValuationResult {
   const missingFields = Array.from(new Set(scenarios.flatMap((scenario) => scenario.missingFields)));
   const hasMissing = scenarios.some((scenario) => scenario.fairValue === null);
   const weightedFairValue = hasMissing
     ? null
     : scenarios.reduce((total, scenario) => total + scenario.fairValue! * scenario.weight, 0);
 
-  return {
+  const result: ModelValuationResult = {
     weightedFairValue,
     scenarioWeightTotal: calculateScenarioWeightTotal(scenarios),
     scenarios,
     missingFields,
   };
+
+  if (marketCap) {
+    result.marketCap = marketCap;
+  }
+
+  return result;
 }
 
 function signalFor(weightedFairValue: number | null, currentPrice: number | null): ValuationSignal {
@@ -1239,14 +1406,29 @@ function signalFor(weightedFairValue: number | null, currentPrice: number | null
 }
 
 export function calculateStockValuation(input: StockValuationInput): StockValuationResult {
+  const marketCap = resolvedMarketCap(input);
+  const dcfScenarios = input.models.dcf10Years.scenarios.map((scenario) =>
+    calculateDcfScenario(scenario, input.sharesOutstanding),
+  );
+  const evEbitdaScenarios = input.models.evEbitda.scenarios.map((scenario) =>
+    calculateEvEbitdaScenario(scenario, input.sharesOutstanding),
+  );
   const dcf10Years = buildModelResult(
-    input.models.dcf10Years.scenarios.map((scenario) =>
-      calculateDcfScenario(scenario, input.sharesOutstanding),
+    dcfScenarios,
+    calculateMarketCapValuation(
+      "dcf10Years",
+      dcfScenarios,
+      marketCap,
+      marketCapMarginOfSafety(input.models.dcf10Years.marketCapMarginOfSafety),
     ),
   );
   const evEbitda = buildModelResult(
-    input.models.evEbitda.scenarios.map((scenario) =>
-      calculateEvEbitdaScenario(scenario, input.sharesOutstanding),
+    evEbitdaScenarios,
+    calculateMarketCapValuation(
+      "evEbitda",
+      evEbitdaScenarios,
+      marketCap,
+      marketCapMarginOfSafety(input.models.evEbitda.marketCapMarginOfSafety),
     ),
   );
   const pe = buildModelResult(

@@ -67,6 +67,7 @@ const metaWorkbookInput: StockValuationInput = {
   companyName: "Meta Platforms",
   currency: "USD",
   currentPrice: 609,
+  marketCap: 1_540_000_000,
   sharesOutstanding: 2533659,
   finalWeights: {
     dcf10Years: 0.4,
@@ -236,6 +237,67 @@ describe("stock valuation workbook parity", () => {
     expect(result.models.dcfMultiple.weightedFairValue).toBeCloseTo(557.433992, 6);
     expect(result.weightedFairValue).toBeCloseTo(574.645851, 6);
     expect(result.signal).toBe("SELL");
+  });
+
+  test("calculates DCF and EV/EBITDA market cap panels like the workbook", () => {
+    const result = calculateStockValuation(metaWorkbookInput);
+
+    expect(result.models.dcf10Years.marketCap?.scenarios[0].intrinsicMarketCap).toBeCloseTo(
+      1_963_055_641,
+      0,
+    );
+    expect(
+      result.models.dcf10Years.marketCap?.scenarios[0].weightedIntrinsicMarketCap,
+    ).toBeCloseTo(490_763_910.3, 1);
+    expect(result.models.dcf10Years.marketCap?.averageIntrinsicMarketCap).toBeCloseTo(
+      1_243_382_123,
+      0,
+    );
+    expect(result.models.dcf10Years.marketCap?.underOverValuedPercent).toBeCloseTo(
+      -0.1926090113,
+      10,
+    );
+    expect(result.models.dcf10Years.marketCap?.signal).toBe("SELL");
+
+    expect(result.models.evEbitda.marketCap?.averageIntrinsicMarketCap).toBeCloseTo(
+      1_639_498_438,
+      0,
+    );
+    expect(result.models.evEbitda.marketCap?.underOverValuedPercent).toBeCloseTo(
+      0.06460937544,
+      10,
+    );
+    expect(result.models.evEbitda.marketCap?.signal).toBe("SELL");
+  });
+
+  test("handles missing, zero, sourced, and derived market cap inputs", () => {
+    const zeroMarketCapResult = calculateStockValuation({
+      ...metaWorkbookInput,
+      marketCap: 0,
+    });
+
+    expect(zeroMarketCapResult.models.dcf10Years.marketCap?.averageIntrinsicMarketCap).toBeNull();
+    expect(zeroMarketCapResult.models.dcf10Years.marketCap?.underOverValuedPercent).toBeNull();
+    expect(zeroMarketCapResult.models.dcf10Years.marketCap?.signal).toBe("NEUTRAL");
+
+    const sourcedMarketCapInput = buildDefaultStockValuationInput({
+      ticker: "MCAP",
+      currentPrice: 10,
+      sharesOutstanding: 100,
+      fields: {
+        marketCap: { value: 1_234, source: "Alpha Vantage" },
+      },
+    });
+    expect(sourcedMarketCapInput.marketCap).toBe(1_234);
+
+    const derivedMarketCapResult = calculateStockValuation(
+      buildDefaultStockValuationInput({
+        ticker: "DERIVED",
+        currentPrice: 10,
+        sharesOutstanding: 100,
+      }),
+    );
+    expect(derivedMarketCapResult.models.dcf10Years.marketCap?.marketCap).toBe(1_000);
   });
 
   test("recalculates final fair value when model weights change", () => {
